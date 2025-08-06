@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     'django_filters',
     'authentication',
     'marketplace',
+    'activity',
 ]
 
 MIDDLEWARE = [
@@ -61,18 +62,9 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-# Custom headers for Google OAuth compatibility
-def custom_headers_middleware(get_response):
-    def middleware(request):
-        response = get_response(request)
-        # Allow Google OAuth iframes
-        if 'google' in request.get_full_path():
-            response['Cross-Origin-Opener-Policy'] = 'same-origin-allow-popups'
-            response['Cross-Origin-Embedder-Policy'] = 'unsafe-none'
-        return response
-    return middleware
-
-MIDDLEWARE.append('designiaBackend.settings.custom_headers_middleware')
+# Security headers for Google OAuth
+SECURE_CROSS_ORIGIN_OPENER_POLICY = "same-origin-allow-popups"
+SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
 
 ROOT_URLCONF = 'designiaBackend.urls'
 
@@ -247,6 +239,41 @@ LOGGING = {
             'propagate': True,
         },
         'marketplace.serializers': {
+            'handlers': ['console', 'file'],
+            'level': 'DEBUG',
+            'propagate': True,
+        },
+        'authentication': {
+            'handlers': ['console', 'file'],
+            'level': 'DEBUG',
+            'propagate': True,
+        },
+        'authentication.views': {
+            'handlers': ['console', 'file'],
+            'level': 'DEBUG',
+            'propagate': True,
+        },
+        'authentication.serializers': {
+            'handlers': ['console', 'file'],
+            'level': 'DEBUG',
+            'propagate': True,
+        },
+        'authentication.models': {
+            'handlers': ['console', 'file'],
+            'level': 'DEBUG',
+            'propagate': True,
+        },
+        'activity': {
+            'handlers': ['console', 'file'],
+            'level': 'DEBUG',
+            'propagate': True,
+        },
+        'activity.models': {
+            'handlers': ['console', 'file'],
+            'level': 'DEBUG',
+            'propagate': True,
+        },
+        'activity.views': {
             'handlers': ['console', 'file'],
             'level': 'DEBUG',
             'propagate': True,

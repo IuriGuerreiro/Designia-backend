@@ -1,4 +1,4 @@
-from rest_framework import status, serializers
+from rest_framework import generics, status, serializers
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -7,9 +7,72 @@ from django.contrib.auth import authenticate
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 from .models import CustomUser, EmailVerificationToken, TwoFactorCode, EmailRequestAttempt
-from .serializers import UserRegistrationSerializer, UserSerializer, GoogleAuthSerializer, TwoFactorToggleSerializer, TwoFactorVerifySerializer, SetPasswordRequestSerializer, SetPasswordVerifySerializer
+from .serializers import (
+    UserRegistrationSerializer, UserSerializer, GoogleAuthSerializer, 
+    TwoFactorToggleSerializer, TwoFactorVerifySerializer, 
+    SetPasswordRequestSerializer, SetPasswordVerifySerializer,
+    PublicUserSerializer
+)
 from .utils import send_verification_email, verify_email_token, send_2fa_code, verify_2fa_code, get_email_rate_limit_status
 from .google_auth import GoogleAuth
+
+
+class PublicProfileDetailView(generics.RetrieveAPIView):
+    queryset = CustomUser.objects.all()
+    serializer_class = PublicUserSerializer
+    permission_classes = [AllowAny]
+    lookup_field = 'pk'
+
+
+class ProfileUpdateView(generics.RetrieveUpdateAPIView):
+    queryset = CustomUser.objects.all()
+    serializer_class = UserSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_object(self):
+        return self.request.user
+    
+    def update(self, request, *args, **kwargs):
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # Debug logging for the view
+        logger.info(f"=== PROFILE UPDATE VIEW DEBUG START ===")
+        logger.info(f"Request method: {request.method}")
+        logger.info(f"Request user: {request.user.id} ({request.user.username})")
+        logger.info(f"Raw request data: {request.data}")
+        logger.info(f"Request headers: {dict(request.headers)}")
+        
+        partial = kwargs.pop('partial', True)  # Always allow partial updates
+        logger.info(f"Partial update enabled: {partial}")
+        
+        instance = self.get_object()
+        logger.info(f"Instance to update: User {instance.id} ({instance.username})")
+        
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        
+        try:
+            serializer.is_valid(raise_exception=True)
+            logger.info("Serializer validation passed")
+        except Exception as e:
+            logger.error(f"Serializer validation failed: {str(e)}")
+            logger.error(f"Serializer errors: {serializer.errors}")
+            raise
+        
+        self.perform_update(serializer)
+        logger.info("Profile update performed successfully")
+        
+        if getattr(instance, '_prefetched_objects_cache', None):
+            # If 'prefetch_related' has been applied to a queryset, we need to
+            # forcibly invalidate the prefetch cache on the instance.
+            instance._prefetched_objects_cache = {}
+            logger.info("Prefetch cache invalidated")
+            
+        response_data = serializer.data
+        logger.info(f"Response data: {response_data}")
+        logger.info(f"=== PROFILE UPDATE VIEW DEBUG END ===")
+        
+        return Response(response_data)
 
 
 @csrf_exempt
@@ -502,7 +565,6 @@ def google_oauth(request):
         }, status=status.HTTP_200_OK)
         
     except Exception as e:
-        print(f"❌ Google OAuth exception: {str(e)}")
         return Response({
             'error': 'Service may be unavailable. Please try again later.'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -703,7 +765,7 @@ def request_password_reset(request):
         
         # Email format validation
         import re
-        email_regex = r'^[^\s@]+@[^\s@]+\.[^\s@]+$'
+        email_regex = r'^[^@]+@[^@]+\.[^@]+$'
         if not re.match(email_regex, email):
             return Response({'error': 'Please enter a valid email address'}, status=status.HTTP_400_BAD_REQUEST)
         

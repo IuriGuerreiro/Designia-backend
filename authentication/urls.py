@@ -6,7 +6,7 @@ urlpatterns = [
     path('login/', views.login, name='login'),
     path('login/verify-2fa/', views.login_verify_2fa, name='login_verify_2fa'),
     path('token/refresh/', views.token_refresh, name='token_refresh'),
-    path('profile/', views.profile, name='profile'),
+    path('profile/', views.ProfileUpdateView.as_view(), name='profile'),
     path('verify-email/', views.verify_email, name='verify_email'),
     path('resend-verification/', views.resend_verification_email, name='resend_verification'),
     path('check-rate-limit/', views.check_email_rate_limit, name='check_email_rate_limit'),
@@ -29,4 +29,7 @@ urlpatterns = [
     # Password reset endpoints (all users)
     path('password/reset/request/', views.request_password_reset, name='request_password_reset'),
     path('password/reset/', views.reset_password_with_2fa, name='reset_password_with_2fa'),
+
+    # Public user profile
+    path('users/<int:pk>/', views.PublicProfileDetailView.as_view(), name='public_profile_detail'),
 ]

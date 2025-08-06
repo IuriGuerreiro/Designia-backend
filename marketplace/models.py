@@ -271,7 +271,8 @@ class Cart(models.Model):
 
     @property
     def total_amount(self):
-        total = 0
+        from decimal import Decimal
+        total = Decimal('0')
         for item in self.items.all():
             total += item.quantity * item.product.price
         return total
@@ -303,7 +304,7 @@ class ProductMetrics(models.Model):
     total_sales = models.PositiveIntegerField(default=0)
     total_revenue = models.DecimalField(max_digits=15, decimal_places=2, default=0)
     
-    # Conversion metrics
+    # Conversion metrics (calculated fields, rates removed as requested)
     view_to_click_rate = models.FloatField(default=0)
     click_to_cart_rate = models.FloatField(default=0)
     cart_to_purchase_rate = models.FloatField(default=0)
@@ -311,10 +312,16 @@ class ProductMetrics(models.Model):
     last_updated = models.DateTimeField(auto_now=True)
 
     def update_conversion_rates(self):
+        """Update conversion rates based on current metrics"""
         self.view_to_click_rate = (self.total_clicks / self.total_views * 100) if self.total_views > 0 else 0
         self.click_to_cart_rate = (self.total_cart_additions / self.total_clicks * 100) if self.total_clicks > 0 else 0
         self.cart_to_purchase_rate = (self.total_sales / self.total_cart_additions * 100) if self.total_cart_additions > 0 else 0
-        self.save()
+        # Don't call save() here to avoid recursion, let the caller handle saving
+
+    def save(self, *args, **kwargs):
+        """Override save to automatically update conversion rates"""
+        self.update_conversion_rates()
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"Metrics for {self.product.name}"

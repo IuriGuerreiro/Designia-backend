@@ -4,8 +4,8 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly
 from rest_framework.exceptions import ValidationError, PermissionDenied
 from django.shortcuts import get_object_or_404
-from django.db.models import Q, F
-from django.db import transaction
+from django.db.models import Q, F, Sum
+from django.db import transaction, models
 from django_filters.rest_framework import DjangoFilterBackend
 import logging
 import json
@@ -14,6 +14,7 @@ from .models import (
     Category, Product, ProductImage, ProductReview, ProductFavorite,
     Order, OrderItem, Cart, CartItem, ProductMetrics
 )
+from activity.models import UserClick
 from .serializers import (
     CategorySerializer, ProductListSerializer, ProductDetailSerializer,
     ProductCreateUpdateSerializer, ProductImageSerializer, ProductReviewSerializer,
@@ -199,7 +200,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
     def retrieve(self, request, *args, **kwargs):
-        """Override retrieve method with debugging"""
+        """Override retrieve method with activity tracking"""
         logger.info("=== PRODUCT RETRIEVE REQUEST START ===")
         logger.info(f"User: {request.user} (authenticated: {request.user.is_authenticated})")
         logger.info(f"Slug: {kwargs.get('slug', 'No slug')}")
@@ -211,14 +212,26 @@ class ProductViewSet(viewsets.ModelViewSet):
             logger.error(f"Failed to get product: {e}")
             raise
         
-        # Increment view count
-        Product.objects.filter(pk=instance.pk).update(view_count=F('view_count') + 1)
+        # Track activity using the new activity system
+        user = request.user if request.user.is_authenticated else None
+        session_key = request.session.session_key if not user else None
         
-        # Update metrics if exists
-        if hasattr(instance, 'metrics'):
-            ProductMetrics.objects.filter(product=instance).update(
-                total_views=F('total_views') + 1
-            )
+        # Ensure session key exists for anonymous users
+        if not user and not session_key:
+            request.session.save()
+            session_key = request.session.session_key
+        
+        # Track the view activity
+        UserClick.track_activity(
+            product=instance,
+            action='view',
+            user=user,
+            session_key=session_key,
+            request=request
+        )
+        
+        # Legacy view count update (keep for backward compatibility)
+        Product.objects.filter(pk=instance.pk).update(view_count=F('view_count') + 1)
         
         serializer = self.get_serializer(instance)
         logger.info(f"Serialized data keys: {serializer.data.keys() if serializer.data else 'No data'}")
@@ -227,7 +240,7 @@ class ProductViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def favorite(self, request, slug=None):
-        """Add/remove product from favorites"""
+        """Add/remove product from favorites with activity tracking"""
         if not request.user.is_authenticated:
             return Response(
                 {'detail': 'Authentication required'}, 
@@ -241,13 +254,27 @@ class ProductViewSet(viewsets.ModelViewSet):
         
         if not created:
             favorite.delete()
-            # Decrement favorite count
+            # Track unfavorite activity
+            UserClick.track_activity(
+                product=product,
+                action='unfavorite',
+                user=request.user,
+                request=request
+            )
+            # Legacy favorite count update (keep for backward compatibility)
             Product.objects.filter(pk=product.pk).update(
                 favorite_count=F('favorite_count') - 1
             )
             return Response({'favorited': False})
         else:
-            # Increment favorite count
+            # Track favorite activity
+            UserClick.track_activity(
+                product=product,
+                action='favorite',
+                user=request.user,
+                request=request
+            )
+            # Legacy favorite count update (keep for backward compatibility)
             Product.objects.filter(pk=product.pk).update(
                 favorite_count=F('favorite_count') + 1
             )
@@ -255,17 +282,29 @@ class ProductViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def click(self, request, slug=None):
-        """Track product clicks"""
+        """Track product clicks with activity system"""
         product = self.get_object()
         
-        # Increment click count
-        Product.objects.filter(pk=product.pk).update(click_count=F('click_count') + 1)
+        # Track activity using the new activity system
+        user = request.user if request.user.is_authenticated else None
+        session_key = request.session.session_key if not user else None
         
-        # Update metrics if exists
-        if hasattr(product, 'metrics'):
-            ProductMetrics.objects.filter(product=product).update(
-                total_clicks=F('total_clicks') + 1
-            )
+        # Ensure session key exists for anonymous users
+        if not user and not session_key:
+            request.session.save()
+            session_key = request.session.session_key
+        
+        # Track the click activity
+        UserClick.track_activity(
+            product=product,
+            action='click',
+            user=user,
+            session_key=session_key,
+            request=request
+        )
+        
+        # Legacy click count update (keep for backward compatibility)
+        Product.objects.filter(pk=product.pk).update(click_count=F('click_count') + 1)
         
         return Response({'clicked': True})
 
@@ -342,13 +381,14 @@ class ProductReviewViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticatedOrReadOnly]
 
     def get_queryset(self):
-        product_slug = self.kwargs.get('product_slug')
+        # For router-based endpoints, get product from query parameter
+        product_slug = self.request.query_params.get('product_slug') or self.kwargs.get('product_slug')
         if product_slug:
             return ProductReview.objects.filter(
                 product__slug=product_slug, 
                 is_active=True
             ).select_related('reviewer', 'product')
-        return ProductReview.objects.none()
+        return ProductReview.objects.filter(is_active=True).select_related('reviewer', 'product')
 
     def get_permissions(self):
         if self.action in ['update', 'partial_update', 'destroy']:
@@ -356,7 +396,9 @@ class ProductReviewViewSet(viewsets.ModelViewSet):
         return super().get_permissions()
 
     def perform_create(self, serializer):
-        product_slug = self.kwargs.get('product_slug')
+        product_slug = self.request.data.get('product_slug') or self.request.query_params.get('product_slug') or self.kwargs.get('product_slug')
+        if not product_slug:
+            raise ValidationError("Product slug is required")
         product = get_object_or_404(Product, slug=product_slug)
         
         # Check if user already reviewed this product
@@ -385,7 +427,7 @@ class CartViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'])
     def add_item(self, request):
-        """Add item to cart"""
+        """Add item to cart with comprehensive stock validation"""
         cart, created = Cart.objects.get_or_create(user=request.user)
         
         serializer = CartItemSerializer(data=request.data)
@@ -395,50 +437,94 @@ class CartViewSet(viewsets.ModelViewSet):
             
             product = get_object_or_404(Product, id=product_id, is_active=True)
             
-            # Check stock availability
-            if quantity > product.stock_quantity:
+            # Enhanced stock validation
+            if not product.is_active:
                 return Response(
-                    {'detail': f'Only {product.stock_quantity} items available'},
+                    {'error': 'PRODUCT_UNAVAILABLE', 'detail': 'This product is no longer available'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            # Get or create cart item
-            cart_item, created = CartItem.objects.get_or_create(
-                cart=cart, product=product,
-                defaults={'quantity': quantity}
-            )
-            
-            if not created:
-                # Update quantity if item already exists
-                new_quantity = cart_item.quantity + quantity
-                if new_quantity > product.stock_quantity:
-                    return Response(
-                        {'detail': f'Only {product.stock_quantity} items available'},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-                cart_item.quantity = new_quantity
-                cart_item.save()
-            
-            # Update metrics
-            if hasattr(product, 'metrics'):
-                ProductMetrics.objects.filter(product=product).update(
-                    total_cart_additions=F('total_cart_additions') + 1
+            if product.stock_quantity <= 0:
+                return Response(
+                    {'error': 'OUT_OF_STOCK', 'detail': 'This product is currently out of stock'},
+                    status=status.HTTP_400_BAD_REQUEST
                 )
             
-            return Response(CartItemSerializer(cart_item).data, status=status.HTTP_201_CREATED)
+            # Check for concurrent cart reservations
+            current_cart_quantity = CartItem.objects.filter(
+                product=product
+            ).aggregate(total_in_carts=models.Sum('quantity'))['total_in_carts'] or 0
+            
+            available_stock = product.stock_quantity - current_cart_quantity
+            
+            # Get or create cart item
+            cart_item, item_created = CartItem.objects.get_or_create(
+                cart=cart, product=product,
+                defaults={'quantity': 0}  # Start with 0 to handle increment properly
+            )
+            
+            # Calculate new quantity
+            new_quantity = cart_item.quantity + quantity
+            
+            # Validate against available stock (excluding current cart item)
+            other_carts_quantity = current_cart_quantity - cart_item.quantity
+            truly_available = product.stock_quantity - other_carts_quantity
+            
+            if new_quantity > truly_available:
+                return Response(
+                    {
+                        'error': 'INSUFFICIENT_STOCK',
+                        'detail': f'Only {truly_available} items available in stock',
+                        'available_stock': truly_available,
+                        'requested_quantity': new_quantity,
+                        'current_in_cart': cart_item.quantity
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Update cart item quantity
+            cart_item.quantity = new_quantity
+            cart_item.save()
+            
+            # Track cart addition activity
+            UserClick.track_activity(
+                product=product,
+                action='cart_add',
+                user=request.user,
+                request=request
+            )
+            
+            return Response({
+                'success': True,
+                'item': CartItemSerializer(cart_item).data,
+                'message': 'Item added to cart successfully' if item_created else 'Cart item quantity updated',
+                'was_created': item_created
+            }, status=status.HTTP_201_CREATED if item_created else status.HTTP_200_OK)
         
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        return Response({
+            'error': 'VALIDATION_ERROR',
+            'detail': 'Invalid data provided',
+            'errors': serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=False, methods=['patch'])
     def update_item(self, request):
-        """Update cart item quantity"""
+        """Update cart item quantity with comprehensive stock validation"""
         cart = get_object_or_404(Cart, user=request.user)
         item_id = request.data.get('item_id')
         quantity = request.data.get('quantity')
         
-        if not item_id or not quantity:
+        if not item_id or quantity is None:
             return Response(
-                {'detail': 'item_id and quantity are required'},
+                {'error': 'MISSING_PARAMETERS', 'detail': 'item_id and quantity are required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            quantity = int(quantity)
+        except (ValueError, TypeError):
+            return Response(
+                {'error': 'INVALID_QUANTITY', 'detail': 'Quantity must be a valid number'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
@@ -448,20 +534,56 @@ class CartViewSet(viewsets.ModelViewSet):
             cart_item.delete()
             return Response({'detail': 'Item removed from cart'})
         
-        if quantity > cart_item.product.stock_quantity:
+        # Enhanced stock validation
+        product = cart_item.product
+        if not product.is_active:
             return Response(
-                {'detail': f'Only {cart_item.product.stock_quantity} items available'},
+                {'error': 'PRODUCT_UNAVAILABLE', 'detail': 'This product is no longer available'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if quantity > product.stock_quantity:
+            return Response(
+                {
+                    'error': 'INSUFFICIENT_STOCK',
+                    'detail': f'Only {product.stock_quantity} items available in stock',
+                    'available_stock': product.stock_quantity,
+                    'requested_quantity': quantity
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Check for concurrent cart updates (other users might have taken items)
+        current_cart_quantity = CartItem.objects.filter(
+            product=product
+        ).exclude(id=cart_item.id).aggregate(
+            total_in_carts=models.Sum('quantity')
+        )['total_in_carts'] or 0
+        
+        available_for_this_cart = product.stock_quantity - current_cart_quantity
+        if quantity > available_for_this_cart:
+            return Response(
+                {
+                    'error': 'STOCK_RESERVED',
+                    'detail': f'Only {available_for_this_cart} items available (some reserved in other carts)',
+                    'available_stock': available_for_this_cart,
+                    'requested_quantity': quantity
+                },
                 status=status.HTTP_400_BAD_REQUEST
             )
         
         cart_item.quantity = quantity
         cart_item.save()
         
-        return Response(CartItemSerializer(cart_item).data)
+        return Response({
+            'success': True,
+            'item': CartItemSerializer(cart_item).data,
+            'message': 'Cart item updated successfully'
+        })
 
     @action(detail=False, methods=['delete'])
     def remove_item(self, request):
-        """Remove item from cart"""
+        """Remove item from cart with activity tracking"""
         cart = get_object_or_404(Cart, user=request.user)
         item_id = request.data.get('item_id')
         
@@ -472,6 +594,15 @@ class CartViewSet(viewsets.ModelViewSet):
             )
         
         cart_item = get_object_or_404(CartItem, id=item_id, cart=cart)
+        
+        # Track cart removal activity before deleting
+        UserClick.track_activity(
+            product=cart_item.product,
+            action='cart_remove',
+            user=request.user,
+            request=request
+        )
+        
         cart_item.delete()
         
         return Response({'detail': 'Item removed from cart'})
@@ -496,28 +627,82 @@ class OrderViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'])
     def create_from_cart(self, request):
-        """Create order from cart items"""
+        """Create order from cart items with comprehensive stock validation"""
         cart = get_object_or_404(Cart, user=request.user)
         
         if not cart.items.exists():
             return Response(
-                {'detail': 'Cart is empty'},
+                {'error': 'EMPTY_CART', 'detail': 'Cart is empty'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
         shipping_address = request.data.get('shipping_address')
         if not shipping_address:
             return Response(
-                {'detail': 'Shipping address is required'},
+                {'error': 'MISSING_ADDRESS', 'detail': 'Shipping address is required'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
+        # Pre-purchase stock validation
+        stock_errors = []
+        unavailable_products = []
+        
         with transaction.atomic():
-            # Calculate totals
+            # First pass: Validate all items before processing any
+            for cart_item in cart.items.select_related('product'):
+                product = cart_item.product
+                
+                # Check if product is still active
+                if not product.is_active:
+                    unavailable_products.append({
+                        'product_name': product.name,
+                        'reason': 'Product is no longer available'
+                    })
+                    continue
+                
+                # Refresh stock from database to get latest value
+                product.refresh_from_db()
+                
+                # Check stock availability
+                if cart_item.quantity > product.stock_quantity:
+                    stock_errors.append({
+                        'product_id': str(product.id),
+                        'product_name': product.name,
+                        'requested_quantity': cart_item.quantity,
+                        'available_stock': product.stock_quantity,
+                        'error': 'INSUFFICIENT_STOCK'
+                    })
+                
+                # Check if product is completely out of stock
+                if product.stock_quantity <= 0:
+                    stock_errors.append({
+                        'product_id': str(product.id),
+                        'product_name': product.name,
+                        'requested_quantity': cart_item.quantity,
+                        'available_stock': 0,
+                        'error': 'OUT_OF_STOCK'
+                    })
+            
+            # If there are any stock issues, return comprehensive error
+            if stock_errors or unavailable_products:
+                return Response(
+                    {
+                        'error': 'STOCK_VALIDATION_FAILED',
+                        'detail': 'Some items in your cart are no longer available or have insufficient stock',
+                        'stock_errors': stock_errors,
+                        'unavailable_products': unavailable_products,
+                        'action_required': 'Please update your cart quantities or remove unavailable items'
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Calculate totals - ensure all values are Decimal for proper calculation
+            from decimal import Decimal
+            
             subtotal = cart.total_amount
-            shipping_cost = request.data.get('shipping_cost', 0)
-            tax_amount = request.data.get('tax_amount', 0)
-            discount_amount = request.data.get('discount_amount', 0)
+            shipping_cost = Decimal(str(request.data.get('shipping_cost', 0)))
+            tax_amount = Decimal(str(request.data.get('tax_amount', 0)))
+            discount_amount = Decimal(str(request.data.get('discount_amount', 0)))
             total_amount = subtotal + shipping_cost + tax_amount - discount_amount
             
             # Create order
@@ -532,43 +717,110 @@ class OrderViewSet(viewsets.ModelViewSet):
                 buyer_notes=request.data.get('buyer_notes', '')
             )
             
-            # Create order items from cart
-            for cart_item in cart.items.all():
-                # Check stock availability
-                if cart_item.quantity > cart_item.product.stock_quantity:
-                    return Response(
-                        {'detail': f'Insufficient stock for {cart_item.product.name}'},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-                
-                # Create order item
-                OrderItem.objects.create(
-                    order=order,
-                    product=cart_item.product,
-                    seller=cart_item.product.seller,
-                    quantity=cart_item.quantity,
-                    unit_price=cart_item.product.price,
-                    product_name=cart_item.product.name,
-                    product_description=cart_item.product.description,
-                    product_image=cart_item.product.images.filter(is_primary=True).first().image.url if cart_item.product.images.filter(is_primary=True).exists() else ''
-                )
-                
-                # Reduce stock
-                cart_item.product.stock_quantity -= cart_item.quantity
-                cart_item.product.save()
-                
-                # Update metrics
-                if hasattr(cart_item.product, 'metrics'):
-                    ProductMetrics.objects.filter(product=cart_item.product).update(
-                        total_sales=F('total_sales') + cart_item.quantity,
-                        total_revenue=F('total_revenue') + cart_item.total_price
-                    )
+            successful_items = []
+            failed_items = []
             
-            # Clear cart
+            # Second pass: Create order items and reduce stock
+            for cart_item in cart.items.select_related('product'):
+                product = cart_item.product
+                
+                try:
+                    # Double-check stock one more time (race condition protection)
+                    product.refresh_from_db()
+                    if cart_item.quantity > product.stock_quantity:
+                        failed_items.append({
+                            'product_name': product.name,
+                            'reason': f'Stock changed during checkout. Only {product.stock_quantity} available.'
+                        })
+                        continue
+                    
+                    # Create order item
+                    order_item = OrderItem.objects.create(
+                        order=order,
+                        product=product,
+                        seller=product.seller,
+                        quantity=cart_item.quantity,
+                        unit_price=product.price,
+                        product_name=product.name,
+                        product_description=product.description,
+                        product_image=product.images.filter(is_primary=True).first().image.url if product.images.filter(is_primary=True).exists() else ''
+                    )
+                    
+                    # Reduce stock atomically
+                    updated_rows = Product.objects.filter(
+                        id=product.id,
+                        stock_quantity__gte=cart_item.quantity
+                    ).update(
+                        stock_quantity=F('stock_quantity') - cart_item.quantity
+                    )
+                    
+                    if updated_rows == 0:
+                        # Stock was reduced by another transaction
+                        failed_items.append({
+                            'product_name': product.name,
+                            'reason': 'Stock was reserved by another customer during checkout'
+                        })
+                        order_item.delete()  # Remove the order item
+                        continue
+                    
+                    successful_items.append({
+                        'product_name': product.name,
+                        'quantity': cart_item.quantity
+                    })
+                    
+                    # Update metrics
+                    if hasattr(product, 'metrics'):
+                        ProductMetrics.objects.filter(product=product).update(
+                            total_sales=F('total_sales') + cart_item.quantity,
+                            total_revenue=F('total_revenue') + cart_item.total_price
+                        )
+                        
+                except Exception as e:
+                    logger.error(f"Error processing cart item {cart_item.id}: {str(e)}")
+                    failed_items.append({
+                        'product_name': product.name,
+                        'reason': 'An error occurred while processing this item'
+                    })
+            
+            # If no items could be processed, delete the order
+            if not successful_items:
+                order.delete()
+                return Response(
+                    {
+                        'error': 'ORDER_PROCESSING_FAILED',
+                        'detail': 'No items could be processed from your cart',
+                        'failed_items': failed_items
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Clear cart (only successful items if there were failures)
             cart.items.all().delete()
             
+            # Recalculate order totals if some items failed
+            if failed_items:
+                order.refresh_from_db()
+                actual_subtotal = sum(item.total_price for item in order.items.all())
+                order.subtotal = actual_subtotal
+                order.total_amount = actual_subtotal + order.shipping_cost + order.tax_amount - order.discount_amount
+                order.save()
+            
             serializer = OrderSerializer(order)
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
+            response_data = {
+                'success': True,
+                'order': serializer.data,
+                'successful_items': successful_items,
+                'message': 'Order created successfully'
+            }
+            
+            if failed_items:
+                response_data.update({
+                    'partial_success': True,
+                    'failed_items': failed_items,
+                    'warning': 'Some items could not be processed due to stock issues'
+                })
+            
+            return Response(response_data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['patch'])
     def update_status(self, request, pk=None):
