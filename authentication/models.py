@@ -5,6 +5,9 @@ import random
 import string
 from datetime import timedelta
 from django.utils import timezone
+from django.conf import settings
+from django.db.models.signals import post_save
+from django.dispatch import receiver
 
 
 class CustomUser(AbstractUser):
@@ -28,6 +31,139 @@ class CustomUser(AbstractUser):
     
     def __str__(self):
         return self.email
+
+
+class Profile(models.Model):
+    GENDER_CHOICES = [
+        ('male', 'Male'),
+        ('female', 'Female'),
+        ('non_binary', 'Non-binary'),
+        ('prefer_not_to_say', 'Prefer not to say'),
+        ('other', 'Other'),
+    ]
+    
+    ACCOUNT_TYPE_CHOICES = [
+        ('personal', 'Personal'),
+        ('business', 'Business'),
+        ('creator', 'Creator'),
+    ]
+    
+    PROFILE_VISIBILITY_CHOICES = [
+        ('public', 'Public'),
+        ('private', 'Private'),
+        ('friends_only', 'Friends Only'),
+    ]
+
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='profile')
+    
+    # Basic Profile Information
+    bio = models.TextField(blank=True, null=True, max_length=500)
+    location = models.CharField(max_length=100, blank=True, null=True)
+    birth_date = models.DateField(blank=True, null=True)
+    gender = models.CharField(max_length=20, choices=GENDER_CHOICES, blank=True, null=True)
+    pronouns = models.CharField(max_length=50, blank=True, null=True)
+    
+    # Contact Information
+    phone_number = models.CharField(max_length=20, blank=True, null=True)
+    country_code = models.CharField(max_length=5, blank=True, null=True, default='+1')
+    website = models.URLField(blank=True, null=True)
+    
+    # Professional Information
+    job_title = models.CharField(max_length=100, blank=True, null=True)
+    company = models.CharField(max_length=100, blank=True, null=True)
+    
+    # Address Information
+    street_address = models.CharField(max_length=255, blank=True, null=True)
+    city = models.CharField(max_length=100, blank=True, null=True)
+    state_province = models.CharField(max_length=100, blank=True, null=True)
+    country = models.CharField(max_length=100, blank=True, null=True)
+    postal_code = models.CharField(max_length=20, blank=True, null=True)
+    
+    # Social Media Links
+    instagram_url = models.URLField(blank=True, null=True)
+    twitter_url = models.URLField(blank=True, null=True)
+    linkedin_url = models.URLField(blank=True, null=True)
+    facebook_url = models.URLField(blank=True, null=True)
+    
+    # Preferences
+    timezone = models.CharField(max_length=50, blank=True, null=True, default='UTC')
+    language_preference = models.CharField(max_length=10, blank=True, null=True, default='en')
+    currency_preference = models.CharField(max_length=3, blank=True, null=True, default='USD')
+    
+    # Account Settings
+    account_type = models.CharField(max_length=20, choices=ACCOUNT_TYPE_CHOICES, default='personal')
+    profile_visibility = models.CharField(max_length=20, choices=PROFILE_VISIBILITY_CHOICES, default='public')
+    
+    # Verification & Status
+    is_verified = models.BooleanField(default=False)
+    is_verified_seller = models.BooleanField(default=False)
+    seller_type = models.CharField(max_length=50, blank=True, null=True)
+    
+    # Metadata
+    created_at = models.DateTimeField(auto_now_add=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    profile_completion_percentage = models.IntegerField(default=0)
+    
+    # Marketing Preferences
+    marketing_emails_enabled = models.BooleanField(default=True)
+    newsletter_enabled = models.BooleanField(default=True)
+    notifications_enabled = models.BooleanField(default=True)
+
+    def calculate_profile_completion(self):
+        """Calculate profile completion percentage"""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        fields_to_check = [
+            'bio', 'location', 'birth_date', 'phone_number', 'job_title',
+            'company', 'city', 'country'
+        ]
+        
+        completed_fields = []
+        empty_fields = []
+        
+        for field in fields_to_check:
+            field_value = getattr(self, field)
+            if field_value:
+                completed_fields.append(field)
+            else:
+                empty_fields.append(field)
+        
+        old_percentage = self.profile_completion_percentage
+        self.profile_completion_percentage = int((len(completed_fields) / len(fields_to_check)) * 100)
+        
+        logger.info(f"Profile completion calculation for user {self.user.username}:")
+        logger.info(f"  Completed fields ({len(completed_fields)}/{len(fields_to_check)}): {completed_fields}")
+        logger.info(f"  Empty fields: {empty_fields}")
+        logger.info(f"  Completion: {old_percentage}% → {self.profile_completion_percentage}%")
+        
+        return self.profile_completion_percentage
+
+    def save(self, *args, **kwargs):
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        logger.info(f"Saving profile for user {self.user.username} (Profile ID: {self.id})")
+        
+        old_completion = self.profile_completion_percentage
+        self.calculate_profile_completion()
+        
+        logger.info(f"Profile completion updated: {old_completion}% → {self.profile_completion_percentage}%")
+        
+        super().save(*args, **kwargs)
+        logger.info("Profile saved successfully to database")
+
+    def __str__(self):
+        return f'{self.user.username}\'s Profile'
+
+@receiver(post_save, sender=CustomUser)
+def create_user_profile(sender, instance, created, **kwargs):
+    if created:
+        Profile.objects.create(user=instance)
+
+@receiver(post_save, sender=CustomUser)
+def save_user_profile(sender, instance, **kwargs):
+    instance.profile.save()
 
 
 class EmailVerificationToken(models.Model):
