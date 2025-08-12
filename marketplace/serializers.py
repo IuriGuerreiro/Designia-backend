@@ -4,7 +4,7 @@ import logging
 import json
 from .models import (
     Category, Product, ProductImage, ProductReview, ProductFavorite,
-    Order, OrderItem, Cart, CartItem, ProductMetrics
+    Order, OrderItem, OrderShipping, Cart, CartItem, ProductMetrics
 )
 
 User = get_user_model()
@@ -95,8 +95,8 @@ class ProductListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Product
         fields = ['id', 'name', 'slug', 'short_description', 'seller', 'category',
-                 'price', 'original_price', 'condition', 'brand', 'primary_image',
-                 'is_featured', 'is_digital', 'average_rating', 'review_count',
+                 'price', 'original_price', 'stock_quantity', 'condition', 'brand', 'primary_image',
+                 'is_featured', 'is_digital', 'is_active', 'average_rating', 'review_count',
                  'is_in_stock', 'is_on_sale', 'discount_percentage', 'is_favorited',
                  'created_at', 'view_count', 'favorite_count']
         read_only_fields = ['id', 'slug', 'seller', 'average_rating', 'review_count',
@@ -430,18 +430,31 @@ class OrderItemSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'total_price']
 
 
+class OrderShippingSerializer(serializers.ModelSerializer):
+    """Order shipping serializer for seller-specific tracking"""
+    seller = UserSerializer(read_only=True)
+    
+    class Meta:
+        model = OrderShipping
+        fields = ['id', 'seller', 'tracking_number', 'shipping_carrier', 'carrier_code',
+                 'shipped_at', 'delivered_at', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'seller', 'created_at', 'updated_at']
+
+
 class OrderSerializer(serializers.ModelSerializer):
     """Order serializer"""
     items = OrderItemSerializer(many=True, read_only=True)
     buyer = UserSerializer(read_only=True)
+    shipping_info = OrderShippingSerializer(many=True, read_only=True)
 
     class Meta:
         model = Order
         fields = ['id', 'buyer', 'status', 'payment_status', 'subtotal', 'shipping_cost',
                  'tax_amount', 'discount_amount', 'total_amount', 'shipping_address',
-                 'tracking_number', 'shipping_carrier', 'items', 'buyer_notes',
+                 'tracking_number', 'shipping_carrier', 'carrier_code', 'items', 'shipping_info',
+                 'buyer_notes', 'cancellation_reason', 'cancelled_by', 'cancelled_at', 'processed_at',
                  'created_at', 'updated_at', 'shipped_at', 'delivered_at']
-        read_only_fields = ['id', 'buyer', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'buyer', 'created_at', 'updated_at', 'cancelled_by', 'cancelled_at', 'processed_at']
 
     def validate_shipping_address(self, value):
         required_fields = ['street', 'city', 'state', 'postal_code', 'country']

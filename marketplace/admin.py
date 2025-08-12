@@ -34,8 +34,7 @@ class ProductMetricsInline(admin.StackedInline):
     extra = 0
     readonly_fields = ('total_views', 'total_clicks', 'total_favorites', 
                       'total_cart_additions', 'total_sales', 'total_revenue',
-                      'view_to_click_rate', 'click_to_cart_rate', 
-                      'cart_to_purchase_rate', 'last_updated')
+                      'last_updated')
 
 
 @admin.register(Category)
@@ -294,8 +293,7 @@ class ProductMetricsAdmin(admin.ModelAdmin):
     search_fields = ('product__name',)
     readonly_fields = ('total_views', 'total_clicks', 'total_favorites', 
                       'total_cart_additions', 'total_sales', 'total_revenue',
-                      'view_to_click_rate', 'click_to_cart_rate', 
-                      'cart_to_purchase_rate', 'last_updated')
+                      'last_updated')
 
     fieldsets = (
         ('Product', {
@@ -304,10 +302,6 @@ class ProductMetricsAdmin(admin.ModelAdmin):
         ('Basic Metrics', {
             'fields': ('total_views', 'total_clicks', 'total_favorites', 
                       'total_cart_additions', 'total_sales', 'total_revenue')
-        }),
-        ('Conversion Rates', {
-            'fields': ('view_to_click_rate', 'click_to_cart_rate', 'cart_to_purchase_rate'),
-            'classes': ('collapse',)
         }),
         ('Timestamps', {
             'fields': ('last_updated',),

@@ -2,8 +2,10 @@ from django.db import models
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from marketplace.models import Product
+import logging
 
 User = get_user_model()
+logger = logging.getLogger(__name__)
 
 
 class UserClick(models.Model):
@@ -13,16 +15,25 @@ class UserClick(models.Model):
     """
     ACTION_CHOICES = [
         ('view', 'Product View'),
+        ('listing_view', 'Product Listing View'),
+        ('detail_view', 'Product Detail View'),
+        ('click', 'Product Click'),
         ('favorite', 'Add to Favorites'),
         ('unfavorite', 'Remove from Favorites'),
         ('cart_add', 'Add to Cart'),
         ('cart_remove', 'Remove from Cart'),
-        ('click', 'Product Click'),
+        ('purchase', 'Product Purchase'),
+        ('search_view', 'Search Result View'),
+        ('category_view', 'Category Listing View'),
+        ('share', 'Product Share'),
+        ('review', 'Product Review'),
+        ('contact_seller', 'Contact Seller'),
+        ('image_view', 'Product Image View'),
     ]
     
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='activity_clicks', null=True, blank=True)
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='activity_clicks')
-    action = models.CharField(max_length=20, choices=ACTION_CHOICES)
+    action = models.CharField(max_length=30, choices=ACTION_CHOICES)
     
     # Session tracking for anonymous users
     session_key = models.CharField(max_length=40, null=True, blank=True)
@@ -60,6 +71,36 @@ class UserClick(models.Model):
             session_key: Session key for anonymous users
             request: HttpRequest object for metadata
         """
+        from django.utils import timezone
+        from datetime import timedelta
+        
+        # Prevent duplicate view tracking within a very short time window (e.g., 1 second)
+        # to avoid double-counting from React StrictMode, double-clicks, or immediate page refreshes
+        # but still allow legitimate repeat visits
+        if action in ['view', 'detail_view', 'listing_view', 'category_view', 'search_view']:
+            time_threshold = timezone.now() - timedelta(seconds=1)  # Short window
+            
+            # Check for very recent similar activity by the same user/session
+            existing_activity = cls.objects.filter(
+                product=product,
+                action=action,  # Only check for the exact same action type
+                created_at__gte=time_threshold
+            )
+            
+            if user:
+                existing_activity = existing_activity.filter(user=user)
+            elif session_key:
+                existing_activity = existing_activity.filter(session_key=session_key)
+            else:
+                # For requests without user or session, still allow tracking
+                # Don't prevent anonymous users from being tracked
+                pass
+            
+            if existing_activity.exists():
+                # Return the most recent existing activity instead of creating a duplicate
+                logger.info(f"Duplicate view prevented (within 1s): {product.name} by {user or session_key or 'anonymous'}")
+                return existing_activity.first()
+        
         # Extract request metadata
         ip_address = None
         user_agent = ''
@@ -97,6 +138,7 @@ class UserClick(models.Model):
         from marketplace.models import ProductMetrics
         
         # Get or create product metrics
+        from decimal import Decimal
         metrics, created = ProductMetrics.objects.get_or_create(
             product=self.product,
             defaults={
@@ -104,11 +146,13 @@ class UserClick(models.Model):
                 'total_clicks': 0,
                 'total_favorites': 0,
                 'total_cart_additions': 0,
+                'total_sales': 0,
+                'total_revenue': Decimal('0.00'),
             }
         )
         
         # Update counters based on action
-        if self.action == 'view':
+        if self.action in ['view', 'detail_view', 'listing_view', 'search_view', 'category_view', 'image_view']:
             metrics.total_views += 1
         elif self.action == 'click':
             metrics.total_clicks += 1
@@ -118,13 +162,15 @@ class UserClick(models.Model):
             # Decrease favorites count but don't go below 0
             metrics.total_favorites = max(0, metrics.total_favorites - 1)
         elif self.action == 'cart_add':
+            # Cart additions count as both cart additions AND clicks (since adding to cart is a user interaction/click)
             metrics.total_cart_additions += 1
+            metrics.total_clicks += 1
         elif self.action == 'cart_remove':
             # We don't decrease cart additions as they represent total attempts
             pass
-        
-        # Update conversion rates
-        metrics.update_conversion_rates()
+        elif self.action == 'purchase':
+            # Purchase metrics are handled separately in the tracking utils
+            pass
         
         # Save the updated metrics
         metrics.save()
@@ -191,7 +237,8 @@ class ActivitySummary(models.Model):
         # Calculate aggregates
         summary_data = {
             'total_views': activities.filter(action='view').count(),
-            'total_clicks': activities.filter(action='click').count(),
+            # Total clicks includes both 'click' actions and 'cart_add' actions (since cart addition is a click interaction)
+            'total_clicks': activities.filter(action__in=['click', 'cart_add']).count(),
             'total_favorites': activities.filter(action='favorite').count(),
             'total_unfavorites': activities.filter(action='unfavorite').count(),
             'total_cart_additions': activities.filter(action='cart_add').count(),

@@ -2,6 +2,7 @@ from django.db import models
 from django.contrib.auth import get_user_model
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.utils.text import slugify
+from django.utils import timezone
 import uuid
 
 User = get_user_model()
@@ -182,9 +183,9 @@ class ProductFavorite(models.Model):
 
 class Order(models.Model):
     STATUS_CHOICES = [
-        ('pending', 'Pending'),
-        ('confirmed', 'Confirmed'),
-        ('processing', 'Processing'),
+        ('pending_payment', 'Pending Payment'),  # Default status - cannot be changed manually
+        ('payment_confirmed', 'Payment Confirmed'),  # Set by Stripe webhook when payment succeeds
+        ('awaiting_shipment', 'Awaiting Shipment'),
         ('shipped', 'Shipped'),
         ('delivered', 'Delivered'),
         ('cancelled', 'Cancelled'),
@@ -193,6 +194,7 @@ class Order(models.Model):
 
     PAYMENT_STATUS_CHOICES = [
         ('pending', 'Pending'),
+        ('processing', 'Processing'),
         ('paid', 'Paid'),
         ('failed', 'Failed'),
         ('refunded', 'Refunded'),
@@ -203,7 +205,7 @@ class Order(models.Model):
     buyer = models.ForeignKey(User, on_delete=models.CASCADE, related_name='orders')
     
     # Order Details
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending_payment')
     payment_status = models.CharField(max_length=20, choices=PAYMENT_STATUS_CHOICES, default='pending')
     
     # Pricing
@@ -217,6 +219,7 @@ class Order(models.Model):
     shipping_address = models.JSONField()
     tracking_number = models.CharField(max_length=100, blank=True)
     shipping_carrier = models.CharField(max_length=100, blank=True)
+    carrier_code = models.CharField(max_length=100, blank=True)  # CTT DY08912401385471 style codes
     
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
@@ -227,12 +230,49 @@ class Order(models.Model):
     # Notes
     buyer_notes = models.TextField(blank=True)
     admin_notes = models.TextField(blank=True)
+    cancellation_reason = models.TextField(blank=True)  # Reason for order cancellation
+    cancelled_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='cancelled_orders')  # Who cancelled the order
+    cancelled_at = models.DateTimeField(null=True, blank=True)  # When the order was cancelled
+    processed_at = models.DateTimeField(null=True, blank=True)  # When order moved to processing
+    
+    # Payment and locking
+    is_locked = models.BooleanField(default=False)  # Lock order from modification during/after payment
+    locked_at = models.DateTimeField(null=True, blank=True)  # When the order was locked
+    payment_initiated_at = models.DateTimeField(null=True, blank=True)  # When payment was initiated
 
     class Meta:
         ordering = ['-created_at']
 
     def __str__(self):
         return f"Order {str(self.id)[:8]} by {self.buyer.username}"
+    
+    def lock_order(self):
+        """Lock the order to prevent modifications during/after payment"""
+        if not self.is_locked:
+            self.is_locked = True
+            self.locked_at = timezone.now()
+            self.save(update_fields=['is_locked', 'locked_at'])
+    
+    def can_be_modified(self):
+        """Check if order can be modified (not locked and payment not initiated)"""
+        return not self.is_locked and self.payment_status in ['pending']
+    
+    def initiate_payment(self):
+        """Mark payment as initiated and lock the order"""
+        if self.can_be_modified():
+            self.payment_status = 'processing'
+            self.status = 'awaiting_payment'
+            self.payment_initiated_at = timezone.now()
+            self.lock_order()
+            self.save(update_fields=['payment_status', 'status', 'payment_initiated_at'])
+            return True
+        return False
+    
+    def confirm_payment(self):
+        """Confirm successful payment"""
+        self.payment_status = 'paid'
+        self.status = 'confirmed'
+        self.save(update_fields=['payment_status', 'status'])
 
 
 class OrderItem(models.Model):
@@ -257,10 +297,40 @@ class OrderItem(models.Model):
         return f"{self.quantity}x {self.product_name} in order {str(self.order.id)[:8]}"
 
 
+class OrderShipping(models.Model):
+    """Tracking information for each seller in an order"""
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='shipping_info')
+    seller = models.ForeignKey(User, on_delete=models.CASCADE, related_name='order_shipments')
+    
+    # Tracking Information
+    tracking_number = models.CharField(max_length=100, blank=True)
+    shipping_carrier = models.CharField(max_length=100, blank=True)  # CTT, DHL, UPS, etc.
+    carrier_code = models.CharField(max_length=100, blank=True)  # CTT DY08912401385471 style codes
+    
+    # Status and Timestamps
+    shipped_at = models.DateTimeField(null=True, blank=True)
+    delivered_at = models.DateTimeField(null=True, blank=True)
+    
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ['order', 'seller']  # One shipping record per seller per order
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Shipping for {self.seller.username} in order {str(self.order.id)[:8]}"
+
+
 class Cart(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='cart')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Shopping Cart"
+        verbose_name_plural = "Shopping Carts"
 
     def __str__(self):
         return f"Cart for {self.user.username}"
@@ -276,6 +346,16 @@ class Cart(models.Model):
         for item in self.items.all():
             total += item.quantity * item.product.price
         return total
+    
+    def clear_items(self):
+        """Clear all items from cart"""
+        self.items.all().delete()
+    
+    @classmethod
+    def get_or_create_cart(cls, user):
+        """Get or create user's unique cart"""
+        cart, created = cls.objects.get_or_create(user=user)
+        return cart
 
 
 class CartItem(models.Model):
@@ -304,24 +384,44 @@ class ProductMetrics(models.Model):
     total_sales = models.PositiveIntegerField(default=0)
     total_revenue = models.DecimalField(max_digits=15, decimal_places=2, default=0)
     
-    # Conversion metrics (calculated fields, rates removed as requested)
-    view_to_click_rate = models.FloatField(default=0)
-    click_to_cart_rate = models.FloatField(default=0)
-    cart_to_purchase_rate = models.FloatField(default=0)
-    
     last_updated = models.DateTimeField(auto_now=True)
-
-    def update_conversion_rates(self):
-        """Update conversion rates based on current metrics"""
-        self.view_to_click_rate = (self.total_clicks / self.total_views * 100) if self.total_views > 0 else 0
-        self.click_to_cart_rate = (self.total_cart_additions / self.total_clicks * 100) if self.total_clicks > 0 else 0
-        self.cart_to_purchase_rate = (self.total_sales / self.total_cart_additions * 100) if self.total_cart_additions > 0 else 0
-        # Don't call save() here to avoid recursion, let the caller handle saving
-
-    def save(self, *args, **kwargs):
-        """Override save to automatically update conversion rates"""
-        self.update_conversion_rates()
-        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"Metrics for {self.product.name}"
+    
+    def update_conversion_rates(self):
+        """
+        Update calculated conversion rate fields.
+        This method is now a no-op since rate fields have been removed.
+        Kept for backwards compatibility with existing tracking code.
+        """
+        # No-op: Rate fields have been removed from the model
+        pass
+    
+    @property
+    def view_to_click_rate(self):
+        """Calculate view-to-click conversion rate on-demand"""
+        if self.total_views == 0:
+            return 0.0
+        return (self.total_clicks / self.total_views) * 100
+    
+    @property 
+    def click_to_cart_rate(self):
+        """Calculate click-to-cart conversion rate on-demand"""
+        if self.total_clicks == 0:
+            return 0.0
+        return (self.total_cart_additions / self.total_clicks) * 100
+    
+    @property
+    def cart_to_purchase_rate(self):
+        """Calculate cart-to-purchase conversion rate on-demand"""
+        if self.total_cart_additions == 0:
+            return 0.0
+        return (self.total_sales / self.total_cart_additions) * 100
+    
+    @property
+    def overall_conversion_rate(self):
+        """Calculate overall view-to-purchase conversion rate on-demand"""
+        if self.total_views == 0:
+            return 0.0
+        return (self.total_sales / self.total_views) * 100

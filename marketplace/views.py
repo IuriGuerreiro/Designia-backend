@@ -12,14 +12,15 @@ import json
 
 from .models import (
     Category, Product, ProductImage, ProductReview, ProductFavorite,
-    Order, OrderItem, Cart, CartItem, ProductMetrics
+    Order, OrderItem, OrderShipping, Cart, CartItem, ProductMetrics
 )
 from activity.models import UserClick
+from .tracking_utils import track_product_listing_view, track_single_product_view, ProductTracker
 from .serializers import (
     CategorySerializer, ProductListSerializer, ProductDetailSerializer,
     ProductCreateUpdateSerializer, ProductImageSerializer, ProductReviewSerializer,
     ProductFavoriteSerializer, CartSerializer, CartItemSerializer,
-    OrderSerializer, OrderItemSerializer, ProductMetricsSerializer
+    OrderSerializer, OrderItemSerializer, OrderShippingSerializer, ProductMetricsSerializer
 )
 from .filters import ProductFilter
 from .permissions import IsSellerOrReadOnly, IsOwnerOrReadOnly
@@ -39,7 +40,7 @@ class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
 
     @action(detail=True, methods=['get'])
     def products(self, request, slug=None):
-        """Get products in this category"""
+        """Get products in this category with view tracking"""
         category = self.get_object()
         products = Product.objects.filter(
             category=category, 
@@ -49,6 +50,37 @@ class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
         # Apply filtering
         filter_backend = ProductFilter()
         products = filter_backend.filter_queryset(request, products, self)
+        
+        # Track category views for products in this category listing
+        try:
+            from .tracking_utils import SessionHelper, MetricsHelper
+            user, session_key = SessionHelper.get_user_or_session(request)
+            
+            products_list = list(products)
+            
+            # Ensure ProductMetrics exist for all products (bulk operation)
+            logger.info(f"Ensuring ProductMetrics exist for {len(products_list)} products in category {category.name}")
+            MetricsHelper.bulk_ensure_metrics(products_list)
+            
+            tracked_count = 0
+            
+            for product in products_list:
+                try:
+                    UserClick.track_activity(
+                        product=product,
+                        action='category_view',
+                        user=user,
+                        session_key=session_key,
+                        request=request
+                    )
+                    tracked_count += 1
+                except Exception as e:
+                    logger.warning(f"Failed to track category view for product {product.id}: {str(e)}")
+                    continue
+            
+            logger.info(f"Tracked category views for {tracked_count}/{len(products_list)} products in category {category.name}")
+        except Exception as e:
+            logger.error(f"Error tracking category listing views: {str(e)}")
         
         serializer = ProductListSerializer(products, many=True, context={'request': request})
         return Response(serializer.data)
@@ -83,159 +115,60 @@ class ProductViewSet(viewsets.ModelViewSet):
         return super().get_permissions()
     
     def create(self, request, *args, **kwargs):
-        """Override create to add debug logging"""
-        logger.info("=== PRODUCT CREATE REQUEST START ===")
-        logger.info(f"User: {request.user} (authenticated: {request.user.is_authenticated})")
-        logger.info(f"Content-Type: {request.content_type}")
-        logger.info(f"Request method: {request.method}")
-        
-        # Get serializer and validate
+        """Override create method"""
         serializer = self.get_serializer(data=request.data)
         
-        logger.info(f"Serializer: {type(serializer).__name__}")
-        logger.info(f"Initial data keys: {list(request.data.keys()) if hasattr(request.data, 'keys') else 'No keys method'}")
-        
         if serializer.is_valid():
-            logger.info("Serializer validation passed, calling perform_create...")
             self.perform_create(serializer)
             headers = self.get_success_headers(serializer.data)
-            logger.info("=== PRODUCT CREATE REQUEST SUCCESS ===")
             return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
         else:
-            logger.error("=== PRODUCT CREATE REQUEST - VALIDATION FAILED ===")
-            logger.error(f"Serializer errors: {serializer.errors}")
-            logger.error(f"Non-field errors: {serializer.non_field_errors if hasattr(serializer, 'non_field_errors') else 'None'}")
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def perform_create(self, serializer):
-        """Create a new product with extensive debugging"""
-        logger.info("=== PRODUCT CREATE DEBUG START ===")
-        
-        # Debug user info
+        """Create a new product"""
         user = self.request.user
-        logger.info(f"User: {user.email} (ID: {user.id})")
-        logger.info(f"User is authenticated: {user.is_authenticated}")
-        logger.info(f"User is seller: {getattr(user, 'is_seller', 'No is_seller field')}")
-        
-        # Debug request data
-        logger.info(f"Request method: {self.request.method}")
-        logger.info(f"Request content type: {self.request.content_type}")
-        
-        # Debug POST data
-        if hasattr(self.request, 'POST'):
-            logger.info(f"POST data: {dict(self.request.POST)}")
-        
-        # Debug FILES data
-        if hasattr(self.request, 'FILES'):
-            logger.info(f"FILES data: {dict(self.request.FILES)}")
-            for key, file in self.request.FILES.items():
-                logger.info(f"File {key}: {file.name} ({file.size} bytes)")
-        
-        # Debug raw data
-        if hasattr(self.request, 'data'):
-            logger.info(f"Request data keys: {list(self.request.data.keys())}")
-            # Log non-file data safely
-            safe_data = {}
-            for key, value in self.request.data.items():
-                if hasattr(value, 'read'):  # File-like object
-                    safe_data[key] = f"<File: {getattr(value, 'name', 'unknown')}>"
-                else:
-                    safe_data[key] = value
-            logger.info(f"Request data (safe): {safe_data}")
-        
-        # Debug serializer validation
-        logger.info(f"Serializer class: {serializer.__class__.__name__}")
-        logger.info(f"Serializer is valid: {serializer.is_valid()}")
-        
-        if not serializer.is_valid():
-            logger.error(f"Serializer errors: {serializer.errors}")
-            logger.error("=== PRODUCT CREATE DEBUG - VALIDATION FAILED ===")
-            raise ValidationError(serializer.errors)
-        
-        logger.info(f"Validated data keys: {list(serializer.validated_data.keys())}")
-        
-        # Safe logging of validated data (excluding files)
-        safe_validated_data = {}
-        for key, value in serializer.validated_data.items():
-            if hasattr(value, 'read'):  # File-like object
-                safe_validated_data[key] = f"<File: {getattr(value, 'name', 'unknown')}>"
-            else:
-                safe_validated_data[key] = value
-        logger.info(f"Validated data (safe): {safe_validated_data}")
-        
-        try:
-            # Save the product
-            logger.info("Attempting to save product...")
-            product = serializer.save(seller=user)
-            logger.info(f"Product created successfully with ID: {product.id}, slug: {product.slug}")
-            logger.info("=== PRODUCT CREATE DEBUG - SUCCESS ===")
-            return product
-            
-        except Exception as e:
-            logger.error(f"Error saving product: {str(e)}")
-            logger.error(f"Error type: {type(e).__name__}")
-            logger.error("=== PRODUCT CREATE DEBUG - SAVE FAILED ===")
-            raise
+        product = serializer.save(seller=user)
+        return product
 
     def list(self, request, *args, **kwargs):
-        """Override list method with debugging"""
-        logger.info("=== PRODUCT LIST REQUEST START ===")
-        logger.info(f"User: {request.user} (authenticated: {request.user.is_authenticated})")
-        logger.info(f"Query params: {dict(request.GET)}")
-        
+        """Override list method with view tracking"""
         queryset = self.filter_queryset(self.get_queryset())
-        logger.info(f"Filtered queryset count: {queryset.count()}")
         
         page = self.paginate_queryset(queryset)
         if page is not None:
-            logger.info(f"Paginated to {len(page)} items")
             serializer = self.get_serializer(page, many=True)
-            logger.info(f"Serialized data length: {len(serializer.data)}")
-            logger.info("=== PRODUCT LIST REQUEST SUCCESS (PAGINATED) ===")
+            
+            # Track views for products in this listing page
+            try:
+                track_product_listing_view(page, request)
+            except Exception as e:
+                logger.error(f"Error tracking listing views: {str(e)}")
+            
             return self.get_paginated_response(serializer.data)
 
         serializer = self.get_serializer(queryset, many=True)
-        logger.info(f"Serialized data length: {len(serializer.data)}")
-        logger.info("=== PRODUCT LIST REQUEST SUCCESS ===")
+        
+        # Track views for all products in non-paginated listing
+        try:
+            products_list = list(queryset)
+            track_product_listing_view(products_list, request)
+        except Exception as e:
+            logger.error(f"Error tracking listing views: {str(e)}")
+        
         return Response(serializer.data)
 
     def retrieve(self, request, *args, **kwargs):
-        """Override retrieve method with activity tracking"""
-        logger.info("=== PRODUCT RETRIEVE REQUEST START ===")
-        logger.info(f"User: {request.user} (authenticated: {request.user.is_authenticated})")
-        logger.info(f"Slug: {kwargs.get('slug', 'No slug')}")
+        instance = self.get_object()
         
+        # Track view activity using tracking utils
         try:
-            instance = self.get_object()
-            logger.info(f"Found product: {instance.name} (ID: {instance.id})")
+            track_single_product_view(instance, request)
         except Exception as e:
-            logger.error(f"Failed to get product: {e}")
-            raise
-        
-        # Track activity using the new activity system
-        user = request.user if request.user.is_authenticated else None
-        session_key = request.session.session_key if not user else None
-        
-        # Ensure session key exists for anonymous users
-        if not user and not session_key:
-            request.session.save()
-            session_key = request.session.session_key
-        
-        # Track the view activity
-        UserClick.track_activity(
-            product=instance,
-            action='view',
-            user=user,
-            session_key=session_key,
-            request=request
-        )
-        
-        # Legacy view count update (keep for backward compatibility)
-        Product.objects.filter(pk=instance.pk).update(view_count=F('view_count') + 1)
+            logger.error(f"Error tracking product view: {str(e)}")
+            # Continue execution even if tracking fails
         
         serializer = self.get_serializer(instance)
-        logger.info(f"Serialized data keys: {serializer.data.keys() if serializer.data else 'No data'}")
-        logger.info("=== PRODUCT RETRIEVE REQUEST SUCCESS ===")
         return Response(serializer.data)
 
     @action(detail=True, methods=['post'])
@@ -254,30 +187,20 @@ class ProductViewSet(viewsets.ModelViewSet):
         
         if not created:
             favorite.delete()
-            # Track unfavorite activity
-            UserClick.track_activity(
-                product=product,
-                action='unfavorite',
-                user=request.user,
-                request=request
-            )
-            # Legacy favorite count update (keep for backward compatibility)
-            Product.objects.filter(pk=product.pk).update(
-                favorite_count=F('favorite_count') - 1
-            )
+            # Track unfavorite activity using new tracking utils
+            try:
+                ProductTracker.track_product_favorite(product, request.user, request, 'unfavorite')
+                logger.info(f"Product unfavorite tracked: {product.name}")
+            except Exception as e:
+                logger.error(f"Error tracking unfavorite: {str(e)}")
             return Response({'favorited': False})
         else:
-            # Track favorite activity
-            UserClick.track_activity(
-                product=product,
-                action='favorite',
-                user=request.user,
-                request=request
-            )
-            # Legacy favorite count update (keep for backward compatibility)
-            Product.objects.filter(pk=product.pk).update(
-                favorite_count=F('favorite_count') + 1
-            )
+            # Track favorite activity using new tracking utils
+            try:
+                ProductTracker.track_product_favorite(product, request.user, request, 'favorite')
+                logger.info(f"Product favorite tracked: {product.name}")
+            except Exception as e:
+                logger.error(f"Error tracking favorite: {str(e)}")
             return Response({'favorited': True})
 
     @action(detail=True, methods=['post'])
@@ -285,26 +208,25 @@ class ProductViewSet(viewsets.ModelViewSet):
         """Track product clicks with activity system"""
         product = self.get_object()
         
-        # Track activity using the new activity system
-        user = request.user if request.user.is_authenticated else None
-        session_key = request.session.session_key if not user else None
-        
-        # Ensure session key exists for anonymous users
-        if not user and not session_key:
-            request.session.save()
-            session_key = request.session.session_key
-        
-        # Track the click activity
-        UserClick.track_activity(
-            product=product,
-            action='click',
-            user=user,
-            session_key=session_key,
-            request=request
-        )
-        
-        # Legacy click count update (keep for backward compatibility)
-        Product.objects.filter(pk=product.pk).update(click_count=F('click_count') + 1)
+        # Track click activity using new tracking utils
+        try:
+            user = request.user if request.user.is_authenticated else None
+            session_key = None
+            
+            if not user:
+                if not request.session.session_key:
+                    request.session.save()
+                session_key = request.session.session_key
+            
+            ProductTracker.track_product_click(
+                product=product,
+                user=user,
+                session_key=session_key,
+                request=request
+            )
+            logger.info(f"Product click tracked: {product.name}")
+        except Exception as e:
+            logger.error(f"Error tracking product click: {str(e)}")
         
         return Response({'clicked': True})
 
@@ -416,20 +338,30 @@ class CartViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        cart, created = Cart.objects.get_or_create(user=self.request.user)
-        return Cart.objects.filter(user=self.request.user)
+        cart = Cart.get_or_create_cart(user=self.request.user)
+        return cart
 
     def list(self, request, *args, **kwargs):
         """Get user's cart"""
-        cart, created = Cart.objects.get_or_create(user=request.user)
+        cart = Cart.get_or_create_cart(user=request.user)
         serializer = self.get_serializer(cart)
         return Response(serializer.data)
 
     @action(detail=False, methods=['post'])
     def add_item(self, request):
         """Add item to cart with comprehensive stock validation"""
-        cart, created = Cart.objects.get_or_create(user=request.user)
+        import logging
+        logger = logging.getLogger(__name__)
         
+        logger.info("=== CART ADD_ITEM DEBUG START ===")
+        logger.info(f"User: {request.user.username if request.user.is_authenticated else 'Anonymous'}")
+        logger.info(f"Method: {request.method}")
+        logger.info(f"Data: {request.data}")
+        
+        cart = Cart.get_or_create_cart(user=request.user)
+        logger.info(f"Cart ID: {cart.id}")
+        
+                
         serializer = CartItemSerializer(data=request.data)
         if serializer.is_valid():
             product_id = serializer.validated_data['product_id']
@@ -486,31 +418,49 @@ class CartViewSet(viewsets.ModelViewSet):
             cart_item.quantity = new_quantity
             cart_item.save()
             
-            # Track cart addition activity
-            UserClick.track_activity(
-                product=product,
-                action='cart_add',
-                user=request.user,
-                request=request
-            )
+            # Track cart addition activity using new tracking utils
+            try:
+                ProductTracker.track_cart_addition(product, request.user, quantity, request)
+                logger.info(f"Cart addition tracked: {quantity}x {product.name}")
+            except Exception as e:
+                logger.error(f"Error tracking cart addition: {str(e)}")
             
-            return Response({
+            response_data = {
                 'success': True,
                 'item': CartItemSerializer(cart_item).data,
                 'message': 'Item added to cart successfully' if item_created else 'Cart item quantity updated',
                 'was_created': item_created
-            }, status=status.HTTP_201_CREATED if item_created else status.HTTP_200_OK)
+            }
+            logger.info(f"Response: {response_data}")
+            logger.info("=== CART ADD_ITEM DEBUG END (SUCCESS) ===")
+            
+            return Response(response_data, status=status.HTTP_201_CREATED if item_created else status.HTTP_200_OK)
         
-        return Response({
+        error_response = {
             'error': 'VALIDATION_ERROR',
             'detail': 'Invalid data provided',
             'errors': serializer.errors
-        }, status=status.HTTP_400_BAD_REQUEST)
+        }
+        logger.error(f"Validation errors: {serializer.errors}")
+        logger.info("=== CART ADD_ITEM DEBUG END (ERROR) ===")
+        
+        return Response(error_response, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=False, methods=['patch'])
     def update_item(self, request):
         """Update cart item quantity with comprehensive stock validation"""
-        cart = get_object_or_404(Cart, user=request.user)
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        logger.info("=== CART UPDATE_ITEM DEBUG START ===")
+        logger.info(f"User: {request.user.username if request.user.is_authenticated else 'Anonymous'}")
+        logger.info(f"Method: {request.method}")
+        logger.info(f"Data: {request.data}")
+        
+        cart = Cart.get_or_create_cart(user=request.user)
+        logger.info(f"Cart ID: {cart.id}")
+        
+                
         item_id = request.data.get('item_id')
         quantity = request.data.get('quantity')
         
@@ -584,7 +534,9 @@ class CartViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['delete'])
     def remove_item(self, request):
         """Remove item from cart with activity tracking"""
-        cart = get_object_or_404(Cart, user=request.user)
+        cart = Cart.get_or_create_cart(user=request.user)
+        
+                
         item_id = request.data.get('item_id')
         
         if not item_id:
@@ -595,13 +547,12 @@ class CartViewSet(viewsets.ModelViewSet):
         
         cart_item = get_object_or_404(CartItem, id=item_id, cart=cart)
         
-        # Track cart removal activity before deleting
-        UserClick.track_activity(
-            product=cart_item.product,
-            action='cart_remove',
-            user=request.user,
-            request=request
-        )
+        # Track cart removal activity before deleting using new tracking utils
+        try:
+            ProductTracker.track_cart_removal(cart_item.product, request.user, request)
+            logger.info(f"Cart removal tracked: {cart_item.product.name}")
+        except Exception as e:
+            logger.error(f"Error tracking cart removal: {str(e)}")
         
         cart_item.delete()
         
@@ -610,9 +561,142 @@ class CartViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['delete'])
     def clear(self, request):
         """Clear all items from cart"""
-        cart = get_object_or_404(Cart, user=request.user)
+        cart = Cart.get_or_create_cart(user=request.user)
+        
+                
         cart.items.all().delete()
         return Response({'detail': 'Cart cleared'})
+    
+    @action(detail=False, methods=['patch'])
+    def update_item_status(self, request):
+        """Update cart item status with comprehensive debugging"""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        logger.info("=== CART UPDATE_ITEM_STATUS DEBUG START ===")
+        logger.info(f"User: {request.user.username if request.user.is_authenticated else 'Anonymous'}")
+        logger.info(f"Method: {request.method}")
+        logger.info(f"Data: {request.data}")
+        
+        cart = Cart.get_or_create_cart(user=request.user)
+        logger.info(f"Cart ID: {cart.id}")
+        
+        
+        item_id = request.data.get('item_id')
+        new_status = request.data.get('status')
+        
+        print(f"DEBUG: item_id={item_id}, new_status={new_status}")
+        logger.info(f"Requested item_id: {item_id}, new_status: {new_status}")
+        
+        if not item_id:
+            logger.error("Missing item_id parameter")
+            return Response(
+                {'error': 'MISSING_PARAMETERS', 'detail': 'item_id is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            cart_item = CartItem.objects.get(id=item_id, cart=cart)
+            logger.info(f"Found cart item: {cart_item.id} - Product: {cart_item.product.name}")
+            
+            # For now, just return success since we don't have status field on CartItem
+            # This endpoint might be used for frontend state management
+            response_data = {
+                'detail': 'Item status updated successfully',
+                'item': {
+                    'id': cart_item.id,
+                    'product_name': cart_item.product.name,
+                    'quantity': cart_item.quantity,
+                    'status': new_status  # Echo back the requested status
+                }
+            }
+            logger.info(f"Response: {response_data}")
+            logger.info("=== CART UPDATE_ITEM_STATUS DEBUG END ===")
+            
+            return Response(response_data)
+            
+        except CartItem.DoesNotExist:
+            logger.error(f"Cart item with id {item_id} not found in user's cart")
+            return Response(
+                {'error': 'ITEM_NOT_FOUND', 'detail': 'Item not found in cart'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error: {str(e)}")
+            return Response(
+                {'error': 'INTERNAL_ERROR', 'detail': 'An unexpected error occurred'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    @action(detail=False, methods=['post'])
+    def validate_stock(self, request):
+        """Validate stock for all cart items with comprehensive debugging"""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        logger.info("=== CART VALIDATE_STOCK DEBUG START ===")
+        logger.info(f"User: {request.user.username if request.user.is_authenticated else 'Anonymous'}")
+        logger.info(f"Method: {request.method}")
+        
+        cart = Cart.get_or_create_cart(user=request.user)
+        logger.info(f"Cart ID: {cart.id}, Total items: {cart.items.count()}")
+        
+        validation_results = []
+        all_valid = True
+        
+        for item in cart.items.all():
+            logger.info(f"Validating item: {item.id} - Product: {item.product.name}")
+            logger.info(f"  Requested quantity: {item.quantity}")
+            logger.info(f"  Available stock: {item.product.stock_quantity}")
+            logger.info(f"  Product active: {item.product.is_active}")
+            
+            item_result = {
+                'item_id': item.id,
+                'product_id': str(item.product.id),
+                'product_name': item.product.name,
+                'requested_quantity': item.quantity,
+                'available_stock': item.product.stock_quantity,
+                'is_valid': True,
+                'issues': []
+            }
+            
+            # Check if product is still active
+            if not item.product.is_active:
+                item_result['is_valid'] = False
+                item_result['issues'].append('Product is no longer available')
+                all_valid = False
+                logger.warning(f"  Issue: Product {item.product.name} is inactive")
+            
+            # Check stock availability
+            if item.product.stock_quantity < item.quantity:
+                item_result['is_valid'] = False
+                item_result['issues'].append(f'Insufficient stock. Available: {item.product.stock_quantity}')
+                all_valid = False
+                logger.warning(f"  Issue: Insufficient stock for {item.product.name}")
+            
+            # Check if stock is zero
+            if item.product.stock_quantity <= 0:
+                item_result['is_valid'] = False
+                item_result['issues'].append('Out of stock')
+                all_valid = False
+                logger.warning(f"  Issue: {item.product.name} is out of stock")
+            
+            validation_results.append(item_result)
+            logger.info(f"  Validation result: {item_result['is_valid']}")
+        
+        response_data = {
+            'cart_valid': all_valid,
+            'total_items': len(validation_results),
+            'valid_items': sum(1 for r in validation_results if r['is_valid']),
+            'invalid_items': sum(1 for r in validation_results if not r['is_valid']),
+            'items': validation_results
+        }
+        
+        logger.info(f"Overall validation result: {all_valid}")
+        logger.info(f"Response: {response_data}")
+        logger.info("=== CART VALIDATE_STOCK DEBUG END ===")
+        
+        return Response(response_data)
 
 
 class OrderViewSet(viewsets.ModelViewSet):
@@ -623,208 +707,27 @@ class OrderViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        return Order.objects.filter(buyer=self.request.user).prefetch_related('items')
+        """Get orders accessible by current user (buyer orders OR orders containing user's products as seller)"""
+        user = self.request.user
+        
+        # Get orders where user is buyer OR has items as seller
+        return Order.objects.filter(
+            models.Q(buyer=user) | models.Q(items__seller=user)
+        ).distinct().prefetch_related('items', 'shipping_info')
 
-    @action(detail=False, methods=['post'])
-    def create_from_cart(self, request):
-        """Create order from cart items with comprehensive stock validation"""
-        cart = get_object_or_404(Cart, user=request.user)
-        
-        if not cart.items.exists():
-            return Response(
-                {'error': 'EMPTY_CART', 'detail': 'Cart is empty'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        shipping_address = request.data.get('shipping_address')
-        if not shipping_address:
-            return Response(
-                {'error': 'MISSING_ADDRESS', 'detail': 'Shipping address is required'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        # Pre-purchase stock validation
-        stock_errors = []
-        unavailable_products = []
-        
-        with transaction.atomic():
-            # First pass: Validate all items before processing any
-            for cart_item in cart.items.select_related('product'):
-                product = cart_item.product
-                
-                # Check if product is still active
-                if not product.is_active:
-                    unavailable_products.append({
-                        'product_name': product.name,
-                        'reason': 'Product is no longer available'
-                    })
-                    continue
-                
-                # Refresh stock from database to get latest value
-                product.refresh_from_db()
-                
-                # Check stock availability
-                if cart_item.quantity > product.stock_quantity:
-                    stock_errors.append({
-                        'product_id': str(product.id),
-                        'product_name': product.name,
-                        'requested_quantity': cart_item.quantity,
-                        'available_stock': product.stock_quantity,
-                        'error': 'INSUFFICIENT_STOCK'
-                    })
-                
-                # Check if product is completely out of stock
-                if product.stock_quantity <= 0:
-                    stock_errors.append({
-                        'product_id': str(product.id),
-                        'product_name': product.name,
-                        'requested_quantity': cart_item.quantity,
-                        'available_stock': 0,
-                        'error': 'OUT_OF_STOCK'
-                    })
-            
-            # If there are any stock issues, return comprehensive error
-            if stock_errors or unavailable_products:
-                return Response(
-                    {
-                        'error': 'STOCK_VALIDATION_FAILED',
-                        'detail': 'Some items in your cart are no longer available or have insufficient stock',
-                        'stock_errors': stock_errors,
-                        'unavailable_products': unavailable_products,
-                        'action_required': 'Please update your cart quantities or remove unavailable items'
-                    },
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            
-            # Calculate totals - ensure all values are Decimal for proper calculation
-            from decimal import Decimal
-            
-            subtotal = cart.total_amount
-            shipping_cost = Decimal(str(request.data.get('shipping_cost', 0)))
-            tax_amount = Decimal(str(request.data.get('tax_amount', 0)))
-            discount_amount = Decimal(str(request.data.get('discount_amount', 0)))
-            total_amount = subtotal + shipping_cost + tax_amount - discount_amount
-            
-            # Create order
-            order = Order.objects.create(
-                buyer=request.user,
-                subtotal=subtotal,
-                shipping_cost=shipping_cost,
-                tax_amount=tax_amount,
-                discount_amount=discount_amount,
-                total_amount=total_amount,
-                shipping_address=shipping_address,
-                buyer_notes=request.data.get('buyer_notes', '')
-            )
-            
-            successful_items = []
-            failed_items = []
-            
-            # Second pass: Create order items and reduce stock
-            for cart_item in cart.items.select_related('product'):
-                product = cart_item.product
-                
-                try:
-                    # Double-check stock one more time (race condition protection)
-                    product.refresh_from_db()
-                    if cart_item.quantity > product.stock_quantity:
-                        failed_items.append({
-                            'product_name': product.name,
-                            'reason': f'Stock changed during checkout. Only {product.stock_quantity} available.'
-                        })
-                        continue
-                    
-                    # Create order item
-                    order_item = OrderItem.objects.create(
-                        order=order,
-                        product=product,
-                        seller=product.seller,
-                        quantity=cart_item.quantity,
-                        unit_price=product.price,
-                        product_name=product.name,
-                        product_description=product.description,
-                        product_image=product.images.filter(is_primary=True).first().image.url if product.images.filter(is_primary=True).exists() else ''
-                    )
-                    
-                    # Reduce stock atomically
-                    updated_rows = Product.objects.filter(
-                        id=product.id,
-                        stock_quantity__gte=cart_item.quantity
-                    ).update(
-                        stock_quantity=F('stock_quantity') - cart_item.quantity
-                    )
-                    
-                    if updated_rows == 0:
-                        # Stock was reduced by another transaction
-                        failed_items.append({
-                            'product_name': product.name,
-                            'reason': 'Stock was reserved by another customer during checkout'
-                        })
-                        order_item.delete()  # Remove the order item
-                        continue
-                    
-                    successful_items.append({
-                        'product_name': product.name,
-                        'quantity': cart_item.quantity
-                    })
-                    
-                    # Update metrics
-                    if hasattr(product, 'metrics'):
-                        ProductMetrics.objects.filter(product=product).update(
-                            total_sales=F('total_sales') + cart_item.quantity,
-                            total_revenue=F('total_revenue') + cart_item.total_price
-                        )
-                        
-                except Exception as e:
-                    logger.error(f"Error processing cart item {cart_item.id}: {str(e)}")
-                    failed_items.append({
-                        'product_name': product.name,
-                        'reason': 'An error occurred while processing this item'
-                    })
-            
-            # If no items could be processed, delete the order
-            if not successful_items:
-                order.delete()
-                return Response(
-                    {
-                        'error': 'ORDER_PROCESSING_FAILED',
-                        'detail': 'No items could be processed from your cart',
-                        'failed_items': failed_items
-                    },
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            
-            # Clear cart (only successful items if there were failures)
-            cart.items.all().delete()
-            
-            # Recalculate order totals if some items failed
-            if failed_items:
-                order.refresh_from_db()
-                actual_subtotal = sum(item.total_price for item in order.items.all())
-                order.subtotal = actual_subtotal
-                order.total_amount = actual_subtotal + order.shipping_cost + order.tax_amount - order.discount_amount
-                order.save()
-            
-            serializer = OrderSerializer(order)
-            response_data = {
-                'success': True,
-                'order': serializer.data,
-                'successful_items': successful_items,
-                'message': 'Order created successfully'
-            }
-            
-            if failed_items:
-                response_data.update({
-                    'partial_success': True,
-                    'failed_items': failed_items,
-                    'warning': 'Some items could not be processed due to stock issues'
-                })
-            
-            return Response(response_data, status=status.HTTP_201_CREATED)
+    @action(detail=False, methods=['get'])
+    def my_orders(self, request):
+        """Get current user's orders as a buyer"""
+        orders = self.get_queryset().filter(buyer=request.user)
+        serializer = self.get_serializer(orders, many=True)
+        return Response(serializer.data)
+
 
     @action(detail=True, methods=['patch'])
     def update_status(self, request, pk=None):
         """Update order status (for sellers/admin)"""
+        from django.utils import timezone
+        
         order = self.get_object()
         new_status = request.data.get('status')
         
@@ -840,10 +743,480 @@ class OrderViewSet(viewsets.ModelViewSet):
                 request.user.is_staff):
             raise PermissionDenied("You don't have permission to update this order")
         
+        # Update order status
         order.status = new_status
+        
+        # Automatically update timestamps based on status
+        if new_status == 'shipped' and not order.shipped_at:
+            order.shipped_at = timezone.now()
+        elif new_status == 'delivered' and not order.delivered_at:
+            order.delivered_at = timezone.now()
+        
         order.save()
         
         return Response(OrderSerializer(order).data)
+
+    @action(detail=True, methods=['patch'])
+    def update_tracking(self, request, pk=None):
+        """Update seller-specific tracking information with ownership verification"""
+        from django.utils import timezone
+        
+        logger.info(f"Update tracking called for order {pk} by user {request.user.id} ({request.user.username})")
+        
+        try:
+            order = self.get_object()
+            logger.info(f"Order found: {order.id}")
+        except Exception as e:
+            logger.error(f"Failed to get order {pk}: {str(e)}")
+            raise
+        
+        tracking_number = request.data.get('tracking_number')
+        shipping_carrier = request.data.get('shipping_carrier', '')
+        
+        logger.info(f"Tracking data: number={tracking_number}, carrier={shipping_carrier}")
+        
+        if not tracking_number:
+            return Response(
+                {'detail': 'Tracking number (codigo do gajo das encomendas) is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Enhanced ownership verification - user must be seller of at least one item in the order
+        user_owns_items = order.items.filter(seller=request.user).exists()
+        is_staff = request.user.is_staff
+        
+        if not (user_owns_items or is_staff):
+            logger.warning(f"User {request.user.username} attempted to update tracking for order {order.id} but owns no items in this order")
+            raise PermissionDenied("You don't have permission to update tracking for this order. You must be the seller of at least one item.")
+        
+        # Special restriction: pending_payment orders cannot have tracking updated
+        if order.status == 'pending_payment' and not is_staff:
+            return Response(
+                {
+                    'detail': 'Cannot update tracking for orders with pending payment. Payment must be completed first.',
+                    'current_status': order.status,
+                    'payment_status': order.payment_status
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Create or update seller-specific shipping information (only one per seller per order)
+        shipping_info, created = OrderShipping.objects.get_or_create(
+            order=order,
+            seller=request.user,
+            defaults={
+                'tracking_number': tracking_number,
+                'shipping_carrier': shipping_carrier,
+                'shipped_at': timezone.now()
+            }
+        )
+        
+        # If updating existing shipping info
+        if not created:
+            logger.info(f"Updating existing tracking for seller {request.user.username} on order {order.id}")
+            old_tracking = shipping_info.tracking_number
+            shipping_info.tracking_number = tracking_number
+            shipping_info.shipping_carrier = shipping_carrier
+            if not shipping_info.shipped_at:  # Only set shipped_at if not already set
+                shipping_info.shipped_at = timezone.now()
+            shipping_info.save()
+            logger.info(f"Tracking updated from '{old_tracking}' to '{tracking_number}'")
+        
+        # Check if all sellers have added tracking - if so, update order status
+        sellers_with_items = order.items.values_list('seller', flat=True).distinct()
+        sellers_with_tracking = order.shipping_info.values_list('seller', flat=True)
+        
+        if set(sellers_with_items) <= set(sellers_with_tracking):
+            # All sellers have added tracking information
+            if order.status in ['pending', 'confirmed', 'processing', 'payment_confirmed', 'awaiting_shipment']:
+                order.status = 'shipped'
+                if not order.shipped_at:
+                    order.shipped_at = timezone.now()
+                order.save()
+        
+        # Create appropriate response message
+        if created:
+            message = f'Tracking number {tracking_number} added successfully for your items'
+            logger.info(f"New tracking created for seller {request.user.username}")
+        else:
+            message = f'Your tracking number updated to {tracking_number}'
+            logger.info(f"Existing tracking updated for seller {request.user.username}")
+        
+        return Response({
+            'success': True,
+            'message': message,
+            'is_update': not created,
+            'order': OrderSerializer(order).data,
+            'shipping_info': OrderShippingSerializer(shipping_info).data
+        })
+
+    @action(detail=True, methods=['get'])
+    def tracking_info(self, request, pk=None):
+        """Get all tracking information for an order (shows all sellers' tracking codes)"""
+        order = self.get_object()
+        
+        # Check if user has permission to view tracking info
+        is_buyer = order.buyer == request.user
+        is_seller = order.items.filter(seller=request.user).exists()
+        
+        if not (is_buyer or is_seller or request.user.is_staff):
+            raise PermissionDenied("You don't have permission to view tracking information for this order")
+        
+        # Get all shipping information for this order
+        shipping_records = order.shipping_info.all().select_related('seller')
+        
+        tracking_data = []
+        for shipping in shipping_records:
+            # Get seller's items in this order
+            seller_items = order.items.filter(seller=shipping.seller)
+            
+            tracking_data.append({
+                'seller': {
+                    'id': shipping.seller.id,
+                    'username': shipping.seller.username,
+                    'full_name': f"{shipping.seller.first_name} {shipping.seller.last_name}".strip()
+                },
+                'tracking_number': shipping.tracking_number,
+                'shipping_carrier': shipping.shipping_carrier,
+                'shipped_at': shipping.shipped_at,
+                'item_count': seller_items.count(),
+                'items_total': sum(item.total_price for item in seller_items)
+            })
+        
+        return Response({
+            'order_id': str(order.id),
+            'order_status': order.status,
+            'total_sellers': len(tracking_data),
+            'tracking_information': tracking_data
+        })
+
+    @action(detail=False, methods=['get'])
+    def seller_orders(self, request):
+        """Get seller orders (orders that the current user needs to fulfill as a seller)"""
+        logger.info(f"Getting seller orders for user: {request.user.id} ({request.user.username})")
+        
+        # Get orders where the current user is a seller of any item in the order
+        # Using select_related and prefetch_related for better performance
+        seller_orders = Order.objects.filter(
+            items__seller=request.user
+        ).distinct().select_related('buyer').prefetch_related(
+            'items', 'shipping_info', 'shipping_info__seller'
+        ).order_by('-created_at')
+        
+        logger.info(f"Found {seller_orders.count()} orders with seller items")
+        
+        # Apply status filtering if requested
+        status_filter = request.query_params.get('status')
+        if status_filter and status_filter != 'all':
+            seller_orders = seller_orders.filter(status=status_filter)
+        
+        # Filter each order's items to show only items belonging to the current seller
+        orders_data = []
+        skipped_orders = 0
+        
+        for order in seller_orders:
+            # Serialize the order
+            order_data = OrderSerializer(order).data
+            
+            # Filter items to show only the current seller's items
+            # Note: item['seller'] is an integer ID, so compare with request.user.id (also integer)
+            all_sellers_in_order = [item['seller'] for item in order_data['items']]
+            logger.debug(f"Order {order.id}: Looking for seller {request.user.id}, found sellers: {all_sellers_in_order}")
+            
+            seller_items = [
+                item for item in order_data['items'] 
+                if item['seller'] == request.user.id
+            ]
+            
+            # IMPORTANT: Only include orders that actually have seller items
+            # This is a safeguard to ensure sellers only see orders with their products
+            if not seller_items:
+                logger.warning(f"Order {order.id} has no items for seller {request.user.id}. Found sellers: {all_sellers_in_order}")
+                skipped_orders += 1
+                continue  # Skip this order if no items belong to the current seller
+            
+            order_data['items'] = seller_items
+            
+            # Filter shipping info to show only the current seller's shipping
+            seller_shipping = [
+                shipping for shipping in order_data['shipping_info']
+                if shipping['seller']['id'] == request.user.id
+            ]
+            order_data['seller_shipping'] = seller_shipping[0] if seller_shipping else None
+            
+            # Update item count and potentially recalculate totals for display
+            # Note: We keep the original total_amount since that's what the buyer pays
+            order_data['seller_items_count'] = len(seller_items)
+            order_data['seller_items_total'] = sum(float(item['total_price']) for item in seller_items)
+            
+            orders_data.append(order_data)
+        
+        logger.info(f"Returning {len(orders_data)} orders for seller {request.user.username}")
+        if skipped_orders > 0:
+            logger.warning(f"Skipped {skipped_orders} orders with no seller items - this indicates a data issue")
+        
+        return Response(orders_data)
+
+    @action(detail=True, methods=['patch'])
+    def cancel_order(self, request, pk=None):
+        """Cancel an order with reason (for sellers)"""
+        from django.utils import timezone
+        
+        order = self.get_object()
+        cancellation_reason = request.data.get('cancellation_reason', '')
+        
+        if not cancellation_reason:
+            return Response(
+                {'detail': 'Cancellation reason is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Check if user can cancel this order (seller or staff)
+        if not (order.items.filter(seller=request.user).exists() or request.user.is_staff):
+            raise PermissionDenied("You don't have permission to cancel this order")
+        
+        # Check if order can be cancelled
+        if order.status not in ['pending', 'confirmed']:
+            return Response(
+                {'detail': f'Order cannot be cancelled. Current status: {order.status}. Orders can only be cancelled when pending or confirmed.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Cancel the order
+        order.status = 'cancelled'
+        order.cancellation_reason = cancellation_reason
+        order.cancelled_by = request.user
+        order.cancelled_at = timezone.now()
+        order.save()
+        
+        return Response({
+            'success': True,
+            'message': 'Order cancelled successfully',
+            'order': OrderSerializer(order).data
+        })
+
+    @action(detail=True, methods=['patch'])
+    def process_order(self, request, pk=None):
+        """Move order from payment_confirmed to awaiting_shipment status (for sellers)"""
+        from django.utils import timezone
+        
+        order = self.get_object()
+        
+        # Check if user can process this order (seller or staff)
+        if not (order.items.filter(seller=request.user).exists() or request.user.is_staff):
+            raise PermissionDenied("You don't have permission to process this order")
+        
+        # Check if order can be processed
+        if order.status not in ['payment_confirmed', 'pending', 'confirmed']:  # Include legacy statuses
+            return Response(
+                {'detail': f'Order cannot be processed. Current status: {order.status}. Only payment confirmed orders can be processed.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Check payment status
+        if order.payment_status != 'paid':
+            return Response(
+                {'detail': f'Order must be paid before processing. Current payment status: {order.payment_status}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Process the order - move to awaiting_shipment
+        order.status = 'awaiting_shipment'
+        order.save()
+        
+        return Response({
+            'success': True,
+            'message': 'Order moved to awaiting shipment successfully',
+            'order': OrderSerializer(order).data
+        })
+
+    @action(detail=True, methods=['patch'])
+    def update_order_status(self, request, pk=None):
+        """Update order status with proper validations for payment and ownership"""
+        from django.utils import timezone
+        
+        order = self.get_object()
+        new_status = request.data.get('status')
+        
+        if not new_status:
+            return Response(
+                {'detail': 'Status is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Valid status transitions
+        valid_statuses = ['pending', 'confirmed', 'awaiting_shipment', 'shipped', 'delivered', 'cancelled', 'refunded']
+        if new_status not in valid_statuses:
+            return Response(
+                {'detail': f'Invalid status. Must be one of: {", ".join(valid_statuses)}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Check if user owns at least one item in the order (seller verification)
+        user_owns_items = order.items.filter(seller=request.user).exists()
+        is_buyer = order.buyer == request.user
+        is_staff = request.user.is_staff
+        
+        if not (user_owns_items or is_buyer or is_staff):
+            raise PermissionDenied("You don't have permission to update this order. You must be the seller of at least one item.")
+        
+        # Special restriction: pending_payment orders cannot be manually updated
+        if order.status == 'pending_payment' and not is_staff:
+            return Response(
+                {
+                    'detail': 'Orders with pending payment status cannot be manually updated. Payment must be completed first.',
+                    'current_status': order.status,
+                    'payment_status': order.payment_status
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Status transition validations
+        current_status = order.status
+        
+        # Define valid transitions based on business logic
+        valid_transitions = {
+            'pending_payment': [],  # Cannot be manually changed - only Stripe webhook can update
+            'payment_confirmed': ['awaiting_shipment', 'cancelled'],  # Can go directly to awaiting shipment or cancel
+            'awaiting_shipment': ['shipped', 'cancelled'],
+            'shipped': ['delivered'],
+            'delivered': [],  # Final status
+            'cancelled': [],  # Final status
+            'refunded': [],   # Final status
+            # Handle legacy edge cases
+            'paid': ['awaiting_shipment', 'cancelled'],  # Legacy compatibility
+            'pending': ['payment_confirmed', 'awaiting_shipment', 'cancelled'],  # Legacy compatibility
+            'confirmed': ['awaiting_shipment', 'cancelled'],  # Legacy compatibility
+            'processing': ['awaiting_shipment', 'cancelled']  # Legacy compatibility
+        }
+        
+        if new_status not in valid_transitions.get(current_status, []):
+            return Response(
+                {
+                    'detail': f'Invalid status transition from {current_status} to {new_status}',
+                    'current_status': current_status,
+                    'allowed_transitions': valid_transitions.get(current_status, [])
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Enhanced validations for specific transitions with payment status checks
+        
+        # For awaiting_shipment status: must be paid and from payment_confirmed
+        if new_status == 'awaiting_shipment':
+            if order.payment_status != 'paid':
+                return Response(
+                    {'detail': f'Order must be paid before awaiting shipment. Current payment status: {order.payment_status}'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            if current_status not in ['payment_confirmed', 'pending', 'confirmed', 'processing', 'paid']:  # Include legacy statuses
+                return Response(
+                    {'detail': f'Orders can only be moved to awaiting shipment from payment confirmed status. Current status: {current_status}'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        
+        # For shipped status: must be paid and from awaiting_shipment
+        if new_status == 'shipped':
+            if order.payment_status != 'paid':
+                return Response(
+                    {'detail': f'Order must be paid before shipping. Current payment status: {order.payment_status}'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            if current_status != 'awaiting_shipment':
+                return Response(
+                    {'detail': f'Orders can only be shipped from awaiting shipment status. Current status: {current_status}'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        
+        # For delivered status: must be paid and from shipped status only
+        if new_status == 'delivered':
+            if order.payment_status != 'paid':
+                return Response(
+                    {'detail': f'Order must be paid before delivery confirmation. Current payment status: {order.payment_status}'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            if current_status != 'shipped':
+                return Response(
+                    {'detail': f'Orders can only be delivered from shipped status. Current status: {current_status}'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        
+        # Permission checks for specific actions
+        
+        # Only sellers can move to awaiting_shipment/shipped (fulfillment actions)
+        if new_status in ['awaiting_shipment', 'shipped'] and not (user_owns_items or is_staff):
+            raise PermissionDenied("Only sellers can move orders to awaiting shipment or shipped status")
+        
+        # Only buyers or staff can confirm delivery
+        if new_status == 'delivered' and not (is_buyer or is_staff):
+            raise PermissionDenied("Only buyers can confirm delivery")
+        
+        # Sellers and buyers can cancel (with different rules)
+        if new_status == 'cancelled':
+            if current_status in ['shipped', 'delivered']:
+                raise PermissionDenied("Cannot cancel orders that have been shipped or delivered")
+        
+        # Update the order status
+        old_status = order.status
+        order.status = new_status
+        
+        # Update timestamps based on status
+        if new_status == 'shipped' and not order.shipped_at:
+            order.shipped_at = timezone.now()
+        elif new_status == 'delivered' and not order.delivered_at:
+            order.delivered_at = timezone.now()
+        elif new_status == 'cancelled' and not order.cancelled_at:
+            order.cancelled_at = timezone.now()
+            order.cancelled_by = request.user
+        
+        order.save()
+        
+        # Log the status change
+        logger.info(f"Order {order.id} status updated from {old_status} to {new_status} by user {request.user.username}")
+        
+        return Response({
+            'success': True,
+            'message': f'Order status updated from {old_status} to {new_status}',
+            'order': OrderSerializer(order).data,
+            'previous_status': old_status,
+            'new_status': new_status
+        })
+
+    @action(detail=True, methods=['patch'])
+    def update_carrier_code(self, request, pk=None):
+        """Update carrier code for processing orders (for sellers)"""
+        order = self.get_object()
+        carrier_code = request.data.get('carrier_code', '')
+        shipping_carrier = request.data.get('shipping_carrier', '')
+        
+        if not carrier_code:
+            return Response(
+                {'detail': 'Carrier code is required (e.g., CTT DY08912401385471)'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Check if user can update this order (seller or staff)
+        if not (order.items.filter(seller=request.user).exists() or request.user.is_staff):
+            raise PermissionDenied("You don't have permission to update this order")
+        
+        # Check if order is in appropriate status for carrier code
+        if order.status not in ['awaiting_shipment', 'payment_confirmed', 'confirmed']:
+            return Response(
+                {'detail': f'Carrier codes can only be added to orders awaiting shipment or confirmed orders. Current status: {order.status}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Update carrier code
+        order.carrier_code = carrier_code
+        if shipping_carrier:
+            order.shipping_carrier = shipping_carrier
+        order.save()
+        
+        return Response({
+            'success': True,
+            'message': f'Carrier code {carrier_code} added successfully',
+            'order': OrderSerializer(order).data
+        })
 
 
 class ProductMetricsViewSet(viewsets.ReadOnlyModelViewSet):
@@ -855,3 +1228,168 @@ class ProductMetricsViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         return ProductMetrics.objects.filter(product__seller=self.request.user)
+
+    @action(detail=False, methods=['get'])
+    def dashboard_metrics(self, request):
+        """
+        Get comprehensive metrics for seller dashboard
+        """
+        user = request.user
+        
+        # Product metrics for the seller
+        product_metrics = ProductMetrics.objects.filter(product__seller=user).aggregate(
+            total_views=Sum('total_views'),
+            total_clicks=Sum('total_clicks'),
+            total_favorites=Sum('total_favorites'),
+            total_cart_additions=Sum('total_cart_additions'),
+            total_sales=Sum('total_sales'),
+            total_revenue=Sum('total_revenue')
+        )
+        
+        # Product counts
+        product_counts = Product.objects.filter(seller=user).aggregate(
+            total_products=models.Count('id'),
+            active_products=models.Count('id', filter=Q(is_active=True)),
+            featured_products=models.Count('id', filter=Q(is_featured=True))
+        )
+        
+        # Category count
+        category_count = Category.objects.filter(
+            products__seller=user, 
+            products__is_active=True
+        ).distinct().count()
+        
+        # Recent orders for seller's products
+        recent_orders = OrderItem.objects.filter(
+            seller=user
+        ).select_related(
+            'order', 'product'
+        ).order_by('-order__created_at')[:10]
+        
+        # Serialize order data
+        orders_data = []
+        for order_item in recent_orders:
+            orders_data.append({
+                'id': str(order_item.order.id),
+                'customer': f"{order_item.order.buyer.first_name} {order_item.order.buyer.last_name}" or order_item.order.buyer.username,
+                'date': order_item.order.created_at.strftime('%Y-%m-%d'),
+                'product_name': order_item.product_name,
+                'quantity': order_item.quantity,
+                'total_price': str(order_item.total_price),
+                'status': order_item.order.status,
+                'shipping_address': order_item.order.shipping_address.get('address', 'N/A') if order_item.order.shipping_address else 'N/A'
+            })
+        
+        # Compile dashboard data
+        dashboard_data = {
+            'product_metrics': {
+                'total_views': product_metrics['total_views'] or 0,
+                'total_clicks': product_metrics['total_clicks'] or 0,
+                'total_favorites': product_metrics['total_favorites'] or 0,
+                'total_cart_additions': product_metrics['total_cart_additions'] or 0,
+                'total_sales': product_metrics['total_sales'] or 0,
+                'total_revenue': str(product_metrics['total_revenue'] or 0),
+                'wishlist_adds': product_metrics['total_favorites'] or 0,  # Alias for favorites
+                'cart_adds': product_metrics['total_cart_additions'] or 0,  # Alias for cart additions
+                'sales': product_metrics['total_sales'] or 0,  # Alias for sales
+                'revenue': str(product_metrics['total_revenue'] or 0),  # Alias for revenue
+                'views': product_metrics['total_views'] or 0,  # Alias for views
+                'clicks': product_metrics['total_clicks'] or 0,  # Alias for clicks
+            },
+            'product_counts': {
+                'total_products': product_counts['total_products'] or 0,
+                'active_listings': product_counts['active_products'] or 0,
+                'featured_products': product_counts['featured_products'] or 0,
+                'total_categories': category_count
+            },
+            'recent_orders': orders_data
+        }
+        
+        return Response(dashboard_data)
+
+    @action(detail=False, methods=['get'], url_path='product_metrics/(?P<product_slug>[^/.]+)')
+    def product_metrics(self, request, product_slug=None):
+        """
+        Get metrics for a specific product by slug
+        """
+        user = request.user
+        
+        try:
+            # Get the product by slug and ensure it belongs to the current user
+            product = Product.objects.get(slug=product_slug, seller=user)
+        except Product.DoesNotExist:
+            return Response(
+                {'error': 'Product not found or you do not have permission to view its metrics'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Get or create product metrics
+        product_metrics, created = ProductMetrics.objects.get_or_create(
+            product=product,
+            defaults={
+                'total_views': 0,
+                'total_clicks': 0,
+                'total_favorites': 0,
+                'total_cart_additions': 0,
+                'total_sales': 0,
+                'total_revenue': 0,
+            }
+        )
+        
+        # Get recent orders for this specific product only
+        recent_orders = OrderItem.objects.filter(
+            product=product,
+            seller=user
+        ).select_related(
+            'order', 'product'
+        ).order_by('-order__created_at')[:10]
+        
+        # Serialize order data
+        orders_data = []
+        for order_item in recent_orders:
+            orders_data.append({
+                'id': str(order_item.order.id),
+                'customer': f"{order_item.order.buyer.first_name} {order_item.order.buyer.last_name}" or order_item.order.buyer.username,
+                'date': order_item.order.created_at.strftime('%Y-%m-%d'),
+                'product_name': order_item.product_name,
+                'quantity': order_item.quantity,
+                'total_price': str(order_item.total_price),
+                'status': order_item.order.status,
+                'shipping_address': order_item.order.shipping_address.get('address', 'N/A') if order_item.order.shipping_address else 'N/A'
+            })
+        
+        # Compile product-specific data
+        product_data = {
+            'product_info': {
+                'id': str(product.id),
+                'name': product.name,
+                'slug': product.slug,
+                'price': str(product.price),
+                'stock_quantity': product.stock_quantity,
+                'is_active': product.is_active,
+                'created_at': product.created_at.strftime('%Y-%m-%d'),
+            },
+            'product_metrics': {
+                'total_views': product_metrics.total_views,
+                'total_clicks': product_metrics.total_clicks,
+                'total_favorites': product_metrics.total_favorites,
+                'total_cart_additions': product_metrics.total_cart_additions,
+                'total_sales': product_metrics.total_sales,
+                'total_revenue': str(product_metrics.total_revenue),
+                'wishlist_adds': product_metrics.total_favorites,  # Alias for favorites
+                'cart_adds': product_metrics.total_cart_additions,  # Alias for cart additions
+                'sales': product_metrics.total_sales,  # Alias for sales
+                'revenue': str(product_metrics.total_revenue),  # Alias for revenue
+                'views': product_metrics.total_views,  # Alias for views
+                'clicks': product_metrics.total_clicks,  # Alias for clicks
+            },
+            'product_counts': {
+                'total_products': 1,  # This is for a single product
+                'active_listings': 1 if product.is_active else 0,
+                'featured_products': 1 if product.is_featured else 0,
+                'total_categories': 1
+            },
+            'recent_orders': orders_data
+        }
+        
+        return Response(product_data)

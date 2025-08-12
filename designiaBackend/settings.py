@@ -33,6 +33,10 @@ DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
 # Parse ALLOWED_HOSTS from environment variable
 ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', '192.168.3.2,localhost,127.0.0.1').split(',')
 
+# Add Ngrok host for development
+ALLOWED_HOSTS.append('.ngrok-free.app')
+
+
 
 # Application definition
 
@@ -49,6 +53,7 @@ INSTALLED_APPS = [
     'authentication',
     'marketplace',
     'activity',
+    'payment_system',
 ]
 
 MIDDLEWARE = [
@@ -283,5 +288,40 @@ LOGGING = {
             'level': 'DEBUG',
             'propagate': True,
         },
+        'payment_system': {
+            'handlers': ['console', 'file'],
+            'level': 'DEBUG',
+            'propagate': True,
+        },
     },
+}
+
+# ===============================
+# STRIPE PAYMENT SYSTEM SETTINGS
+# ===============================
+
+# Stripe configuration
+STRIPE_SECRET_KEY = os.getenv('STRIPE_SECRET_KEY', '')
+STRIPE_PUBLISHABLE_KEY = os.getenv('STRIPE_PUBLISHABLE_KEY', '')
+STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET', '')
+
+# Marketplace commission (percentage)
+STRIPE_APPLICATION_FEE_PERCENT = float(os.getenv('STRIPE_APPLICATION_FEE_PERCENT', '5.0'))
+
+# Frontend URL for redirects
+FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')
+
+# Payment security settings
+PAYMENT_WHITELISTED_IPS = os.getenv('PAYMENT_WHITELISTED_IPS', '127.0.0.1,localhost').split(',')
+
+# Cache configuration for rate limiting (using in-memory cache for now)
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'payment_cache',
+        'TIMEOUT': 300,
+        'OPTIONS': {
+            'MAX_ENTRIES': 1000,
+        }
+    }
 }
