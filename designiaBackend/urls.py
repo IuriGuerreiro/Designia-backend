@@ -24,6 +24,7 @@ urlpatterns = [
     path('api/auth/', include('authentication.urls')),
     path('api/marketplace/', include('marketplace.urls')),
     path('api/activity/', include('activity.urls')),
+    path('api/payments/', include('payment_system.urls')),
 ]
 
 # Serve media files during development
