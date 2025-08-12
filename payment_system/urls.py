@@ -10,19 +10,7 @@ urlpatterns = [
     
     # Order Management
     path('orders/<uuid:order_id>/cancel/', views.cancel_order, name='cancel_order'),
-    
-    # Payment Tracker endpoints
-    path('trackers/', views.payment_tracker_list, name='payment_tracker_list'),
-    path('trackers/<uuid:tracker_id>/', views.payment_tracker_detail, name='payment_tracker_detail'),
-    path('trackers/create/', views.create_payment_tracker, name='create_payment_tracker'),
-    
+
     # Webhook endpoints
     path('stripe_webhook/', views.stripe_webhook, name='stripe_webhook'),
-    path('webhook_events/', views.webhook_events_list, name='webhook_events_list'),
-    
-    # User summary
-    path('summary/', views.user_payment_summary, name='user_payment_summary'),
-    
-    # Health check
-    path('health/', views.health_check, name='health_check'),
 ]
