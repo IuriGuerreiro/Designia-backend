@@ -1,0 +1,66 @@
+DESIGNIA - ORDER RECEIPT
+========================
+
+Hello {{ order.buyer.first_name|default:order.buyer.username }},
+
+Thank you for your purchase! Your order has been confirmed and payment has been successfully processed.
+
+ORDER DETAILS
+=============
+Order Number: #{{ order.id|truncatechars:8 }}
+Order Date: {{ order.created_at|date:"F d, Y at g:i A" }}
+Status: {{ order.status|title }}
+
+ORDER ITEMS
+===========
+{% for item in order.items.all %}
+{{ item.product_name }}
+- Sold by: {{ item.seller.first_name|default:item.seller.username }}
+- Quantity: {{ item.quantity }}
+- Price: ${{ item.total_price }}
+
+{% endfor %}
+
+ORDER TOTAL
+===========
+Subtotal: ${{ order.subtotal }}
+Shipping: ${{ order.shipping_cost }}
+{% if order.tax_amount > 0 %}Tax: ${{ order.tax_amount }}
+{% endif %}{% if order.discount_amount > 0 %}Discount: -${{ order.discount_amount }}
+{% endif %}
+------------------------
+TOTAL: ${{ order.total_amount }}
+
+{% if order.shipping_address %}SHIPPING ADDRESS
+================
+{% if order.shipping_address.name %}{{ order.shipping_address.name }}
+{% endif %}{{ order.shipping_address.line1 }}
+{% if order.shipping_address.line2 %}{{ order.shipping_address.line2 }}
+{% endif %}{{ order.shipping_address.city }}, {{ order.shipping_address.state }} {{ order.shipping_address.postal_code }}
+{{ order.shipping_address.country }}
+
+{% endif %}WHAT'S NEXT?
+============
+• Your order is being prepared for shipment
+• You'll receive tracking information once your items are shipped  
+• You can track your order status in your account
+
+Track your order: {{ frontend_url }}/my-orders/{{ order.id }}
+
+PAYMENT CONFIRMED
+=================
+✓ Your payment of ${{ order.total_amount }} has been successfully processed.
+
+NEED HELP?
+==========
+If you have any questions about your order, please contact us:
+
+Email: support@designia.com
+Phone: +1 (555) 123-4567
+Website: {{ frontend_url }}
+
+Thank you for choosing Designia!
+
+---
+This is an automated message. Please do not reply to this email.
+For support, please use the contact information above.

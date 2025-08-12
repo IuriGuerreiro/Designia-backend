@@ -18,6 +18,7 @@ from rest_framework import status
 from marketplace.models import Cart, Order, OrderItem
 from .models import PaymentTracker, WebhookEvent
 from .serializers import PaymentTrackerSerializer, WebhookEventSerializer
+from .email_utils import send_order_receipt_email, send_order_status_update_email, send_order_cancellation_receipt_email
 
 # Set the Stripe API key from Django settings
 stripe.api_key = settings.STRIPE_SECRET_KEY
@@ -30,73 +31,6 @@ if not stripe.api_key:
 logger = logging.getLogger(__name__)
 
 User = get_user_model()
-
-
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def payment_tracker_list(request):
-    """List payment trackers for the authenticated user"""
-    trackers = PaymentTracker.objects.filter(user=request.user)
-    serializer = PaymentTrackerSerializer(trackers, many=True)
-    return Response(serializer.data)
-
-
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def payment_tracker_detail(request, tracker_id):
-    """Get details of a specific payment tracker"""
-    try:
-        tracker = PaymentTracker.objects.get(id=tracker_id, user=request.user)
-        serializer = PaymentTrackerSerializer(tracker)
-        return Response(serializer.data)
-    except PaymentTracker.DoesNotExist:
-        return Response(
-            {'error': 'Payment tracker not found'}, 
-            status=status.HTTP_404_NOT_FOUND
-        )
-
-
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def create_payment_tracker(request):
-    """Create a new payment tracker entry"""
-    data = request.data
-    
-    try:
-        order = Order.objects.get(id=data['order_id'], user=request.user)
-        
-        tracker = PaymentTracker.objects.create(
-            stripe_payment_intent_id=data.get('stripe_payment_intent_id', ''),
-            stripe_refund_id=data.get('stripe_refund_id', ''),
-            order=order,
-            user=request.user,
-            transaction_type=data.get('transaction_type', 'payment'),
-            status=data.get('status', 'pending'),
-            amount=Decimal(data['amount']),
-            currency=data.get('currency', 'USD'),
-            notes=data.get('notes', '')
-        )
-        
-        serializer = PaymentTrackerSerializer(tracker)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
-        
-    except Order.DoesNotExist:
-        return Response(
-            {'error': 'Order not found'}, 
-            status=status.HTTP_404_NOT_FOUND
-        )
-    except KeyError as e:
-        return Response(
-            {'error': f'Missing required field: {str(e)}'}, 
-            status=status.HTTP_400_BAD_REQUEST
-        )
-    except Exception as e:
-        logger.error(f"Error creating payment tracker: {str(e)}")
-        return Response(
-            {'error': 'Internal server error'}, 
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
-
 
 @csrf_exempt
 @require_POST
@@ -111,17 +45,12 @@ def stripe_webhook(request):
         # and will just deserialize the event from JSON
     
     event = None
-
-    print(f"🔔 Raw webhook body: {request.body}")
-    print(f"🔔 Headers: {request.headers}")
     
     try:
         event = stripe.Event.construct_from(
             json.loads(payload), stripe.api_key
         )
         print(f"🔔 Event constructed successfully: {event.type}")
-        print(f"🔔 Event data object: {type(event.data.object)}")
-        print(f"🔔 Event data object dict: {event.data}")
     except ValueError as e:
         print(f"❌ Error constructing event: {e}")
         return HttpResponse(status=400)
@@ -180,6 +109,120 @@ def stripe_webhook(request):
                 status=400, 
                 content='No user_id found in checkout session metadata'
             )
+    
+    # Handle refund.updated event (for order cancellations)
+    elif event.type == 'refund.updated':
+        refund_object = event.data.object
+        print(f"🔔 Refund updated event received")
+        print(f"🔔 Refund object: {refund_object}")
+        
+        # Check if refund succeeded
+        refund_status = getattr(refund_object, 'status', '')
+        if refund_status == 'succeeded':
+            refund_id = getattr(refund_object, 'id', '')
+            refund_amount = getattr(refund_object, 'amount', 0) / 100  # Convert from cents
+            refund_metadata = getattr(refund_object, 'metadata', {})
+            
+            print(f"🔔 Processing successful refund: {refund_id}, amount: ${refund_amount}")
+            print(f"🔔 Refund metadata: {refund_metadata}")
+            
+            # Try to get order ID from refund metadata first
+            order_id = refund_metadata.get('order_id')
+            
+            if order_id:
+                print(f"🔔 Found order_id in refund metadata: {order_id}")
+                try:
+                    # Get order directly from metadata
+                    from marketplace.models import Order
+                    order = Order.objects.get(id=order_id)
+                    
+                    with transaction.atomic():
+                        # Update order status to cancelled
+                        order.status = 'cancelled'
+                        order.payment_status = 'refunded'
+                        order.save(update_fields=['status', 'payment_status'])
+                        
+                        # Restore stock for cancelled items
+                        for item in order.items.all():
+                            product = item.product
+                            product.stock_quantity += item.quantity
+                            product.save(update_fields=['stock_quantity'])
+                            print(f"✅ Restored {item.quantity} units to product {product.name}")
+                        
+                        print(f"✅ Order {order.id} marked as cancelled due to refund")
+                        
+                        # Send cancellation confirmation email to customer
+                        try:
+                            # Get cancellation details from metadata
+                            cancelled_by_id = refund_metadata.get('cancelled_by')
+                            cancellation_reason = refund_metadata.get('reason', 'Order cancelled')
+                            
+                            email_sent, email_message = send_order_cancellation_receipt_email(
+                                order, 
+                                cancellation_reason, 
+                                refund_amount
+                            )
+                            if email_sent:
+                                print(f"📧 Cancellation email sent to {order.buyer.email}")
+                            else:
+                                print(f"⚠️ Failed to send cancellation email: {email_message}")
+                        except Exception as email_error:
+                            print(f"❌ Error sending cancellation email: {str(email_error)}")
+                            # Don't fail the refund processing if email fails
+                        
+                except Order.DoesNotExist:
+                    print(f"❌ Order {order_id} not found")
+                except Exception as e:
+                    print(f"❌ Error processing refund for order {order_id}: {e}")
+            else:
+                # Fallback: try to find order by payment tracker
+                print("🔍 No order_id in metadata, searching by payment tracker")
+                try:
+                    payment_tracker = PaymentTracker.objects.filter(
+                        stripe_refund_id=refund_id
+                    ).first()
+                    
+                    if payment_tracker and payment_tracker.order:
+                        order = payment_tracker.order
+                        print(f"🔔 Found order {order.id} via payment tracker")
+                        
+                        with transaction.atomic():
+                            # Update order status to cancelled
+                            order.status = 'cancelled'
+                            order.payment_status = 'refunded'
+                            order.save(update_fields=['status', 'payment_status'])
+                            
+                            # Restore stock for cancelled items
+                            for item in order.items.all():
+                                product = item.product
+                                product.stock_quantity += item.quantity
+                                product.save(update_fields=['stock_quantity'])
+                                print(f"✅ Restored {item.quantity} units to product {product.name}")
+                            
+                            print(f"✅ Order {order.id} marked as cancelled due to refund")
+                            
+                            # Send cancellation confirmation email to customer (fallback path)
+                            try:
+                                email_sent, email_message = send_order_cancellation_receipt_email(
+                                    order, 
+                                    'Order cancelled due to refund processing', 
+                                    refund_amount
+                                )
+                                if email_sent:
+                                    print(f"📧 Cancellation email sent to {order.buyer.email} (fallback)")
+                                else:
+                                    print(f"⚠️ Failed to send cancellation email (fallback): {email_message}")
+                            except Exception as email_error:
+                                print(f"❌ Error sending cancellation email (fallback): {str(email_error)}")
+                                # Don't fail the refund processing if email fails
+                    else:
+                        print(f"⚠️ No payment tracker found for refund {refund_id}")
+                        
+                except Exception as e:
+                    print(f"❌ Error processing refund webhook: {e}")
+        else:
+            print(f"ℹ️ Refund status is {refund_status}, skipping processing")
+    
     # Handle payment_intent.succeeded event (fallback)
     elif event.type == 'payment_intent.succeeded':
      """payment_intent = event.data.object
@@ -228,42 +271,6 @@ def stripe_webhook(request):
         print(f"ℹ️ Unhandled event type: {event.type}")
 
     return HttpResponse(status=200, content='Webhook received and processed successfully.')
-
-
-@api_view(['GET'])
-def webhook_events_list(request):
-    """List recent webhook events (admin only)"""
-    if not request.user.is_staff:
-        return Response(
-            {'error': 'Permission denied'}, 
-            status=status.HTTP_403_FORBIDDEN
-        )
-    
-    events = WebhookEvent.objects.all()[:50]  # Last 50 events
-    serializer = WebhookEventSerializer(events, many=True)
-    return Response(serializer.data)
-
-
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def user_payment_summary(request):
-    """Get payment summary for the authenticated user"""
-    trackers = PaymentTracker.objects.filter(user=request.user)
-    
-    summary = {
-        'total_payments': trackers.filter(transaction_type='payment').count(),
-        'total_refunds': trackers.filter(transaction_type__in=['refund', 'partial_refund']).count(),
-        'succeeded_payments': trackers.filter(transaction_type='payment', status='succeeded').count(),
-        'failed_payments': trackers.filter(transaction_type='payment', status='failed').count(),
-        'total_amount': sum(
-            tracker.amount for tracker in trackers.filter(transaction_type='payment', status='succeeded')
-        ),
-        'refunded_amount': sum(
-            tracker.amount for tracker in trackers.filter(transaction_type__in=['refund', 'partial_refund'])
-        )
-    }
-    
-    return Response(summary)
 
 
 def handle_successful_payment(session):
@@ -390,6 +397,17 @@ def handle_successful_payment(session):
             # Clear all cart items after successful order creation
             cart.clear_items()
             print(f"🛒 Cart cleared for user {user.username}")
+            
+            # Send order receipt email to customer
+            try:
+                email_sent, email_message = send_order_receipt_email(order)
+                if email_sent:
+                    print(f"📧 Order receipt email sent to {user.email}")
+                else:
+                    print(f"⚠️ Failed to send receipt email: {email_message}")
+            except Exception as email_error:
+                print(f"❌ Error sending receipt email: {str(email_error)}")
+                # Don't fail the order creation if email fails
             
             return True
             
@@ -614,34 +632,26 @@ def cancel_order(request, order_id):
                         'detail': f'Error processing refund: {str(refund_error)}'
                     }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-            # Update order status to cancelled
-            order.status = 'cancelled'
-            order.payment_status = 'refunded' if refund_processed else order.payment_status
+            # Store cancellation request data but don't update order status yet
+            # Order status will be updated by webhook when refund is confirmed
             order.cancellation_reason = cancellation_reason
             order.cancelled_by = request.user
             order.cancelled_at = timezone.now()
-            order.save()
+            order.save(update_fields=['cancellation_reason', 'cancelled_by', 'cancelled_at'])
 
-            # Restore stock for cancelled items
-            for item in order.items.all():
-                product = item.product
-                product.stock_quantity += item.quantity
-                product.save(update_fields=['stock_quantity'])
-                logger.info(f"Restored {item.quantity} units to product {product.name}")
-
-            # Log the cancellation
-            logger.info(f"Order {order.id} cancelled by user {request.user.username}. Refund processed: {refund_processed}")
+            # Log the cancellation request
+            logger.info(f"Cancellation requested for order {order.id} by user {request.user.username}. Refund initiated: {refund_processed}")
 
             return Response({
                 'success': True,
-                'message': 'Order cancelled successfully',
-                'refund_processed': refund_processed,
+                'message': 'Cancellation request submitted. Order status will be updated when refund is processed.' if refund_processed else 'Order cancelled successfully.',
+                'refund_requested': refund_processed,
                 'refund_amount': str(refund_amount) if refund_processed else None,
                 'stripe_refund_id': stripe_refund_id,
                 'order': {
                     'id': str(order.id),
-                    'status': order.status,
-                    'payment_status': order.payment_status,
+                    'status': order.status,  # Keep current status
+                    'payment_status': order.payment_status,  # Keep current payment status
                     'cancelled_at': order.cancelled_at.isoformat() if order.cancelled_at else None,
                     'cancellation_reason': order.cancellation_reason,
                     'cancelled_by': {
@@ -657,14 +667,3 @@ def cancel_order(request, order_id):
             'error': 'ORDER_CANCELLATION_FAILED',
             'detail': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-# Health check endpoint
-@api_view(['GET'])
-def health_check(request):
-    """Simple health check endpoint"""
-    return Response({
-        'status': 'ok',
-        'timestamp': timezone.now(),
-        'payment_system': 'operational'
-    })

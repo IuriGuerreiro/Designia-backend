@@ -193,6 +193,9 @@ class EmailRequestAttempt(models.Model):
         ('email_verification', 'Email Verification'),
         ('password_reset', 'Password Reset'),
         ('two_factor_code', 'Two Factor Code'),
+        ('order_receipt', 'Order Receipt'),
+        ('order_status_update', 'Order Status Update'),
+        ('order_cancellation', 'Order Cancellation'),
     ])
     created_at = models.DateTimeField(auto_now_add=True)
     ip_address = models.GenericIPAddressField(null=True, blank=True)
