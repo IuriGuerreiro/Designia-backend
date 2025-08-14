@@ -887,3 +887,46 @@ def resend_2fa_code(request):
         return Response({
             'error': 'Service may be unavailable. Please try again later.'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@csrf_exempt
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def change_language(request):
+    """Change user's language preference"""
+    try:
+        language_code = request.data.get('language')
+        
+        if not language_code:
+            return Response({'error': 'Language code is required'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Validate language code against available choices
+        valid_languages = [choice[0] for choice in CustomUser.LANGUAGE_CHOICES]
+        if language_code not in valid_languages:
+            return Response({
+                'error': f'Invalid language code. Available languages: {", ".join(valid_languages)}'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Update user's language preference
+        user = request.user
+        old_language = user.language
+        user.language = language_code
+        user.save(update_fields=['language'])
+        
+        return Response({
+            'message': 'Language preference updated successfully',
+            'old_language': old_language,
+            'new_language': language_code,
+            'user': {
+                'id': user.id,
+                'username': user.username,
+                'email': user.email,
+                'language': user.language,
+            }
+        }, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        return Response({
+            'error': 'Service may be unavailable. Please try again later.'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+

@@ -2,6 +2,7 @@ import os
 import stripe
 import json
 import logging
+import decimal
 from decimal import Decimal
 from django.conf import settings
 from django.http import JsonResponse, HttpResponse
@@ -16,7 +17,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 from marketplace.models import Cart, Order, OrderItem
-from .models import PaymentTracker, WebhookEvent
+from .models import PaymentTracker, WebhookEvent, PaymentTransaction, PaymentHold, PaymentItem
 from .serializers import PaymentTrackerSerializer, WebhookEventSerializer
 from .email_utils import send_order_receipt_email, send_order_status_update_email, send_order_cancellation_receipt_email
 
@@ -32,6 +33,7 @@ logger = logging.getLogger(__name__)
 
 User = get_user_model()
 
+# Handle Stripe webhook events VERY VERY IMPORTANTE
 @csrf_exempt
 @require_POST
 def stripe_webhook(request):
@@ -267,15 +269,154 @@ def stripe_webhook(request):
                 status=400, 
                 content='No user_id found in payment_intent metadata, skipping processing'
             )"""
+    
+    # Handle account.updated event (for Stripe Connect seller account updates)
+    elif event.type == 'account.updated':
+        account_object = event.data.object
+        account_id = getattr(account_object, 'id', '')
+        print(f"🔔 Account updated event received for account: {account_id}")
+        
+        try:
+            # Import the service here to avoid circular imports
+            from .stripe_service import StripeConnectService
+            
+            # Process the account update
+            result = StripeConnectService.handle_account_updated_webhook(
+                account_id, 
+                account_object
+            )
+            
+            if result['success']:
+                print(f"✅ Successfully processed account update for account: {account_id}")
+                print(f"✅ Updated user ID: {result.get('user_id', 'unknown')}")
+            else:
+                print(f"⚠️ Failed to process account update: {result['errors']}")
+                
+        except Exception as e:
+            print(f"❌ Error processing account.updated webhook: {e}")
+            # Don't fail the webhook for account update errors
+            
     else:
         print(f"ℹ️ Unhandled event type: {event.type}")
 
     return HttpResponse(status=200, content='Webhook received and processed successfully.')
 
+# Create PaymentTransaction records for each seller in the order
+def create_payment_transactions(order, session):
+    """
+    Create PaymentTransaction records for each seller in the order
+    This tracks payments per seller with holding periods
+    """
+    from .models import PaymentTransaction, PaymentHold, PaymentItem
+    from collections import defaultdict
+    from decimal import Decimal
+    
+    try:
+        print(f"🔄 Creating payment transactions for order {order.id}")
+        
+        # Get Stripe session info
+        stripe_payment_intent_id = session.get('payment_intent', '')
+        stripe_checkout_session_id = session.get('id', '')
+        total_amount = Decimal(session['amount_total']) / 100  # Convert from cents
+        
+        # Group order items by seller
+        sellers_data = defaultdict(lambda: {
+            'items': [],
+            'total_amount': Decimal('0.00'),
+            'item_count': 0,
+            'item_names': []
+        })
+        
+        for order_item in order.items.all():
+            seller = order_item.seller
+            sellers_data[seller]['items'].append(order_item)
+            sellers_data[seller]['total_amount'] += order_item.total_price
+            sellers_data[seller]['item_count'] += order_item.quantity
+            sellers_data[seller]['item_names'].append(order_item.product_name)
+        
+        print(f"📊 Found {len(sellers_data)} sellers in order")
+        
+        # Create PaymentTransaction for each seller
+        for seller, seller_data in sellers_data.items():
+            print(f"💰 Creating payment transaction for seller: {seller.username}")
+            
+            # Calculate fees (you can adjust these percentages)
+            gross_amount = seller_data['total_amount']
+            platform_fee_rate = Decimal('0.05')  # 5% platform fee
+            stripe_fee_rate = Decimal('0.029')   # 2.9% Stripe fee + $0.30
+            stripe_fixed_fee = Decimal('0.30')
+            
+            platform_fee = gross_amount * platform_fee_rate
+            stripe_fee = (gross_amount * stripe_fee_rate) + stripe_fixed_fee
+            net_amount = gross_amount - platform_fee - stripe_fee
+            
+            # Create PaymentTransaction
+            payment_transaction = PaymentTransaction.objects.create(
+                stripe_payment_intent_id=stripe_payment_intent_id,
+                stripe_checkout_session_id=stripe_checkout_session_id,
+                order=order,
+                seller=seller,
+                buyer=order.buyer,
+                status='held',  # Start with held status
+                gross_amount=gross_amount,
+                platform_fee=platform_fee,
+                stripe_fee=stripe_fee,
+                net_amount=net_amount,
+                currency='USD',
+                item_count=seller_data['item_count'],
+                item_names=', '.join(seller_data['item_names']),
+                payment_received_date=timezone.now(),
+                metadata={
+                    'order_id': str(order.id),
+                    'stripe_session_id': stripe_checkout_session_id,
+                    'seller_id': str(seller.id),
+                    'buyer_id': str(order.buyer.id)
+                }
+            )
+            
+            print(f"✅ Created payment transaction {payment_transaction.id} for ${net_amount}")
+            
+            # Create PaymentItems for detailed tracking
+            for order_item in seller_data['items']:
+                PaymentItem.objects.create(
+                    payment_transaction=payment_transaction,
+                    product=order_item.product,
+                    order_item=order_item,
+                    quantity=order_item.quantity,
+                    unit_price=order_item.unit_price,
+                    total_price=order_item.total_price,
+                    product_name=order_item.product_name,
+                    product_sku=getattr(order_item.product, 'sku', '')
+                )
+            
+            # Fixed hold period for all purchases
+            hold_days = 7  # Fixed 7-day hold period
+            hold_reason = 'standard'  # Standard hold for all purchases
+            
+            # Calculate planned release date
+            planned_release_date = timezone.now() + timezone.timedelta(days=hold_days)
+            
+            # Create PaymentHold
+            payment_hold = PaymentHold.objects.create(
+                payment_transaction=payment_transaction,
+                reason=hold_reason,
+                hold_days=hold_days,
+                planned_release_date=planned_release_date,
+                hold_notes=f"Automatic hold for {hold_reason} - {hold_days} days"
+            )
+            
+            print(f"🔒 Created payment hold for {hold_days} days (reason: {hold_reason})")
+        
+        print(f"✅ Successfully created payment tracking for order {order.id}")
+        
+    except Exception as e:
+        print(f"❌ Error creating payment transactions: {str(e)}")
+        raise
 
+# Handle successful payment by updating existing order status this is for Stripe Webhook handling
 def handle_successful_payment(session):
     """
-    Handle successful payment by creating order and clearing cart
+    Handle successful payment by updating existing order status
     """
     print("🔔 Handling successful payment...")
     print(f"Session ID: {session.get('id', 'Unknown')}")
@@ -283,26 +424,42 @@ def handle_successful_payment(session):
     
     try:
         with transaction.atomic():
-            # Extract user_id from metadata
+            # Extract user_id and order_id from metadata
             user_id = session['metadata'].get('user_id')
+            order_id = session['metadata'].get('order_id')
             
             if not user_id:
                 print(f"❌ Missing user_id in session metadata")
                 return False
                 
-            # Get user and their cart
+            if not order_id:
+                print(f"❌ Missing order_id in session metadata")
+                return False
+                
+            # Get user and verify they exist
             User = get_user_model()
             try:
                 user = User.objects.get(id=user_id)
-                cart = Cart.get_or_create_cart(user=user)
             except User.DoesNotExist as e:
                 print(f"❌ User not found: {e}")
                 return False
                 
-            # Check if cart has items
-            cart_items = cart.items.all()
-            if not cart_items.exists():
-                print(f"❌ User cart is empty")
+            # Get the existing order and verify ownership
+            try:
+                order = Order.objects.get(id=order_id)
+                
+                # Verify the user owns this order
+                if order.buyer != user:
+                    print(f"❌ Order {order_id} does not belong to user {user_id}")
+                    return False
+                    
+                # Verify order is in pending_payment status
+                if order.status != 'pending_payment':
+                    print(f"⚠️ Order {order_id} is not in pending_payment status (current: {order.status})")
+                    # We still continue to update payment info, but log this
+                    
+            except Order.DoesNotExist:
+                print(f"❌ Order {order_id} not found")
                 return False
                 
             # Get shipping and billing address from session
@@ -333,26 +490,20 @@ def handle_successful_payment(session):
                     'country': customer_details['address'].get('country', ''),
                 }
                 
-            # Calculate totals from cart
-            subtotal = sum(item.total_price for item in cart_items)
-            shipping_cost = Decimal('19.99')  # Fixed shipping for now
+            # Calculate payment amounts from Stripe session
             tax_amount = Decimal(session.get('total_details', {}).get('amount_tax', 0)) / 100  # Convert from cents
             total_amount = Decimal(session['amount_total']) / 100  # Convert from cents
             
-            # Create the order with payment_confirmed status
-            order = Order.objects.create(
-                buyer=user,
-                status='payment_confirmed',  # Set status as payment_confirmed (set by Stripe webhook)
-                payment_status='paid',  # Set payment status as paid
-                subtotal=subtotal,
-                shipping_cost=shipping_cost,
-                tax_amount=tax_amount,
-                total_amount=total_amount,
-                shipping_address=shipping_address,
-                is_locked=True,
-            )
+            # Update the existing order with payment confirmation
+            order.status = 'payment_confirmed'  # Update status to payment confirmed
+            order.payment_status = 'paid'  # Update payment status to paid
+            order.tax_amount = tax_amount  # Update tax amount from Stripe
+            order.total_amount = total_amount  # Update total amount from Stripe
+            order.shipping_address = shipping_address  # Update shipping address from checkout
+            order.is_locked = True  # Lock the order after payment
+            order.save(update_fields=['status', 'payment_status', 'tax_amount', 'total_amount', 'shipping_address', 'is_locked'])
             
-            print(f"📦 Order {order.id} created with status 'payment_confirmed' and payment_status 'paid'")
+            print(f"📦 Order {order.id} updated to 'payment_confirmed' status with payment_status 'paid'")
             
             # Create payment tracker for this order
             stripe_payment_intent_id = session.get('payment_intent', session.get('id', ''))
@@ -368,35 +519,12 @@ def handle_successful_payment(session):
             )
             print(f"💳 Payment tracker created for order {order.id}")
             
-            # Create order items from cart items
-            for cart_item in cart_items:
-                product = cart_item.product
-                
-                # Create order item
-                OrderItem.objects.create(
-                    order=order,
-                    product=product,
-                    seller=product.seller,
-                    quantity=cart_item.quantity,
-                    unit_price=product.price,
-                    total_price=cart_item.total_price,
-                    product_name=product.name,
-                    product_description=product.description,
-                    product_image=product.images.filter(is_primary=True).first().image.url if product.images.filter(is_primary=True).exists() else '',
-                )
-                
-                # Update product stock
-                if product.stock_quantity >= cart_item.quantity:
-                    product.stock_quantity -= cart_item.quantity
-                    product.save(update_fields=['stock_quantity'])
-                else:
-                    print(f"⚠️ Warning: Insufficient stock for product {product.name}")
-                    
-            print(f"✅ Order {order.id} created successfully with {cart_items.count()} items")
+            # Create detailed payment tracking records per seller (manual processing for now)
+            print(f"🔄 Creating detailed payment transactions for order {order.id}")
+            create_payment_transactions(order, session)
+            print(f"📊 Detailed payment transactions created for order {order.id} - MANUAL RELEASE REQUIRED")
             
-            # Clear all cart items after successful order creation
-            cart.clear_items()
-            print(f"🛒 Cart cleared for user {user.username}")
+            print(f"✅ Order {order.id} payment confirmed successfully with {order.items.count()} items")
             
             # Send order receipt email to customer
             try:
@@ -407,7 +535,7 @@ def handle_successful_payment(session):
                     print(f"⚠️ Failed to send receipt email: {email_message}")
             except Exception as email_error:
                 print(f"❌ Error sending receipt email: {str(email_error)}")
-                # Don't fail the order creation if email fails
+                # Don't fail the order confirmation if email fails
             
             return True
             
@@ -415,7 +543,7 @@ def handle_successful_payment(session):
         print(f"❌ Error handling successful payment: {str(e)}")
         return False
 
-
+# Create a Stripe Embedded Checkout Session
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def create_checkout_session(request):
@@ -436,6 +564,23 @@ def create_checkout_session(request):
         # Prepare line items for Stripe
         line_items = []
         for item in cart_items:
+            if item.product.stock_quantity < item.quantity:
+                return Response({
+                    'error': 'INSUFFICIENT_STOCK',
+                    'detail': f'Insufficient stock for product {item.product.name}'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            # Prepare line item for each product in the cart
+            if item.product.price <= 0:
+                return Response({
+                    'error': 'INVALID_PRICE',
+                    'detail': f'Invalid price for product {item.product.name}'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            if item.quantity <= 0:
+                return Response({
+                    'error': 'INVALID_QUANTITY',
+                    'detail': f'Invalid quantity for product {item.product.name}'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            # Add product line item
             line_items.append({
                 'price_data': {
                     'currency': 'usd',
@@ -462,17 +607,76 @@ def create_checkout_session(request):
             'quantity': 1,
         })
         
-        print(f"🔔 Creating Stripe checkout session for user {request.user.id}")
-        # Create Stripe Embedded Checkout Session
+        # Create order with pending_payment status before Stripe session
+        print(f"🔔 Creating order with pending_payment status for user {request.user.id}")
+        
+        with transaction.atomic():
+            # Calculate totals from cart
+            subtotal = sum(item.total_price for item in cart_items)
+            shipping_cost = Decimal('19.99')  # Fixed shipping for now
+            total_amount = subtotal + shipping_cost
+            
+            # Create the order with pending_payment status
+            order = Order.objects.create(
+                buyer=request.user,
+                status='pending_payment',  # Order starts as pending payment
+                payment_status='pending',  # Payment status is pending
+                subtotal=subtotal,
+                shipping_cost=shipping_cost,
+                tax_amount=Decimal('0.00'),  # Will be calculated by Stripe
+                total_amount=total_amount,
+                shipping_address={},  # Will be filled by Stripe checkout
+                is_locked=False,  # Order is not locked until payment succeeds
+            )
+            
+            print(f"📦 Order {order.id} created with status 'pending_payment'")
+            
+            # Create order items from cart items
+            for cart_item in cart_items:
+                product = cart_item.product
+                
+                # Create order item
+                OrderItem.objects.create(
+                    order=order,
+                    product=product,
+                    seller=product.seller,
+                    quantity=cart_item.quantity,
+                    unit_price=product.price,
+                    total_price=cart_item.total_price,
+                    product_name=product.name,
+                    product_description=product.description,
+                    product_image=product.images.filter(is_primary=True).first().image.url if product.images.filter(is_primary=True).exists() else '',
+                )
+                
+                # Reserve stock (reduce stock quantity immediately)
+                if product.stock_quantity >= cart_item.quantity:
+                    product.stock_quantity -= cart_item.quantity
+                    product.save(update_fields=['stock_quantity'])
+                    print(f"📦 Reserved {cart_item.quantity} units of {product.name}")
+                else:
+                    print(f"⚠️ Warning: Insufficient stock for product {product.name}")
+                    # In a production system, you might want to handle this differently
+                    
+            print(f"✅ Order {order.id} created successfully with {cart_items.count()} items")
+            
+            # Clear cart after order creation
+            cart.clear_items()
+            print(f"🛒 Cart cleared for user {request.user.username}")
+        
+        print(f"🔔 Creating Stripe checkout session for order {order.id}")
+        # Create Stripe Embedded Checkout Session with order_id instead of cart_id
         session = stripe.checkout.Session.create(
             ui_mode='embedded',
+            locale=str(request.user.language) or 'en',
             line_items=line_items,
             mode='payment',
-            return_url=f"http://localhost:5173/order-success/",
+            automatic_tax={'enabled': True},
+            return_url=f"http://localhost:5173/order-success/{order.id}",
             metadata={
-                "user_id":str(request.user.id),
-                "cart_id":str(cart.id), 
+                "user_id": str(request.user.id),
+                "order_id": str(order.id),  # Pass order_id instead of cart_id
             },
+
             billing_address_collection='required',
         )
         
@@ -525,7 +729,7 @@ def checkout_session_status(request):
             'detail': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-
+# Cancel an order and process Stripe refund if payment was made
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def cancel_order(request, order_id):
@@ -667,3 +871,353 @@ def cancel_order(request, order_id):
             'error': 'ORDER_CANCELLATION_FAILED',
             'detail': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# Stripe Connect Views for Seller Account Management
+
+from .stripe_service import StripeConnectService
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def stripe_account(request):
+    """
+    Unified Stripe account endpoint:
+    - GET: Retrieve existing account info or eligibility status
+    - POST: Create new account if user doesn't have one, or return existing account info
+    
+    Required security validations:
+    - User must be authenticated (handled by @permission_classes([IsAuthenticated]))
+    - For regular users: Must have password and 2FA enabled
+    - For OAuth users: No additional requirements (authenticated via OAuth provider)
+    """
+    try:
+        user = request.user
+        
+        if request.method == 'GET':
+            print(f"🔍 GET /stripe/account for user: {user.email}")
+            
+            # Check if user already has a Stripe account
+            if user.stripe_account_id:
+                print(f"✅ User has existing account: {user.stripe_account_id}")
+                
+                # Get account status using the service
+                result = StripeConnectService.get_account_status(user)
+                
+                if result['success']:
+                    return Response({
+                        'has_account': True,
+                        'account_id': result['account_id'],
+                        'status': result['status'],
+                        'details_submitted': result['details_submitted'],
+                        'charges_enabled': result['charges_enabled'],
+                        'payouts_enabled': result['payouts_enabled'],
+                        'requirements': result['requirements'],
+                        'message': 'Account exists and details retrieved successfully.'
+                    }, status=status.HTTP_200_OK)
+                else:
+                    return Response({
+                        'error': 'Failed to get account status.',
+                        'details': result['errors']
+                    }, status=status.HTTP_400_BAD_REQUEST)
+            else:
+                print("ℹ️ User doesn't have account, checking eligibility...")
+                
+                # Check eligibility for account creation
+                validation = StripeConnectService.validate_seller_requirements(user)
+                
+                return Response({
+                    'has_account': False,
+                    'eligible_for_creation': validation['valid'],
+                    'eligibility_errors': validation['errors'],
+                    'requirements': {
+                        'is_authenticated': True,
+                        'is_oauth_user': user.is_oauth_only_user(),
+                        'has_password': user.has_usable_password(),
+                        'two_factor_enabled': getattr(user, 'two_factor_enabled', False),
+                    },
+                    'message': 'No account exists. Check eligibility for creation.'
+                }, status=status.HTTP_200_OK)
+        
+        elif request.method == 'POST':
+            print(f"🔄 POST /stripe/account for user: {user.email}")
+            
+            # Check if user already has account
+            if user.stripe_account_id:
+                print(f"ℹ️ User already has account: {user.stripe_account_id}, returning account info")
+                
+                # Return existing account info instead of creating new one
+                result = StripeConnectService.get_account_status(user)
+                
+                if result['success']:
+                    return Response({
+                        'account_exists': True,
+                        'account_id': result['account_id'],
+                        'status': result['status'],
+                        'details_submitted': result['details_submitted'],
+                        'charges_enabled': result['charges_enabled'],
+                        'payouts_enabled': result['payouts_enabled'],
+                        'requirements': result['requirements'],
+                        'message': 'Account already exists. Returning existing account information.'
+                    }, status=status.HTTP_200_OK)
+                else:
+                    return Response({
+                        'error': 'Failed to get existing account status.',
+                        'details': result['errors']
+                    }, status=status.HTTP_400_BAD_REQUEST)
+            else:
+                print("🚀 Creating new Stripe account...")
+                
+                # Get optional parameters for account creation
+                country = request.data.get('country', 'US')
+                business_type = request.data.get('business_type', 'individual')
+                
+                # Validate country code
+                if len(country) != 2:
+                    return Response({
+                        'error': 'Invalid country code. Please provide a 2-letter ISO country code.'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+                
+                # Validate business type
+                if business_type not in ['individual', 'company']:
+                    return Response({
+                        'error': 'Invalid business type. Must be "individual" or "company".'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+                
+                # Create Stripe account using the service
+                result = StripeConnectService.create_stripe_account(user, country, business_type)
+                
+                if result['success']:
+                    return Response({
+                        'account_created': True,
+                        'account_id': result['account_id'],
+                        'status': 'incomplete',  # New accounts are always incomplete
+                        'message': 'Stripe account created successfully.',
+                        'next_step': 'Complete account setup using the account session.'
+                    }, status=status.HTTP_201_CREATED)
+                else:
+                    return Response({
+                        'error': 'Failed to create Stripe account.',
+                        'details': result['errors']
+                    }, status=status.HTTP_400_BAD_REQUEST)
+            
+    except Exception as e:
+        logger.error(f"Unexpected error in stripe_account: {str(e)}")
+        return Response({
+            'error': 'Service may be unavailable. Please try again later.'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+# This creates a Stripe Account Session for seller onboarding AKA get seller info to pay or edit the info
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def create_stripe_account_session(request):
+    """
+    Create a Stripe Account Session for seller onboarding.
+    User must already have a Stripe account created.
+    """
+    try:
+        user = request.user
+        
+        # Create account session using the service
+        result = StripeConnectService.create_account_session(user)
+        
+        if result['success']:
+            return Response({
+                'message': 'Account session created successfully.',
+                'client_secret': result['client_secret'],
+                'account_id': result['account_id']
+            }, status=status.HTTP_200_OK)
+        else:
+            return Response({
+                'error': 'Failed to create account session.',
+                'details': result['errors']
+            }, status=status.HTTP_400_BAD_REQUEST)
+            
+    except Exception as e:
+        logger.error(f"Unexpected error in create_stripe_account_session: {str(e)}")
+        return Response({
+            'error': 'Service may be unavailable. Please try again later.'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+# Get the Stripe account status for the authenticated user
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_stripe_account_status(request):
+    """
+    Get the Stripe account status for the authenticated user.
+    """
+    try:
+        user = request.user
+        
+        # Get account status using the service
+        result = StripeConnectService.get_account_status(user)
+        
+        if result['success']:
+            response_data = {
+                'has_stripe_account': result['has_account'],
+                'status': result['status']
+            }
+            
+            # Add detailed information if account exists
+            if result['has_account']:
+                response_data.update({
+                    'account_id': result['account_id'],
+                    'details_submitted': result['details_submitted'],
+                    'charges_enabled': result['charges_enabled'],
+                    'payouts_enabled': result['payouts_enabled'],
+                    'requirements': result['requirements']
+                })
+            
+            return Response(response_data, status=status.HTTP_200_OK)
+        else:
+            return Response({
+                'error': 'Failed to get account status.',
+                'details': result['errors']
+            }, status=status.HTTP_400_BAD_REQUEST)
+            
+    except Exception as e:
+        logger.error(f"Unexpected error in get_stripe_account_status: {str(e)}")
+        return Response({
+            'error': 'Service may be unavailable. Please try again later.'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# Get seller payment holds with remaining time calculation
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_seller_payment_holds(request):
+    """
+    Get all payment holds for the authenticated seller with remaining time calculation
+    """
+    logger.info(f"[API] GET /stripe/holds/ called")
+    
+    # Debug authentication
+    logger.info(f"[DEBUG] Request headers: {dict(request.headers)}")
+    logger.info(f"[DEBUG] Request user: {request.user}")
+    logger.info(f"[DEBUG] User authenticated: {request.user.is_authenticated}")
+    
+    if not request.user.is_authenticated:
+        logger.warning(f"[ERROR] User not authenticated for stripe holds endpoint")
+        return Response({
+            'error': 'AUTHENTICATION_REQUIRED',
+            'detail': 'You must be logged in to view payment holds',
+            'authenticated': False
+        }, status=status.HTTP_401_UNAUTHORIZED)
+    
+    try:
+        user = request.user
+        logger.info(f"[SUCCESS] Authenticated user: {user.username} (ID: {user.id})")
+        
+        # Get all payment transactions where the user is the seller and payment is held
+        logger.info(f"[DEBUG] Querying PaymentTransaction for seller: {user.id}")
+        held_transactions = PaymentTransaction.objects.filter(
+            seller=user,
+            status='held'
+        ).select_related('payment_hold', 'order', 'buyer').prefetch_related('payment_items')
+        
+        logger.info(f"[INFO] Found {held_transactions.count()} held transactions for seller {user.username}")
+        
+        holds_data = []
+        total_pending_amount = Decimal('0.00')
+        
+        for transaction in held_transactions:
+            try:
+                # Get the payment hold information
+                payment_hold = transaction.payment_hold
+                
+                # Calculate remaining time
+                now = timezone.now()
+                if payment_hold.planned_release_date:
+                    remaining_time = payment_hold.planned_release_date - now
+                    remaining_days = max(0, remaining_time.days)
+                    remaining_hours = max(0, remaining_time.seconds // 3600)
+                    
+                    # Check if ready for release
+                    is_ready_for_release = remaining_time.total_seconds() <= 0
+                else:
+                    remaining_days = 30  # Default if no planned date
+                    remaining_hours = 0
+                    is_ready_for_release = False
+                
+                # Get order items for this seller
+                seller_items = transaction.payment_items.all()
+                item_details = []
+                for item in seller_items:
+                    item_details.append({
+                        'product_name': item.product_name,
+                        'quantity': item.quantity,
+                        'unit_price': str(item.unit_price),
+                        'total_price': str(item.total_price)
+                    })
+                
+                hold_info = {
+                    'transaction_id': str(transaction.id),
+                    'order_id': str(transaction.order.id),
+                    'buyer_username': transaction.buyer.username,
+                    'buyer_email': transaction.buyer.email,
+                    'gross_amount': str(transaction.gross_amount),
+                    'platform_fee': str(transaction.platform_fee),
+                    'stripe_fee': str(transaction.stripe_fee),
+                    'net_amount': str(transaction.net_amount),
+                    'currency': transaction.currency,
+                    'purchase_date': transaction.purchase_date.isoformat(),
+                    'item_count': transaction.item_count,
+                    'item_names': transaction.item_names,
+                    'items': item_details,
+                    'hold': {
+                        'reason': payment_hold.reason,
+                        'reason_display': payment_hold.get_reason_display(),
+                        'status': payment_hold.status,
+                        'status_display': payment_hold.get_status_display(),
+                        'hold_days': payment_hold.hold_days,
+                        'hold_start_date': payment_hold.hold_start_date.isoformat(),
+                        'planned_release_date': payment_hold.planned_release_date.isoformat() if payment_hold.planned_release_date else None,
+                        'remaining_days': remaining_days,
+                        'remaining_hours': remaining_hours,
+                        'is_ready_for_release': is_ready_for_release,
+                        'hold_notes': payment_hold.hold_notes,
+                    }
+                }
+                
+                holds_data.append(hold_info)
+                total_pending_amount += transaction.net_amount
+                
+            except Exception as item_error:
+                logger.error(f"Error processing transaction {transaction.id}: {str(item_error)}")
+                continue
+        
+        # Summary statistics
+        summary = {
+            'total_holds': len(holds_data),
+            'total_pending_amount': str(total_pending_amount),
+            'currency': 'USD',
+            'ready_for_release_count': sum(1 for hold in holds_data if hold['hold']['is_ready_for_release']),
+        }
+        
+        logger.info(f"[SUCCESS] Successfully prepared response with {len(holds_data)} holds, total pending: ${total_pending_amount}")
+        
+        return Response({
+            'success': True,
+            'summary': summary,
+            'holds': holds_data,
+            'message': f'Found {len(holds_data)} payment holds for seller {user.username}.',
+            'debug_info': {
+                'user_id': user.id,
+                'username': user.username,
+                'is_authenticated': True,
+                'query_count': held_transactions.count()
+            }
+        }, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        logger.error(f"[ERROR] Error retrieving seller payment holds for user {user.username}: {str(e)}")
+        logger.error(f"[ERROR] Full exception: ", exc_info=True)
+        return Response({
+            'error': 'PAYMENT_HOLDS_RETRIEVAL_FAILED',
+            'detail': f'Failed to retrieve payment holds: {str(e)}',
+            'debug_info': {
+                'user_id': user.id if hasattr(user, 'id') else None,
+                'username': user.username if hasattr(user, 'username') else str(user),
+                'is_authenticated': request.user.is_authenticated
+            }
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+

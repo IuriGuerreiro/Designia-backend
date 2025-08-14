@@ -11,6 +11,49 @@ from django.dispatch import receiver
 
 
 class CustomUser(AbstractUser):
+    LANGUAGE_CHOICES = [
+        ('en', 'English'),
+        ('pt', 'Portuguese'),
+        ('es', 'Spanish'),
+        ('fr', 'French'),
+        ('de', 'German'),
+        ('it', 'Italian'),
+        ('ru', 'Russian'),
+        ('ja', 'Japanese'),
+        ('ko', 'Korean'),
+        ('zh', 'Chinese'),
+        ('ar', 'Arabic'),
+        ('hi', 'Hindi'),
+        ('nl', 'Dutch'),
+        ('sv', 'Swedish'),
+        ('da', 'Danish'),
+        ('no', 'Norwegian'),
+        ('fi', 'Finnish'),
+        ('pl', 'Polish'),
+        ('tr', 'Turkish'),
+        ('th', 'Thai'),
+        ('vi', 'Vietnamese'),
+        ('id', 'Indonesian'),
+        ('ms', 'Malay'),
+        ('he', 'Hebrew'),
+        ('cs', 'Czech'),
+        ('hu', 'Hungarian'),
+        ('ro', 'Romanian'),
+        ('bg', 'Bulgarian'),
+        ('hr', 'Croatian'),
+        ('sk', 'Slovak'),
+        ('sl', 'Slovenian'),
+        ('et', 'Estonian'),
+        ('lv', 'Latvian'),
+        ('lt', 'Lithuanian'),
+        ('mt', 'Maltese'),
+        ('ga', 'Irish'),
+        ('cy', 'Welsh'),
+        ('eu', 'Basque'),
+        ('ca', 'Catalan'),
+        ('gl', 'Galician'),
+    ]
+    
     email = models.EmailField(unique=True)
     first_name = models.CharField(max_length=30, blank=True)
     last_name = models.CharField(max_length=30, blank=True)
@@ -21,6 +64,12 @@ class CustomUser(AbstractUser):
     
     # 2FA fields
     two_factor_enabled = models.BooleanField(default=False)
+    
+    # Language preference
+    language = models.CharField(max_length=5, choices=LANGUAGE_CHOICES, default='en')
+    
+    # Stripe Connect fields
+    stripe_account_id = models.CharField(max_length=255, blank=True, null=True, unique=True)
     
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = ['username']
