@@ -116,7 +116,7 @@ class UserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = CustomUser
-        fields = ('id', 'username', 'email', 'first_name', 'last_name', 'date_joined', 'avatar', 'is_email_verified', 'two_factor_enabled', 'is_oauth_only_user', 'profile')
+        fields = ('id', 'username', 'email', 'first_name', 'last_name', 'date_joined', 'avatar', 'is_email_verified', 'two_factor_enabled', 'is_oauth_only_user', 'language', 'profile')
         read_only_fields = ('id', 'email', 'date_joined', 'is_email_verified', 'two_factor_enabled', 'is_oauth_only_user')
 
     def get_is_oauth_only_user(self, obj):

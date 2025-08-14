@@ -13,4 +13,12 @@ urlpatterns = [
 
     # Webhook endpoints
     path('stripe_webhook/', views.stripe_webhook, name='stripe_webhook'),
+    
+    # Stripe Connect endpoints
+    path('stripe/account/', views.stripe_account, name='stripe_account'),
+    path('stripe/create-session/', views.create_stripe_account_session, name='create_stripe_account_session'),
+    path('stripe/account-status/', views.get_stripe_account_status, name='get_stripe_account_status'),
+    
+    # Payment Holds endpoints
+    path('stripe/holds/', views.get_seller_payment_holds, name='get_seller_payment_holds'),
 ]

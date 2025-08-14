@@ -30,6 +30,9 @@ urlpatterns = [
     path('password/reset/request/', views.request_password_reset, name='request_password_reset'),
     path('password/reset/', views.reset_password_with_2fa, name='reset_password_with_2fa'),
 
+    # Language preference
+    path('change-language/', views.change_language, name='change_language'),
+
     # Public user profile
     path('users/<int:pk>/', views.PublicProfileDetailView.as_view(), name='public_profile_detail'),
 ]
