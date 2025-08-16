@@ -17,7 +17,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 from marketplace.models import Cart, Order, OrderItem
-from .models import PaymentTracker, WebhookEvent, PaymentTransaction, PaymentHold, PaymentItem
+from .models import PaymentTracker, WebhookEvent, PaymentTransaction, Payout, PayoutItem
 from .serializers import PaymentTrackerSerializer, WebhookEventSerializer
 from .email_utils import send_order_receipt_email, send_order_status_update_email, send_order_cancellation_receipt_email
 
@@ -295,19 +295,349 @@ def stripe_webhook(request):
         except Exception as e:
             print(f"❌ Error processing account.updated webhook: {e}")
             # Don't fail the webhook for account update errors
+    
+    # Handle transfer.created events for payment verification
+    elif event.type == 'transfer.created':
+        transfer_object = event.data.object
+
+        print(f"🔔 Event Type: {event.type}")
+        # Extract transfer data based on the actual Stripe structure
+        transfer_id = getattr(transfer_object, 'id', '')  # e.g., "tr_1RwA18CEfT6kDqKIZfcknZlv"
+        amount = getattr(transfer_object, 'amount', 0)    # e.g., 205106 (in cents)
+        currency = getattr(transfer_object, 'currency', '') # e.g., "eur"
+        destination = getattr(transfer_object, 'destination', '') # e.g., "acct_1Rw2CuFhtX16wVcQ"
+        metadata = getattr(transfer_object, 'metadata', {})
+        reversed = getattr(transfer_object, 'reversed', False)
+        
+        # Log the transfer details
+        logger.info(f"[WEBHOOK] Transfer created: {transfer_id}")
+        logger.info(f"[WEBHOOK] Transfer amount: {amount} {currency}")
+        logger.info(f"[WEBHOOK] Transfer destination: {destination}")
+        logger.info(f"[WEBHOOK] Transfer reversed: {reversed}")
+        logger.info(f"[WEBHOOK] Transfer metadata: {metadata}")
+        
+        try:
+            # Extract transaction_id from metadata (from your example)
+            transaction_id = metadata.get('transaction_id')  # "19220fe2-3c3b-45dc-8995-a750ba8e3982"
+            order_id = metadata.get('order_id')             # "b6df43cd-4d40-49fb-bb33-adb7a390fa65"
+            seller_id = metadata.get('seller_id')           # "1"
+            buyer_id = metadata.get('buyer_id')             # "1"
+            
+            print(f"🔍 Extracted from metadata:")
+            print(f"   Transaction ID: {transaction_id}")
+            print(f"   Order ID: {order_id}")
+            print(f"   Seller ID: {seller_id}")
+            print(f"   Buyer ID: {buyer_id}")
+            
+            if transaction_id:
+                try:
+                    payment_transaction = PaymentTransaction.objects.get(id=transaction_id)
+                    logger.info(f"[WEBHOOK] Found payment transaction {transaction_id}")
+                    print(f"✅ Found PaymentTransaction: {payment_transaction.id}")
+                    print(f"   Current status: {payment_transaction.status}")
+                    print(f"   Current transfer_id: {payment_transaction.transfer_id}")
+                    
+                    # Since this is transfer.created, the transfer was successfully created
+                    # This means the transfer is now "paid" and completed
+                    if not reversed:
+                        success = payment_transaction.complete_transfer(
+                            notes=f"Transfer completed via webhook: {transfer_id} (amount: {amount/100:.2f} {currency.upper()})"
+                        )
+                        if success:
+                            logger.info(f"[SUCCESS] Payment transaction {transaction_id} marked as completed")
+                            print(f"✅ Transfer {transfer_id} completed successfully - payment released to seller")
+                            print(f"   Amount: {amount/100:.2f} {currency.upper()}")
+                            print(f"   New status: {payment_transaction.status}")
+                        else:
+                            logger.error(f"[ERROR] Failed to mark transaction {transaction_id} as completed")
+                            print(f"❌ Failed to update transaction status")
+                    else:
+                        # Transfer was reversed - this would be unusual for a .created event
+                        logger.warning(f"[REVERSED] Transfer {transfer_id} was reversed")
+                        print(f"⚠️ Transfer {transfer_id} was reversed - unusual for created event")
+                        
+                    # Update metadata with webhook information
+                    if hasattr(payment_transaction, 'metadata') and payment_transaction.metadata:
+                        payment_transaction.metadata.update({
+                            'webhook_transfer_id': transfer_id,
+                            'webhook_received': timezone.now().isoformat(),
+                            'webhook_amount': amount,
+                            'webhook_currency': currency,
+                            'webhook_destination': destination,
+                            'webhook_event_type': 'transfer.created'
+                        })
+                        payment_transaction.save(update_fields=['metadata', 'updated_at'])
+                        print(f"📝 Updated transaction metadata with webhook info")
+                        
+                except PaymentTransaction.DoesNotExist:
+                    logger.error(f"[ERROR] Payment transaction {transaction_id} not found")
+                    print(f"❌ PaymentTransaction {transaction_id} not found in database")
+                    
+            else:
+                logger.warning(f"[WARNING] No transaction_id found in transfer metadata")
+                print(f"⚠️ No transaction_id found in transfer metadata")
+                print(f"   Available metadata keys: {list(metadata.keys())}")
+                
+        except Exception as e:
+            logger.error(f"[ERROR] Error processing transfer.created webhook: {e}")
+            print(f"❌ Error processing transfer webhook: {e}")
+            import traceback
+            traceback.print_exc()
+            # Don't fail the webhook for transfer processing errors
+
+    # Handle payout.paid, payout.failed, and payout.updated events
+    elif event.type in ['payout.paid', 'payout.failed', 'payout.updated', 'payout.canceled']:
+        payout_object = event.data.object
+        
+
+
+        print(f"🔔 ==================== PAYOUT WEBHOOK EVENT ====================")
+        print(f"🔔 Event Type: {event.type}")
+        print(f"🔔 Event ID: {getattr(event, 'id', 'unknown')}")
+        print(f"🔔 Created: {getattr(event, 'created', 'unknown')}")
+        print(f"🔔 Payout Object:")
+        print(f"🔔 {json.dumps(payout_object, indent=2, default=str)}")
+        print(f"🔔 ===============================================================")
+        
+        """try:
+            stripe_payout_id = getattr(payout_object, 'id', None)
+            payout_status = getattr(payout_object, 'status', None)
+            payout_amount = getattr(payout_object, 'amount', None)
+            payout_currency = getattr(payout_object, 'currency', None)
+            payout_arrival_date = getattr(payout_object, 'arrival_date', None)
+            payout_metadata = getattr(payout_object, 'metadata', {})
+            
+            print(f"📊 Payout Details:")
+            print(f"   Stripe Payout ID: {stripe_payout_id}")
+            print(f"   Status: {payout_status}")
+            print(f"   Amount: {payout_amount/100 if payout_amount else 0:.2f} {payout_currency.upper() if payout_currency else 'unknown'}")
+            print(f"   Arrival Date: {payout_arrival_date}")
+            print(f"   Metadata: {payout_metadata}")
+            
+            if stripe_payout_id:
+                try:
+                    payout = Payout.objects.get(stripe_payout_id=stripe_payout_id)
+                    logger.info(f"[WEBHOOK] Found payout {payout.id} for Stripe payout {stripe_payout_id}")
+                    print(f"✅ Found Payout: {payout.id}")
+                    print(f"   Current status: {payout.status}")
+                    print(f"   Amount: {payout.amount_formatted}")
+                    print(f"   Seller: {payout.seller.username}")
+                    
+                    # Update payout status and details
+                    payout.status = payout_status
+                    
+                    # Update arrival date if provided
+                    if payout_arrival_date:
+                        payout.arrival_date = timezone.datetime.fromtimestamp(
+                            payout_arrival_date, tz=timezone.utc
+                        )
+                    
+                    # Handle failure information
+                    if event.type == 'payout.failed':
+                        failure_code = getattr(payout_object, 'failure_code', None)
+                        failure_message = getattr(payout_object, 'failure_message', None)
+                        
+                        payout.failure_code = failure_code or 'unknown'
+                        payout.failure_message = failure_message or 'Payout failed'
+                        
+                        logger.error(f"[WEBHOOK] Payout {payout.id} failed: {failure_code} - {failure_message}")
+                        print(f"❌ Payout failed: {failure_code} - {failure_message}")
+                        
+                        # Update fields for failed payout
+                        payout.save(update_fields=[
+                            'status', 'failure_code', 'failure_message', 
+                            'arrival_date', 'updated_at'
+                        ])
+                    else:
+                        # Update fields for successful status update
+                        payout.save(update_fields=[
+                            'status', 'arrival_date', 'updated_at'
+                        ])
+                    
+                    logger.info(f"[SUCCESS] Payout {payout.id} updated with status: {payout_status}")
+                    print(f"✅ Payout status updated to: {payout_status}")
+                    
+                    # Update metadata with webhook information
+                    if hasattr(payout, 'metadata') and payout.metadata:
+                        payout.metadata.update({
+                            'webhook_event_type': event.type,
+                            'webhook_received': timezone.now().isoformat(),
+                            'webhook_status': payout_status,
+                            'webhook_arrival_date': payout_arrival_date,
+                            'last_webhook_event_id': getattr(event, 'id', 'unknown')
+                        })
+                        payout.save(update_fields=['metadata', 'updated_at'])
+                        print(f"📝 Updated payout metadata with webhook info")
+                    
+                except Payout.DoesNotExist:
+                    logger.error(f"[ERROR] Payout with stripe_payout_id {stripe_payout_id} not found")
+                    print(f"❌ Payout {stripe_payout_id} not found in database")
+                    
+            else:
+                logger.warning(f"[WARNING] No stripe_payout_id found in payout object")
+                print(f"⚠️ No stripe_payout_id found in payout object")
+                
+        except Exception as e:
+            logger.error(f"[ERROR] Error processing {event.type} webhook: {e}")
+            print(f"❌ Error processing payout webhook: {e}")
+            import traceback
+            traceback.print_exc()
+            # Don't fail the webhook for payout processing errors"""
             
     else:
         print(f"ℹ️ Unhandled event type: {event.type}")
 
     return HttpResponse(status=200, content='Webhook received and processed successfully.')
 
+
+def stripe_webhook_connect(request):
+    """
+    Handle Stripe Connect webhooks for seller account updates
+    """
+    payload = request.body
+    endpoint_secret = settings.STRIPE_WEBHOOK_CONNECT_SECRET
+    sig_header = request.headers.get('stripe-signature')
+
+    if not endpoint_secret:
+        print('⚠️  No endpoint secret configured. Skipping webhook verification.')
+        # If no endpoint secret is configured, we won't verify the signature
+        # and will just deserialize the event from JSON
+    
+    event = None
+    
+    try:
+        event = stripe.Event.construct_from(
+            json.loads(payload), stripe.api_key
+        )
+        print(f"🔔 Event constructed successfully: {event.type}")
+    except ValueError as e:
+        print(f"❌ Error constructing event: {e}")
+        return HttpResponse(status=400)
+
+    # Only verify the event if you've defined an endpoint secret
+    # Otherwise, use the basic event deserialized with JSON
+    try:
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, endpoint_secret
+        )
+    except stripe.error.SignatureVerificationError as e:
+        print('⚠️  Webhook signature verification failed.' + str(e))
+        return HttpResponse(status=400, content='Webhook signature verification failed.')
+    except Exception as e:
+        print('❌ Error parsing webhook payload: ' + str(e))
+        return HttpResponse(status=400, content='Webhook payload parsing failed.')
+
+    print(f"🔔 Received Stripe event: {event.type}")
+    if event.type in ['payout.paid', 'payout.failed', 'payout.updated', 'payout.canceled']:
+        payout_object = event.data.object
+        
+
+
+        print(f"🔔 ==================== PAYOUT WEBHOOK EVENT ====================")
+        print(f"🔔 Event Type: {event.type}")
+        print(f"🔔 Event ID: {getattr(event, 'id', 'unknown')}")
+        print(f"🔔 Created: {getattr(event, 'created', 'unknown')}")
+        print(f"🔔 Payout Object:")
+        print(f"🔔 {json.dumps(payout_object, indent=2, default=str)}")
+        print(f"🔔 ===============================================================")
+        
+        try:
+            stripe_payout_id = getattr(payout_object, 'id', None)
+            payout_status = getattr(payout_object, 'status', None)
+            payout_amount = getattr(payout_object, 'amount', None)
+            payout_currency = getattr(payout_object, 'currency', None)
+            payout_arrival_date = getattr(payout_object, 'arrival_date', None)
+            payout_metadata = getattr(payout_object, 'metadata', {})
+            
+            print(f"📊 Payout Details:")
+            print(f"   Stripe Payout ID: {stripe_payout_id}")
+            print(f"   Status: {payout_status}")
+            print(f"   Amount: {payout_amount/100 if payout_amount else 0:.2f} {payout_currency.upper() if payout_currency else 'unknown'}")
+            print(f"   Arrival Date: {payout_arrival_date}")
+            print(f"   Metadata: {payout_metadata}")
+            
+            if stripe_payout_id:
+                try:
+                    payout = Payout.objects.get(stripe_payout_id=stripe_payout_id)
+                    logger.info(f"[WEBHOOK] Found payout {payout.id} for Stripe payout {stripe_payout_id}")
+                    print(f"✅ Found Payout: {payout.id}")
+                    print(f"   Current status: {payout.status}")
+                    print(f"   Amount: {payout.amount_formatted}")
+                    print(f"   Seller: {payout.seller.username}")
+                    
+                    # Update payout status and details
+                    payout.status = payout_status
+                    
+                    # Update arrival date if provided
+                    if payout_arrival_date:
+                        payout.arrival_date = timezone.datetime.fromtimestamp(
+                            payout_arrival_date, tz=timezone.utc
+                        )
+                    
+                    # Handle failure information
+                    if event.type == 'payout.failed':
+                        failure_code = getattr(payout_object, 'failure_code', None)
+                        failure_message = getattr(payout_object, 'failure_message', None)
+                        
+                        payout.failure_code = failure_code or 'unknown'
+                        payout.failure_message = failure_message or 'Payout failed'
+                        
+                        logger.error(f"[WEBHOOK] Payout {payout.id} failed: {failure_code} - {failure_message}")
+                        print(f"❌ Payout failed: {failure_code} - {failure_message}")
+                        
+                        # Update fields for failed payout
+                        payout.save(update_fields=[
+                            'status', 'failure_code', 'failure_message', 
+                            'arrival_date', 'updated_at'
+                        ])
+                    else:
+                        # Update fields for successful status update
+                        payout.save(update_fields=[
+                            'status', 'arrival_date', 'updated_at'
+                        ])
+                    
+                    logger.info(f"[SUCCESS] Payout {payout.id} updated with status: {payout_status}")
+                    print(f"✅ Payout status updated to: {payout_status}")
+                    
+                    # Update metadata with webhook information
+                    if hasattr(payout, 'metadata') and payout.metadata:
+                        payout.metadata.update({
+                            'webhook_event_type': event.type,
+                            'webhook_received': timezone.now().isoformat(),
+                            'webhook_status': payout_status,
+                            'webhook_arrival_date': payout_arrival_date,
+                            'last_webhook_event_id': getattr(event, 'id', 'unknown')
+                        })
+                        payout.save(update_fields=['metadata', 'updated_at'])
+                        print(f"📝 Updated payout metadata with webhook info")
+                    
+                except Payout.DoesNotExist:
+                    logger.error(f"[ERROR] Payout with stripe_payout_id {stripe_payout_id} not found")
+                    print(f"❌ Payout {stripe_payout_id} not found in database")
+                    
+            else:
+                logger.warning(f"[WARNING] No stripe_payout_id found in payout object")
+                print(f"⚠️ No stripe_payout_id found in payout object")
+                
+        except Exception as e:
+            logger.error(f"[ERROR] Error processing {event.type} webhook: {e}")
+            print(f"❌ Error processing payout webhook: {e}")
+            import traceback
+            traceback.print_exc()
+            # Don't fail the webhook for payout processing errors"""
+    else :
+        print(f"ℹ️ Unhandled event type: {event.type}")
+
+    return HttpResponse(status=200, content='Webhook received but not successfully.')
+
+
+
 # Create PaymentTransaction records for each seller in the order
 def create_payment_transactions(order, session):
     """
     Create PaymentTransaction records for each seller in the order
-    This tracks payments per seller with holding periods
+    This tracks payments per seller with integrated 30-day holding periods
     """
-    from .models import PaymentTransaction, PaymentHold, PaymentItem
     from collections import defaultdict
     from decimal import Decimal
     
@@ -350,7 +680,7 @@ def create_payment_transactions(order, session):
             stripe_fee = (gross_amount * stripe_fee_rate) + stripe_fixed_fee
             net_amount = gross_amount - platform_fee - stripe_fee
             
-            # Create PaymentTransaction
+            # Create PaymentTransaction with integrated hold system
             payment_transaction = PaymentTransaction.objects.create(
                 stripe_payment_intent_id=stripe_payment_intent_id,
                 stripe_checkout_session_id=stripe_checkout_session_id,
@@ -366,6 +696,11 @@ def create_payment_transactions(order, session):
                 item_count=seller_data['item_count'],
                 item_names=', '.join(seller_data['item_names']),
                 payment_received_date=timezone.now(),
+                # Integrated hold fields - all payments held for 30 days
+                hold_reason='standard',
+                days_to_hold=30,  # Standard 30-day hold
+                hold_start_date=timezone.now(),
+                hold_notes=f"Standard 30-day hold period for marketplace transactions",
                 metadata={
                     'order_id': str(order.id),
                     'stripe_session_id': stripe_checkout_session_id,
@@ -374,38 +709,7 @@ def create_payment_transactions(order, session):
                 }
             )
             
-            print(f"✅ Created payment transaction {payment_transaction.id} for ${net_amount}")
-            
-            # Create PaymentItems for detailed tracking
-            for order_item in seller_data['items']:
-                PaymentItem.objects.create(
-                    payment_transaction=payment_transaction,
-                    product=order_item.product,
-                    order_item=order_item,
-                    quantity=order_item.quantity,
-                    unit_price=order_item.unit_price,
-                    total_price=order_item.total_price,
-                    product_name=order_item.product_name,
-                    product_sku=getattr(order_item.product, 'sku', '')
-                )
-            
-            # Fixed hold period for all purchases
-            hold_days = 7  # Fixed 7-day hold period
-            hold_reason = 'standard'  # Standard hold for all purchases
-            
-            # Calculate planned release date
-            planned_release_date = timezone.now() + timezone.timedelta(days=hold_days)
-            
-            # Create PaymentHold
-            payment_hold = PaymentHold.objects.create(
-                payment_transaction=payment_transaction,
-                reason=hold_reason,
-                hold_days=hold_days,
-                planned_release_date=planned_release_date,
-                hold_notes=f"Automatic hold for {hold_reason} - {hold_days} days"
-            )
-            
-            print(f"🔒 Created payment hold for {hold_days} days (reason: {hold_reason})")
+            print(f"✅ Created payment transaction {payment_transaction.id} for ${net_amount} with 30-day hold")
         
         print(f"✅ Successfully created payment tracking for order {order.id}")
         
@@ -671,6 +975,9 @@ def create_checkout_session(request):
             line_items=line_items,
             mode='payment',
             automatic_tax={'enabled': True},
+            payment_intent_data={
+                'transfer_group': f'ORDER{order.id}'  # Group transfers by order ID
+            },
             return_url=f"http://localhost:5173/order-success/{order.id}",
             metadata={
                 "user_id": str(request.user.id),
@@ -1087,6 +1394,7 @@ def get_stripe_account_status(request):
 def get_seller_payment_holds(request):
     """
     Get all payment holds for the authenticated seller with remaining time calculation
+    Using simplified PaymentTransaction model with integrated hold system
     """
     logger.info(f"[API] GET /stripe/holds/ called")
     
@@ -1112,7 +1420,7 @@ def get_seller_payment_holds(request):
         held_transactions = PaymentTransaction.objects.filter(
             seller=user,
             status='held'
-        ).select_related('payment_hold', 'order', 'buyer').prefetch_related('payment_items')
+        ).select_related('order', 'buyer')
         
         logger.info(f"[INFO] Found {held_transactions.count()} held transactions for seller {user.username}")
         
@@ -1121,60 +1429,69 @@ def get_seller_payment_holds(request):
         
         for transaction in held_transactions:
             try:
-                # Get the payment hold information
-                payment_hold = transaction.payment_hold
-                
-                # Calculate remaining time
+                # Calculate remaining time using integrated hold system
                 now = timezone.now()
-                if payment_hold.planned_release_date:
-                    remaining_time = payment_hold.planned_release_date - now
+                if transaction.planned_release_date:
+                    remaining_time = transaction.planned_release_date - now
                     remaining_days = max(0, remaining_time.days)
                     remaining_hours = max(0, remaining_time.seconds // 3600)
                     
                     # Check if ready for release
                     is_ready_for_release = remaining_time.total_seconds() <= 0
                 else:
-                    remaining_days = 30  # Default if no planned date
-                    remaining_hours = 0
-                    is_ready_for_release = False
+                    # Use days_to_hold and hold_start_date to calculate remaining
+                    remaining_days = transaction.days_remaining
+                    remaining_hours = transaction.hours_remaining
+                    is_ready_for_release = transaction.can_be_released
                 
-                # Get order items for this seller
-                seller_items = transaction.payment_items.all()
-                item_details = []
-                for item in seller_items:
-                    item_details.append({
-                        'product_name': item.product_name,
-                        'quantity': item.quantity,
-                        'unit_price': str(item.unit_price),
-                        'total_price': str(item.total_price)
-                    })
+                # Parse item names for display (simplified from PaymentItems)
+                item_list = transaction.item_names.split(', ') if transaction.item_names else []
+                
+                # Calculate progress percentage for UI
+                total_hold_time = transaction.days_to_hold * 24  # Convert to hours
+                elapsed_hours = 0
+                if transaction.hold_start_date:
+                    elapsed_time = now - transaction.hold_start_date
+                    elapsed_hours = elapsed_time.total_seconds() / 3600
+                
+                progress_percentage = min(100, max(0, (elapsed_hours / total_hold_time) * 100)) if total_hold_time > 0 else 0
                 
                 hold_info = {
                     'transaction_id': str(transaction.id),
                     'order_id': str(transaction.order.id),
-                    'buyer_username': transaction.buyer.username,
-                    'buyer_email': transaction.buyer.email,
-                    'gross_amount': str(transaction.gross_amount),
-                    'platform_fee': str(transaction.platform_fee),
-                    'stripe_fee': str(transaction.stripe_fee),
-                    'net_amount': str(transaction.net_amount),
-                    'currency': transaction.currency,
-                    'purchase_date': transaction.purchase_date.isoformat(),
-                    'item_count': transaction.item_count,
-                    'item_names': transaction.item_names,
-                    'items': item_details,
-                    'hold': {
-                        'reason': payment_hold.reason,
-                        'reason_display': payment_hold.get_reason_display(),
-                        'status': payment_hold.status,
-                        'status_display': payment_hold.get_status_display(),
-                        'hold_days': payment_hold.hold_days,
-                        'hold_start_date': payment_hold.hold_start_date.isoformat(),
-                        'planned_release_date': payment_hold.planned_release_date.isoformat() if payment_hold.planned_release_date else None,
+                    'buyer': {
+                        'username': transaction.buyer.username,
+                        'email': transaction.buyer.email,
+                        'first_name': getattr(transaction.buyer, 'first_name', ''),
+                        'last_name': getattr(transaction.buyer, 'last_name', '')
+                    },
+                    'amounts': {
+                        'gross_amount': float(transaction.gross_amount),
+                        'platform_fee': float(transaction.platform_fee),
+                        'stripe_fee': float(transaction.stripe_fee),
+                        'net_amount': float(transaction.net_amount),
+                        'currency': transaction.currency
+                    },
+                    'order_details': {
+                        'purchase_date': transaction.purchase_date.isoformat(),
+                        'item_count': transaction.item_count,
+                        'item_names': transaction.item_names,
+                        'items': [{'product_name': name.strip(), 'quantity': 1} for name in item_list]
+                    },
+                    'hold_status': {
+                        'reason': transaction.hold_reason,
+                        'reason_display': transaction.get_hold_reason_display(),
+                        'status': 'held',
+                        'status_display': 'Payment on Hold',
+                        'total_hold_days': transaction.days_to_hold,
+                        'hold_start_date': transaction.hold_start_date.isoformat() if transaction.hold_start_date else None,
+                        'planned_release_date': transaction.planned_release_date.isoformat() if transaction.planned_release_date else None,
                         'remaining_days': remaining_days,
                         'remaining_hours': remaining_hours,
+                        'progress_percentage': round(progress_percentage, 1),
                         'is_ready_for_release': is_ready_for_release,
-                        'hold_notes': payment_hold.hold_notes,
+                        'hold_notes': transaction.hold_notes or f"Standard {transaction.days_to_hold}-day hold period for marketplace transactions",
+                        'time_display': f"{remaining_days}d {remaining_hours}h remaining" if not is_ready_for_release else "Ready for release"
                     }
                 }
                 
@@ -1190,7 +1507,7 @@ def get_seller_payment_holds(request):
             'total_holds': len(holds_data),
             'total_pending_amount': str(total_pending_amount),
             'currency': 'USD',
-            'ready_for_release_count': sum(1 for hold in holds_data if hold['hold']['is_ready_for_release']),
+            'ready_for_release_count': sum(1 for hold in holds_data if hold['hold_status']['is_ready_for_release']),
         }
         
         logger.info(f"[SUCCESS] Successfully prepared response with {len(holds_data)} holds, total pending: ${total_pending_amount}")
@@ -1220,4 +1537,487 @@ def get_seller_payment_holds(request):
                 'is_authenticated': request.user.is_authenticated
             }
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+# transfer payment to seller's connected account 
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def transfer_payment_to_seller(request):
+    """
+    Transfer payment to seller's connected Stripe account.
+    
+    Expected request body:
+    {
+        "transaction_id": "uuid-of-payment-transaction",
+        "transfer_group": "ORDER123" (optional - will use order ID if not provided)
+    }
+    """
+    try:
+        from .stripe_service import create_transfer_to_connected_account
+        
+        # Get request data
+        transaction_id = request.data.get('transaction_id')
+        transfer_group = request.data.get('transfer_group')
+        
+        if not transaction_id:
+            return Response({
+                'error': 'MISSING_TRANSACTION_ID',
+                'detail': 'Transaction ID is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Get the payment transaction
+        try:
+            payment_transaction = PaymentTransaction.objects.select_related(
+                'seller', 'buyer', 'order'
+            ).get(id=transaction_id)
+        except PaymentTransaction.DoesNotExist:
+            return Response({
+                'error': 'TRANSACTION_NOT_FOUND',
+                'detail': f'Payment transaction {transaction_id} not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        # Security check: Only allow admins or the seller to trigger transfer
+        if not (request.user.is_staff or request.user == payment_transaction.seller):
+            return Response({
+                'error': 'PERMISSION_DENIED',
+                'detail': 'You do not have permission to transfer this payment'
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        # SECURITY: Only allow transfers of payments with 'held' status
+        if not payment_transaction.can_transfer:
+            return Response({
+                'error': 'PAYMENT_NOT_TRANSFERABLE',
+                'detail': f'Only payments with "held" status can be transferred. Current status: {payment_transaction.status}',
+                'payment_status': payment_transaction.status,
+                'transfer_allowed': False
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Check if seller has a connected Stripe account
+        if not payment_transaction.seller.stripe_account_id:
+            return Response({
+                'error': 'NO_CONNECTED_ACCOUNT',
+                'detail': 'Seller does not have a connected Stripe account'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        if payment_transaction.planned_release_date and payment_transaction.planned_release_date > timezone.now():
+            return Response({
+                'error': 'TRANSFER_NOT_READY',
+                'detail': f'Transfer not ready yet. Planned release date: {payment_transaction.planned_release_date.isoformat()}'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Use transfer group from request or default to order ID
+        if not transfer_group:
+            transfer_group = f"ORDER{payment_transaction.order.id}"
+        
+        # Calculate transfer amount in cents
+        transfer_amount_cents = int(payment_transaction.net_amount * 100)
+        
+        # Use currency handler to check balance and find optimal currency
+        from .currency_handler import switch_currency, CurrencyHandler
+        
+        # Get current balance information for enhanced response
+        try:
+            current_balance = CurrencyHandler.get_available_currencies_with_balance()
+            logger.info(f"Current balance available: {len(current_balance)} currencies")
+        except Exception as balance_error:
+            logger.warning(f"Could not retrieve balance info: {balance_error}")
+            current_balance = []
+        
+        # Check exchange rate data freshness
+        try:
+            rate_freshness = CurrencyHandler.check_exchange_rate_freshness()
+            if not rate_freshness['is_fresh']:
+                logger.warning(f"Exchange rate data is stale (age: {rate_freshness.get('age_hours', 'unknown')} hours)")
+        except Exception as freshness_error:
+            logger.warning(f"Could not check exchange rate freshness: {freshness_error}")
+            rate_freshness = {'is_fresh': False, 'status': 'unknown'}
+        
+        currency_result = switch_currency(
+            preferred_currency=payment_transaction.currency.lower(),
+            required_amount_cents=transfer_amount_cents,
+            destination_account_id=payment_transaction.seller.stripe_account_id
+        )
+        
+        # Handle currency response format
+        if 'success' in currency_result and 'was_converted' in currency_result:
+            if currency_result['was_converted'] == True:
+                # Currency conversion was needed
+                logger.info(f"Currency conversion applied: {currency_result['original_currency']} to {currency_result['new_currency'].upper()} (rate: {currency_result['rate']})")
+                
+                # Create transfer with converted currency and amount
+                transfer_result = create_transfer_to_connected_account(
+                    amount=currency_result['new_amount_cents'],  # Already in cents
+                    currency=currency_result['new_currency'],
+                    destination_account_id=payment_transaction.seller.stripe_account_id,
+                    transfer_group=transfer_group,
+                    metadata={
+                        'transaction_id': str(payment_transaction.id),
+                        'order_id': str(payment_transaction.order.id),
+                        'seller_id': str(payment_transaction.seller.id),
+                        'buyer_id': str(payment_transaction.buyer.id),
+                        'original_currency': currency_result['original_currency'],
+                        'original_amount_cents': currency_result['original_amount_cents'],
+                        'currency_conversion': True,
+                        'exchange_rate': currency_result['rate'],
+                    }
+                )
+            else:
+                # No conversion needed - use original values
+                logger.info(f"No currency conversion needed: using {currency_result.get('use_currency_display', payment_transaction.currency.upper())}")
+                
+                # Create transfer with original currency and amount
+                transfer_result = create_transfer_to_connected_account(
+                    amount=currency_result.get('amount_cents', transfer_amount_cents),
+                    currency=currency_result.get('use_currency', payment_transaction.currency.lower()),
+                    destination_account_id=payment_transaction.seller.stripe_account_id,
+                    transfer_group=transfer_group,
+                    metadata={
+                        'transaction_id': str(payment_transaction.id),
+                        'order_id': str(payment_transaction.order.id),
+                        'seller_id': str(payment_transaction.seller.id),
+                        'buyer_id': str(payment_transaction.buyer.id),
+                        'original_currency': payment_transaction.currency.upper(),
+                        'original_amount_cents': transfer_amount_cents,
+                        'currency_conversion': False,
+                        'exchange_rate': 1.0,
+                    }
+                )
+            
+        elif 'success' in currency_result:
+            # Full response format - handle as before
+            if not currency_result['success']:
+                logger.error(f"Currency switch failed for transaction {transaction_id}: {currency_result.get('error')}")
+                
+                # Check if it's an exchange rate error
+                if currency_result.get('error_type') == 'EXCHANGE_RATE_UNAVAILABLE':
+                    return Response({
+                        'error': 'EXCHANGE_RATE_UNAVAILABLE',
+                        'detail': currency_result.get('error'),
+                        'message': currency_result.get('message'),
+                        'exchange_rate_status': rate_freshness,
+                        'required_action': 'Update exchange rate data or contact system administrator'
+                    }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+                else:
+                    # Handle other currency errors (insufficient balance, etc.)
+                    return Response({
+                        'error': 'INSUFFICIENT_BALANCE',
+                        'detail': f"Insufficient balance for transfer: {currency_result.get('error')}",
+                        'balance_info': currency_result.get('balance_info', {}),
+                        'available_currencies': currency_result.get('available_currencies', current_balance),
+                        'current_balance_summary': {
+                            'total_currencies_available': len(current_balance),
+                            'highest_balance_currency': current_balance[0]['currency'] if current_balance else None,
+                            'currencies_with_balance': [
+                                {
+                                    'currency': curr['currency'],
+                                    'amount_formatted': curr['amount_formatted']
+                                } 
+                                for curr in current_balance[:5]  # Top 5 currencies
+                            ]
+                        },
+                        'exchange_rate_status': rate_freshness
+                    }, status=status.HTTP_400_BAD_REQUEST)
+            
+        else:
+            # Unknown response format
+            logger.error(f"Unknown currency_result format for transaction {transaction_id}: {currency_result}")
+            return Response({
+                'error': 'CURRENCY_HANDLER_ERROR',
+                'detail': 'Unknown response format from currency handler',
+                'currency_result': currency_result
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+        if not transfer_result['success']:
+            logger.error(f"Failed to create transfer for transaction {transaction_id}: {transfer_result['errors']}")
+            return Response({
+                'error': 'TRANSFER_FAILED',
+                'detail': 'Failed to create transfer to seller account',
+                'errors': transfer_result['errors']
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+        # Update payment transaction status to 'processing' and store transfer_id
+        transfer_started = payment_transaction.start_transfer(
+            transfer_id=transfer_result['transfer_id'],
+            notes=f"Transfer created by {request.user.username}: {transfer_result['transfer_id']}"
+        )
+        
+        if not transfer_started:
+            logger.error(f"Failed to update payment transaction status for {transaction_id}")
+            return Response({
+                'error': 'STATUS_UPDATE_FAILED',
+                'detail': 'Transfer created but failed to update transaction status',
+                'transfer_id': transfer_result['transfer_id']
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+        logger.info(f"Payment transferred successfully: Transaction {transaction_id}, Transfer {transfer_result['transfer_id']}")
+        
+        # Get updated balance information after transfer
+        try:
+            post_transfer_balance = CurrencyHandler.get_available_currencies_with_balance()
+        except Exception as balance_error:
+            logger.warning(f"Could not retrieve post-transfer balance: {balance_error}")
+            post_transfer_balance = current_balance
+        
+        # Build complete response based on currency result format
+        if currency_result.get('was_converted') == True:
+            # Currency conversion was performed
+            logger.info(f"Building response for currency conversion scenario")
+            
+            response_data = {
+                'success': True,
+                'message': 'Transfer initiated successfully with currency conversion. Status set to processing - awaiting webhook verification.',
+                'transfer_details': {
+                    'transfer_id': transfer_result['transfer_id'],
+                    'amount_cents': transfer_result['amount'],
+                    'amount_dollars': transfer_result['amount'] / 100,
+                    'currency': transfer_result['currency'],
+                    'destination_account': transfer_result['destination'],
+                    'transfer_group': transfer_result['transfer_group'],
+                    'created_at': transfer_result['created']
+                },
+                'currency_info': {
+                    'original_currency': currency_result['original_currency'],
+                    'final_currency': currency_result['new_currency'].upper(),
+                    'conversion_needed': True,
+                    'exchange_rate': currency_result['rate'],
+                    'original_amount_cents': currency_result['original_amount_cents'],
+                    'original_amount_decimal': float(currency_result['original_amount_decimal']),
+                    'final_amount_cents': currency_result['new_amount_cents'],
+                    'final_amount_decimal': float(currency_result['new_amount_decimal']),
+                    'conversion_summary': f"Converted {currency_result['original_amount_decimal']} {currency_result['original_currency']} to {currency_result['new_amount_decimal']} {currency_result['new_currency'].upper()} at rate {currency_result['rate']}",
+                    'balance_used': {
+                        'currency': currency_result['new_currency'].upper(),
+                        'amount_used_cents': currency_result['new_amount_cents'],
+                        'amount_used_decimal': float(currency_result['new_amount_decimal'])
+                    }
+                },
+                'transaction_details': {
+                    'transaction_id': str(payment_transaction.id),
+                    'status': payment_transaction.status,
+                    'net_amount': float(payment_transaction.net_amount),
+                    'release_date': payment_transaction.actual_release_date.isoformat() if payment_transaction.actual_release_date else None
+                },
+                'balance_summary': {
+                    'currencies_available_before': len(current_balance),
+                    'currencies_available_after': len(post_transfer_balance),
+                    'top_currencies_remaining': [
+                        {
+                            'currency': curr['currency'],
+                            'amount_formatted': curr['amount_formatted'],
+                            'amount_cents': curr['amount_cents']
+                        }
+                        for curr in post_transfer_balance[:3]
+                    ],
+                    'transfer_impact': {
+                        'currency_used': currency_result['new_currency'].upper(),
+                        'amount_deducted': f"{currency_result['new_amount_decimal']:.2f} {currency_result['new_currency'].upper()}"
+                    }
+                },
+                'exchange_rate_info': {
+                    'data_freshness': rate_freshness,
+                    'rate_source': 'database_stored',
+                    'conversion_rate': currency_result['rate'],
+                    'rate_timestamp': rate_freshness.get('last_updated')
+                }
+            }
+        else:
+            # No currency conversion needed
+            logger.info(f"Building response for no conversion scenario")
+            
+            response_data = {
+                'success': True,
+                'message': 'Transfer initiated successfully. Status set to processing - awaiting webhook verification.',
+                'transfer_details': {
+                    'transfer_id': transfer_result['transfer_id'],
+                    'amount_cents': transfer_result['amount'],
+                    'amount_dollars': transfer_result['amount'] / 100,
+                    'currency': transfer_result['currency'],
+                    'destination_account': transfer_result['destination'],
+                    'transfer_group': transfer_result['transfer_group'],
+                    'created_at': transfer_result['created']
+                },
+                'currency_info': {
+                    'original_currency': payment_transaction.currency.upper(),
+                    'final_currency': currency_result.get('use_currency_display', payment_transaction.currency.upper()),
+                    'conversion_needed': False,
+                    'exchange_rate': 1.0,
+                    'original_amount_cents': transfer_amount_cents,
+                    'original_amount_decimal': float(payment_transaction.net_amount),
+                    'final_amount_cents': transfer_amount_cents,
+                    'final_amount_decimal': float(payment_transaction.net_amount),
+                    'recommendation': currency_result.get('recommendation', 'No conversion needed'),
+                    'balance_used': {
+                        'currency': currency_result.get('use_currency_display', payment_transaction.currency.upper()),
+                        'amount_used_cents': transfer_amount_cents,
+                        'amount_used_decimal': float(payment_transaction.net_amount)
+                    }
+                },
+                'transaction_details': {
+                    'transaction_id': str(payment_transaction.id),
+                    'status': payment_transaction.status,
+                    'net_amount': float(payment_transaction.net_amount),
+                    'release_date': payment_transaction.actual_release_date.isoformat() if payment_transaction.actual_release_date else None
+                },
+                'balance_summary': {
+                    'currencies_available_before': len(current_balance),
+                    'currencies_available_after': len(post_transfer_balance),
+                    'top_currencies_remaining': [
+                        {
+                            'currency': curr['currency'],
+                            'amount_formatted': curr['amount_formatted'],
+                            'amount_cents': curr['amount_cents']
+                        }
+                        for curr in post_transfer_balance[:3]
+                    ],
+                    'transfer_impact': {
+                        'currency_used': currency_result.get('use_currency_display', payment_transaction.currency.upper()),
+                        'amount_deducted': f"{payment_transaction.net_amount:.2f} {currency_result.get('use_currency_display', payment_transaction.currency.upper())}"
+                    }
+                },
+                'exchange_rate_info': {
+                    'data_freshness': rate_freshness,
+                    'rate_source': 'database_stored',
+                    'fallback_used': currency_result.get('fallback_rates_used', False)
+                }
+            }
+        
+        return Response(response_data, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in transfer_payment_to_seller: {str(e)}", exc_info=True)
+        return Response({
+            'error': 'TRANSFER_ERROR',
+            'detail': f'An unexpected error occurred: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def seller_payout(request):
+    """
+    Simple Stripe payout creation - just create the payout with Stripe API.
+    
+    Expected request data:
+    {
+        "amount": 24784,  # Amount in cents
+        "currency": "eur",  # Currency code
+        "description": "Monthly payout"  # optional
+    }
+    """
+    print("🔍 === SIMPLE SELLER_PAYOUT API CALLED ===")
+    print(f"👤 User: {request.user.username} (ID: {request.user.id})")
+    print(f"🔐 Is authenticated: {request.user.is_authenticated}")
+    print(f"📊 Request data: {request.data}")
+    
+    try:
+        # Get current user info
+        user = request.user
+        
+        print(f"🔧 User ID: {user.id}")
+        
+        # Verify user has Stripe account
+        stripe_account_id = user.stripe_account_id
+
+        if not stripe_account_id:
+            print("⚠️ User does not have a Stripe account.")
+            return Response({
+                'error': 'NO_STRIPE_ACCOUNT',
+                'detail': 'User does not have a connected Stripe account.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        
+        StripeAccountBalance = stripe.Balance.retrieve(
+            stripe_account=stripe_account_id,
+            expand=['available']
+        )
+        available_balance = StripeAccountBalance['available']
+
+
+        print(f"🔧 Available balance: {available_balance}")
+
+
+        if not available_balance or len(available_balance) == 0:
+            print("⚠️ No available balance found for this account.")
+            return Response({
+                'error': 'NO_AVAILABLE_BALANCE',
+                'detail': 'No available balance found for this Stripe account.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+
+        """[<Available at 0x2973e8f39f0> JSON: {
+  "amount": 223723,
+  "currency": "eur",
+  "source_types": {
+    "card": 223723
+  }
+}]"""
+        
+        # Get the first available balance (usually EUR or primary currency)
+        first_balance = available_balance[0]
+        payout_amount = first_balance['amount']
+        payout_currency = first_balance['currency']
+        
+        print(f"💰 Using balance: {payout_amount} {payout_currency.upper()}")
+        print(f"💰 Amount in cents: {payout_amount}")
+        print(f"💰 Amount formatted: €{payout_amount/100:.2f}")
+        
+        if payout_amount <= 1:
+            print("⚠️ Available balance is zero or negative.")
+            return Response({
+                'error': 'INSUFFICIENT_BALANCE',
+                'detail': f'Available balance is {payout_amount} cents. Cannot create payout.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Create Stripe payout using actual available balance
+        stripe_payout = stripe.Payout.create(
+            amount=payout_amount,  # Use actual available balance amount
+            currency=payout_currency,  # Use actual available balance currency
+            stripe_account=stripe_account_id,
+            method="instant",
+            metadata={
+                'user_id': str(user.id),
+                'original_amount': payout_amount,
+                'payout_currency': payout_currency,
+            }
+        )
+        
+        print(f"✅ Stripe payout created: {stripe_payout.id}")
+        print(f"📊 Payout status: {stripe_payout.status}")
+        
+        # Simple response with actual payout amounts
+        response_data = {
+            'success': True,
+            'payout': {
+                'stripe_payout_id': stripe_payout.id,
+                'status': stripe_payout.status,
+                'amount_cents': payout_amount,
+                'amount_formatted': f"€{payout_amount/100:.2f}",
+                'currency': payout_currency,
+                'created': stripe_payout.created
+            },
+            'user': {
+                'id': str(user.id),
+                'username': user.username,
+                'stripe_account_id': stripe_account_id
+            },
+            'message': f'Payout of €{payout_amount/100:.2f} created successfully using available balance'
+        }
+        
+        logger.info(f"Simple payout created successfully: {stripe_payout.id} for user {user.id}")
+        
+        return Response(response_data, status=status.HTTP_201_CREATED)
+        
+    except stripe.error.StripeError as e:
+        logger.error(f"Stripe payout failed: {e}")
+        return Response({
+            'error': 'STRIPE_PAYOUT_FAILED',
+            'detail': str(e),
+            'stripe_error_code': getattr(e, 'code', 'unknown')
+        }, status=status.HTTP_400_BAD_REQUEST)
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in seller_payout: {str(e)}", exc_info=True)
+        return Response({
+            'error': 'PAYOUT_ERROR',
+            'detail': f'An unexpected error occurred: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
