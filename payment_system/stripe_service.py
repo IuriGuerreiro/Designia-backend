@@ -489,3 +489,83 @@ def validate_seller_eligibility(user):
         dict: Validation result
     """
     return StripeConnectService.validate_seller_requirements(user)
+
+
+def create_transfer_to_connected_account(amount, currency, destination_account_id, transfer_group=None, metadata=None):
+    """
+    Create a transfer to a connected Stripe account.
+    
+    Args:
+        amount (int): Amount in cents to transfer
+        currency (str): Currency code (e.g., 'usd')
+        destination_account_id (str): Stripe connected account ID to transfer to
+        transfer_group (str, optional): Transfer group ID for grouping related transfers
+        metadata (dict, optional): Additional metadata for the transfer
+        
+    Returns:
+        dict: Transfer result with success status and transfer data
+    """
+    logger.info(f"Creating transfer of {amount} {currency} to account {destination_account_id}")
+    
+    try:
+        # Validate inputs
+        if not destination_account_id:
+            return {
+                'success': False,
+                'errors': ['Destination account ID is required']
+            }
+            
+        if amount <= 0:
+            return {
+                'success': False,
+                'errors': ['Transfer amount must be greater than 0']
+            }
+        
+        # Prepare transfer parameters
+        transfer_params = {
+            'amount': amount,
+            'currency': currency.lower(),
+            'destination': destination_account_id,
+
+        }
+        
+        # Add optional parameters
+        if transfer_group:
+            transfer_params['transfer_group'] = transfer_group
+            
+        if metadata:
+            transfer_params['metadata'] = metadata
+        
+        logger.info(f"Transfer parameters: {transfer_params}")
+        # Create the transfer
+        transfer = stripe.Transfer.create(**transfer_params)
+        
+        logger.info(f"Transfer created successfully: {transfer.id}")
+        logger.info(f"Transfer status: {transfer.object}")
+        
+        
+
+        
+        return {
+            'success': True,
+            'transfer_id': transfer.id,
+            'amount': transfer.amount,
+            'currency': transfer.currency,
+            'destination': transfer.destination,
+            'transfer_group': transfer.transfer_group,
+            'created': transfer.created,
+            'transfer_data': transfer
+        }
+        
+    except stripe.error.StripeError as e:
+        logger.error(f"Stripe error creating transfer: {str(e)}")
+        return {
+            'success': False,
+            'errors': [f"Failed to create transfer: {str(e)}"]
+        }
+    except Exception as e:
+        logger.error(f"Unexpected error creating transfer: {str(e)}")
+        return {
+            'success': False,
+            'errors': [f"An unexpected error occurred: {str(e)}"]
+        }
