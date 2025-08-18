@@ -10,6 +10,12 @@ from django_filters.rest_framework import DjangoFilterBackend
 import logging
 import json
 
+# Import transaction utilities
+from utils.transaction_utils import (
+    product_transaction, atomic_with_isolation, 
+    rollback_safe_operation, log_transaction_performance
+)
+
 from .models import (
     Category, Product, ProductImage, ProductReview, ProductFavorite,
     Order, OrderItem, OrderShipping, Cart, CartItem, ProductMetrics
@@ -28,6 +34,16 @@ from .permissions import IsSellerOrReadOnly, IsOwnerOrReadOnly
 # Set up logger
 logger = logging.getLogger(__name__)
 
+
+def start_background_tracking(tracking_func):
+    """Helper function to start tracking in truly background thread."""
+    try:
+        import threading
+        tracking_thread = threading.Thread(target=tracking_func, daemon=True)
+        tracking_thread.start()
+    except Exception as e:
+        logger.error(f"Error starting background tracking: {str(e)}")
+
 class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
     """
     ViewSet for categories - read-only operations
@@ -45,7 +61,16 @@ class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
         products = Product.objects.filter(
             category=category, 
             is_active=True
-        ).select_related('seller', 'category').prefetch_related('images')
+        ).select_related(
+            'seller', 'category'
+        ).prefetch_related(
+            'images',
+            'reviews__reviewer',
+            'favorited_by'
+        ).annotate(
+            calculated_review_count=models.Count('reviews', filter=models.Q(reviews__is_active=True)),
+            calculated_avg_rating=models.Avg('reviews__rating', filter=models.Q(reviews__is_active=True))
+        )
         
         # Apply filtering
         filter_backend = ProductFilter()
@@ -92,7 +117,15 @@ class ProductViewSet(viewsets.ModelViewSet):
     """
     queryset = Product.objects.filter(is_active=True).select_related(
         'seller', 'category'
-    ).prefetch_related('images', 'reviews')
+    ).prefetch_related(
+        'images',
+        'reviews__reviewer',
+        'favorited_by'
+    ).annotate(
+        # Pre-calculate aggregated values to avoid repeated queries
+        calculated_review_count=models.Count('reviews', filter=models.Q(reviews__is_active=True)),
+        calculated_avg_rating=models.Avg('reviews__rating', filter=models.Q(reviews__is_active=True))
+    )
     
     permission_classes = [IsAuthenticatedOrReadOnly]
     lookup_field = 'slug'
@@ -114,8 +147,24 @@ class ProductViewSet(viewsets.ModelViewSet):
             return [IsAuthenticated(), IsSellerOrReadOnly()]
         return super().get_permissions()
     
+    def get_queryset(self):
+        """Override to add user-specific optimizations"""
+        queryset = super().get_queryset()
+        
+        # If user is authenticated, prefetch their favorites for this queryset
+        if hasattr(self.request, 'user') and self.request.user.is_authenticated:
+            queryset = queryset.prefetch_related(
+                models.Prefetch(
+                    'favorited_by',
+                    queryset=ProductFavorite.objects.filter(user=self.request.user),
+                    to_attr='user_favorites'
+                )
+            )
+        
+        return queryset
+    
     def create(self, request, *args, **kwargs):
-        """Override create method"""
+        """Override create method without heavy transactions"""
         serializer = self.get_serializer(data=request.data)
         
         if serializer.is_valid():
@@ -126,50 +175,59 @@ class ProductViewSet(viewsets.ModelViewSet):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def perform_create(self, serializer):
-        """Create a new product"""
+        """Create a new product with async metrics initialization"""
         user = self.request.user
+        # Create the product without heavy transactions
         product = serializer.save(seller=user)
+        
+        # Queue async metrics initialization for the new product
+        try:
+            from .async_tracking import AsyncTracker
+            # Initialize the async tracker which will handle metrics creation in background
+            AsyncTracker.initialize()
+            logger.info(f"Product created: {product.name} - metrics will be initialized asynchronously")
+        except Exception as e:
+            logger.error(f"Failed to initialize async metrics for product {product.id}: {e}")
+            # Don't fail the product creation if async initialization fails
+        
         return product
 
     def list(self, request, *args, **kwargs):
-        """Override list method with view tracking"""
+        """Override list method with truly async view tracking"""
         queryset = self.filter_queryset(self.get_queryset())
         
         page = self.paginate_queryset(queryset)
         if page is not None:
             serializer = self.get_serializer(page, many=True)
+            response = self.get_paginated_response(serializer.data)
             
-            # Track views for products in this listing page
-            try:
-                track_product_listing_view(page, request)
-            except Exception as e:
-                logger.error(f"Error tracking listing views: {str(e)}")
+            # Queue async tracking AFTER response is ready
+            from .async_tracking import AsyncTracker
+            start_background_tracking(lambda: AsyncTracker.queue_listing_view(page, request))
             
-            return self.get_paginated_response(serializer.data)
+            return response
 
         serializer = self.get_serializer(queryset, many=True)
+        response = Response(serializer.data)
         
-        # Track views for all products in non-paginated listing
-        try:
-            products_list = list(queryset)
-            track_product_listing_view(products_list, request)
-        except Exception as e:
-            logger.error(f"Error tracking listing views: {str(e)}")
+        # Queue async tracking AFTER response is ready  
+        from .async_tracking import AsyncTracker
+        products_list = list(queryset)
+        start_background_tracking(lambda: AsyncTracker.queue_listing_view(products_list, request))
         
-        return Response(serializer.data)
+        return response
 
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
         
-        # Track view activity using tracking utils
-        try:
-            track_single_product_view(instance, request)
-        except Exception as e:
-            logger.error(f"Error tracking product view: {str(e)}")
-            # Continue execution even if tracking fails
-        
         serializer = self.get_serializer(instance)
-        return Response(serializer.data)
+        response = Response(serializer.data)
+        
+        # Queue async tracking AFTER response is ready
+        from .async_tracking import AsyncTracker
+        start_background_tracking(lambda: AsyncTracker.queue_product_view(instance, request))
+        
+        return response
 
     @action(detail=True, methods=['post'])
     def favorite(self, request, slug=None):
@@ -187,48 +245,54 @@ class ProductViewSet(viewsets.ModelViewSet):
         
         if not created:
             favorite.delete()
-            # Track unfavorite activity using new tracking utils
+            response = Response({'favorited': False})
+            # Queue async tracking AFTER response is ready
             try:
-                ProductTracker.track_product_favorite(product, request.user, request, 'unfavorite')
-                logger.info(f"Product unfavorite tracked: {product.name}")
+                from .async_tracking import AsyncTracker
+                import threading
+                tracking_thread = threading.Thread(
+                    target=lambda: AsyncTracker.queue_favorite_action(product, request.user, 'unfavorite', request),
+                    daemon=True
+                )
+                tracking_thread.start()
             except Exception as e:
-                logger.error(f"Error tracking unfavorite: {str(e)}")
-            return Response({'favorited': False})
+                logger.error(f"Error starting background tracking: {str(e)}")
+            return response
         else:
-            # Track favorite activity using new tracking utils
+            response = Response({'favorited': True})
+            # Queue async tracking AFTER response is ready
             try:
-                ProductTracker.track_product_favorite(product, request.user, request, 'favorite')
-                logger.info(f"Product favorite tracked: {product.name}")
+                from .async_tracking import AsyncTracker
+                import threading
+                tracking_thread = threading.Thread(
+                    target=lambda: AsyncTracker.queue_favorite_action(product, request.user, 'favorite', request),
+                    daemon=True
+                )
+                tracking_thread.start()
             except Exception as e:
-                logger.error(f"Error tracking favorite: {str(e)}")
-            return Response({'favorited': True})
+                logger.error(f"Error starting background tracking: {str(e)}")
+            return response
 
     @action(detail=True, methods=['post'])
     def click(self, request, slug=None):
-        """Track product clicks with activity system"""
+        """Track product clicks with truly async activity system"""
         product = self.get_object()
         
-        # Track click activity using new tracking utils
-        try:
-            user = request.user if request.user.is_authenticated else None
-            session_key = None
-            
-            if not user:
-                if not request.session.session_key:
-                    request.session.save()
-                session_key = request.session.session_key
-            
-            ProductTracker.track_product_click(
-                product=product,
-                user=user,
-                session_key=session_key,
-                request=request
-            )
-            logger.info(f"Product click tracked: {product.name}")
-        except Exception as e:
-            logger.error(f"Error tracking product click: {str(e)}")
+        response = Response({'clicked': True})
         
-        return Response({'clicked': True})
+        # Queue async tracking AFTER response is ready
+        try:
+            from .async_tracking import AsyncTracker
+            import threading
+            tracking_thread = threading.Thread(
+                target=lambda: AsyncTracker.queue_product_click(product, request),
+                daemon=True
+            )
+            tracking_thread.start()
+        except Exception as e:
+            logger.error(f"Error starting background tracking: {str(e)}")
+        
+        return response
 
     @action(detail=True, methods=['get'])
     def reviews(self, request, slug=None):
@@ -418,19 +482,26 @@ class CartViewSet(viewsets.ModelViewSet):
             cart_item.quantity = new_quantity
             cart_item.save()
             
-            # Track cart addition activity using new tracking utils
-            try:
-                ProductTracker.track_cart_addition(product, request.user, quantity, request)
-                logger.info(f"Cart addition tracked: {quantity}x {product.name}")
-            except Exception as e:
-                logger.error(f"Error tracking cart addition: {str(e)}")
-            
+            # Store response data first
             response_data = {
                 'success': True,
                 'item': CartItemSerializer(cart_item).data,
                 'message': 'Item added to cart successfully' if item_created else 'Cart item quantity updated',
                 'was_created': item_created
             }
+            
+            # Queue async tracking AFTER response is ready
+            try:
+                from .async_tracking import AsyncTracker
+                import threading
+                tracking_thread = threading.Thread(
+                    target=lambda: AsyncTracker.queue_cart_action(product, request.user, 'cart_add', quantity, request),
+                    daemon=True
+                )
+                tracking_thread.start()
+            except Exception as e:
+                logger.error(f"Error starting background tracking: {str(e)}")
+            
             logger.info(f"Response: {response_data}")
             logger.info("=== CART ADD_ITEM DEBUG END (SUCCESS) ===")
             
@@ -547,16 +618,27 @@ class CartViewSet(viewsets.ModelViewSet):
         
         cart_item = get_object_or_404(CartItem, id=item_id, cart=cart)
         
-        # Track cart removal activity before deleting using new tracking utils
-        try:
-            ProductTracker.track_cart_removal(cart_item.product, request.user, request)
-            logger.info(f"Cart removal tracked: {cart_item.product.name}")
-        except Exception as e:
-            logger.error(f"Error tracking cart removal: {str(e)}")
+        # Store cart info before deletion
+        product = cart_item.product
+        quantity = cart_item.quantity
         
         cart_item.delete()
         
-        return Response({'detail': 'Item removed from cart'})
+        response = Response({'detail': 'Item removed from cart'})
+        
+        # Queue async tracking AFTER response is ready
+        try:
+            from .async_tracking import AsyncTracker
+            import threading
+            tracking_thread = threading.Thread(
+                target=lambda: AsyncTracker.queue_cart_action(product, request.user, 'cart_remove', quantity, request),
+                daemon=True
+            )
+            tracking_thread.start()
+        except Exception as e:
+            logger.error(f"Error starting background tracking: {str(e)}")
+        
+        return response
 
     @action(detail=False, methods=['delete'])
     def clear(self, request):

@@ -86,11 +86,14 @@ class ProductReviewSerializer(serializers.ModelSerializer):
 
 
 class ProductListSerializer(serializers.ModelSerializer):
-    """Minimal product serializer for lists"""
+    """Minimal product serializer for lists with query optimization"""
     seller = UserSerializer(read_only=True)
     category = CategorySerializer(read_only=True)
     primary_image = serializers.SerializerMethodField()
     is_favorited = serializers.SerializerMethodField()
+    # Use pre-calculated values from annotations
+    review_count = serializers.SerializerMethodField()
+    average_rating = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
@@ -104,20 +107,54 @@ class ProductListSerializer(serializers.ModelSerializer):
                            'created_at', 'view_count', 'favorite_count']
 
     def get_primary_image(self, obj):
-        primary_image = obj.images.filter(is_primary=True).first()
-        if primary_image:
-            return ProductImageSerializer(primary_image).data
-        # Return first image if no primary image is set
-        first_image = obj.images.first()
-        if first_image:
-            return ProductImageSerializer(first_image).data
+        # Use prefetched images to avoid additional queries
+        images = getattr(obj, '_prefetched_objects_cache', {}).get('images', obj.images.all())
+        
+        # Find primary image from prefetched data
+        primary_image = None
+        first_image = None
+        
+        for image in images:
+            if first_image is None:
+                first_image = image
+            if image.is_primary:
+                primary_image = image
+                break
+        
+        target_image = primary_image or first_image
+        if target_image:
+            return ProductImageSerializer(target_image).data
         return None
 
     def get_is_favorited(self, obj):
         request = self.context.get('request')
         if request and request.user.is_authenticated:
+            # First try to use the optimized user_favorites attribute
+            if hasattr(obj, 'user_favorites'):
+                return len(obj.user_favorites) > 0
+            
+            # Use prefetched favorited_by to avoid additional queries
+            favorited_by = getattr(obj, '_prefetched_objects_cache', {}).get('favorited_by', [])
+            if favorited_by:
+                return any(fav.user_id == request.user.id for fav in favorited_by)
+            
+            # Fallback to direct query if prefetch not available
             return ProductFavorite.objects.filter(user=request.user, product=obj).exists()
         return False
+    
+    def get_review_count(self, obj):
+        # Use pre-calculated value from annotation if available
+        if hasattr(obj, 'calculated_review_count'):
+            return obj.calculated_review_count or 0
+        # Fallback to property method
+        return obj.review_count
+    
+    def get_average_rating(self, obj):
+        # Use pre-calculated value from annotation if available
+        if hasattr(obj, 'calculated_avg_rating'):
+            return obj.calculated_avg_rating or 0
+        # Fallback to property method
+        return obj.average_rating
 
 
 class ProductDetailSerializer(serializers.ModelSerializer):
