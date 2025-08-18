@@ -6,3 +6,10 @@ python-dotenv
 stripe
 apscheduler
 requests
+
+# Database
+PyMySQL
+
+# AWS Services
+boto3
+django-storages

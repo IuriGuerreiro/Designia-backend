@@ -1,13 +1,13 @@
 from django.urls import path
 from . import views
+from . import PayoutViews
 
 app_name = 'payment_system'
 
 urlpatterns = [
     # Stripe Checkout endpoints
     path('checkout_session/', views.create_checkout_session, name='create_checkout_session'),
-    path('session_status/', views.checkout_session_status, name='checkout_session_status'),
-    
+
     # Order Management
     path('orders/<uuid:order_id>/cancel/', views.cancel_order, name='cancel_order'),
 
@@ -21,11 +21,14 @@ urlpatterns = [
     path('stripe/account-status/', views.get_stripe_account_status, name='get_stripe_account_status'),
     
     # Payment Holds endpoints
-    path('stripe/holds/', views.get_seller_payment_holds, name='get_seller_payment_holds'),
+    path('stripe/holds/', PayoutViews.get_seller_payment_holds, name='get_seller_payment_holds'),
     
     # Transfer endpoints
     path('transfer/', views.transfer_payment_to_seller, name='transfer_payment_to_seller'),
     
     # Payout endpoints
-    path('payout/', views.seller_payout, name='seller_payout'),
+    path('payout/', PayoutViews.seller_payout, name='seller_payout'),
+    path('payouts/', PayoutViews.user_payouts_list, name='user_payouts_list'),
+    path('payouts/<uuid:payout_id>/', PayoutViews.payout_detail, name='payout_detail'),
+    path('payouts/<uuid:payout_id>/orders/', PayoutViews.payout_orders, name='payout_orders'),
 ]

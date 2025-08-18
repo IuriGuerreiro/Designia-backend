@@ -311,6 +311,13 @@ class StripeConnectService:
                             "external_account_collection": True
                         }
                     }
+                },
+                'settings': {
+                    'payouts': {
+                        'schedule': {
+                            'interval': 'manual'  # 🔑 disables automatic payouts
+                        }
+                    }
                 }
             }
             

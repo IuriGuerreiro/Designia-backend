@@ -212,6 +212,7 @@ class PaymentTransaction(models.Model):
     # Tracking
     purchase_date = models.DateTimeField(auto_now_add=True)
     payment_received_date = models.DateTimeField(null=True, blank=True)
+    payed_out = models.BooleanField(default=False, help_text="True if this transfer has been included in a payout")
     
     # Notes and metadata
     notes = models.TextField(blank=True)
@@ -352,7 +353,8 @@ class PaymentTransaction(models.Model):
         return False
     
     def __str__(self):
-        return f"Payment {str(self.id)[:8]} - {self.seller.username} - ${self.net_amount} ({self.status})"
+        payout_status = " - Paid Out" if self.payed_out else ""
+        return f"Payment {str(self.id)[:8]} - {self.seller.username} - ${self.net_amount} ({self.status}){payout_status}"
 
 
 class ExchangeRateManager(models.Manager):
@@ -840,6 +842,7 @@ class PayoutItem(models.Model):
     payment_transfer = models.ForeignKey(
         PaymentTransaction,
         on_delete=models.CASCADE,
+        unique=False,  # Allow multiple items to reference the same transfer
         related_name='payout_items',
         help_text="The payment transfer included in the payout"
     )
@@ -868,8 +871,8 @@ class PayoutItem(models.Model):
             models.Index(fields=['payment_transfer']),
             models.Index(fields=['order_id']),
         ]
-        # Ensure a payment transfer can only be in one payout
-        unique_together = ['payment_transfer']
+        # Removed unique_together constraint to allow payment transfers in multiple payouts
+        # This enables audit trail of failed payout attempts
     
     def save(self, *args, **kwargs):
         """Auto-populate denormalized fields from payment transfer."""

@@ -14,6 +14,9 @@ from django.db import transaction, models
 from django.utils import timezone
 from activity.models import UserClick
 
+# Import transaction utilities
+from utils.transaction_utils import atomic_with_isolation
+
 User = get_user_model()
 logger = logging.getLogger(__name__)
 
@@ -226,7 +229,7 @@ class ProductTracker:
             from decimal import Decimal
             
             # Update product metrics for purchase
-            with transaction.atomic():
+            with atomic_with_isolation('REPEATABLE READ'):
                 metrics, created = ProductMetrics.objects.get_or_create(
                     product=product,
                     defaults={

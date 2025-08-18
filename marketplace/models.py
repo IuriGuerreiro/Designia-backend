@@ -88,11 +88,22 @@ class Product(models.Model):
     class Meta:
         ordering = ['-created_at']
         indexes = [
+            # Existing indexes
             models.Index(fields=['seller', 'is_active']),
             models.Index(fields=['category', 'is_active']),
             models.Index(fields=['created_at']),
             models.Index(fields=['price']),
             models.Index(fields=['is_featured', 'is_active']),
+            # Additional performance indexes
+            models.Index(fields=['is_active', '-created_at']),  # Most common query pattern
+            models.Index(fields=['is_active', 'price']),  # Price filtering
+            models.Index(fields=['is_active', '-view_count']),  # Popular products
+            models.Index(fields=['is_active', '-favorite_count']),  # Most favorited
+            models.Index(fields=['category', 'is_active', '-created_at']),  # Category listings
+            models.Index(fields=['seller', 'is_active', '-created_at']),  # Seller products
+            models.Index(fields=['brand', 'is_active']),  # Brand filtering
+            models.Index(fields=['condition', 'is_active']),  # Condition filtering
+            models.Index(fields=['stock_quantity', 'is_active']),  # Stock availability
         ]
 
     def save(self, *args, **kwargs):
@@ -176,6 +187,12 @@ class ProductFavorite(models.Model):
 
     class Meta:
         unique_together = ['user', 'product']
+        indexes = [
+            models.Index(fields=['user', 'product']),  # For favorite checks
+            models.Index(fields=['product']),  # For product's favorite list
+            models.Index(fields=['user']),  # For user's favorites
+            models.Index(fields=['created_at']),  # For ordering
+        ]
 
     def __str__(self):
         return f"{self.user.username} favorited {self.product.name}"

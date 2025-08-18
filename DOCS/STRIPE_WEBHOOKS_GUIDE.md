@@ -56,7 +56,7 @@ You can trigger test events from the Stripe Dashboard.
 
 1.  Go to the webhook endpoint you just created in the Stripe Dashboard.
 2.  Click the **"Send test webhook"** button.
-3.  Select an event type (e.g., `payment_intent.succeeded`) and send it.
+3.  Select an event (all the ones on the endpoints) and send it.
 
 You should see the request being received in the Ngrok terminal window and your Django server console should show the request being processed.
 
