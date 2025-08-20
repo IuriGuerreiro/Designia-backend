@@ -55,6 +55,7 @@ INSTALLED_APPS = [
     'corsheaders',
     'django_filters',
     'storages',  # AWS S3 storage backend
+    'django_celery_beat',  # Celery Beat for scheduled tasks
     'authentication',
     'marketplace',
     'activity',
@@ -383,3 +384,45 @@ CACHES = {
         }
     }
 }
+
+# ===============================
+# CELERY CONFIGURATION
+# ===============================
+
+# Celery Configuration Options
+CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'redis://localhost:6379/0')
+CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', 'redis://localhost:6379/1')
+
+# Celery Task Configuration
+CELERY_ACCEPT_CONTENT = ['application/json']
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_TIMEZONE = 'UTC'
+CELERY_ENABLE_UTC = True
+
+# Celery Task Routing
+CELERY_TASK_ROUTES = {
+    'payment_system.tasks.*': {'queue': 'payment_tasks'},
+    'marketplace.tasks.*': {'queue': 'marketplace_tasks'},
+}
+
+# Celery Worker Configuration
+CELERY_WORKER_POOL_RESTARTS = True
+CELERY_WORKER_MAX_TASKS_PER_CHILD = 1000
+CELERY_WORKER_DISABLE_RATE_LIMITS = False
+
+# Task execution settings
+CELERY_TASK_ACKS_LATE = True
+CELERY_TASK_REJECT_ON_WORKER_LOST = True
+CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes
+CELERY_TASK_SOFT_TIME_LIMIT = 25 * 60  # 25 minutes
+
+# Result backend configuration
+CELERY_RESULT_EXPIRES = 60 * 60 * 24  # Results expire after 24 hours
+
+# Celery Beat scheduler (for periodic tasks)
+CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
+
+# Celery Security
+CELERY_WORKER_HIJACK_ROOT_LOGGER = False
+CELERY_WORKER_LOG_COLOR = False

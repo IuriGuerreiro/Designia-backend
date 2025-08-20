@@ -4,8 +4,12 @@ django-cors-headers
 pillow
 python-dotenv
 stripe
-apscheduler
 requests
+
+# Task Queue
+celery[redis]
+django-celery-beat
+redis
 
 # Database
 PyMySQL

@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import PaymentTracker, WebhookEvent, Payout, PayoutItem, PaymentTransaction
+from .models import PaymentTracker, Payout, PayoutItem, PaymentTransaction
 from marketplace.models import Order
 from django.contrib.auth import get_user_model
 
@@ -18,19 +18,6 @@ class PaymentTrackerSerializer(serializers.ModelSerializer):
             'amount', 'currency', 'notes', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
-
-
-class WebhookEventSerializer(serializers.ModelSerializer):
-    payment_tracker_id = serializers.CharField(source='payment_tracker.id', read_only=True)
-    
-    class Meta:
-        model = WebhookEvent
-        fields = [
-            'id', 'stripe_event_id', 'event_type', 'status',
-            'processing_attempts', 'last_processing_error',
-            'payment_tracker_id', 'created_at', 'processed_at'
-        ]
-        read_only_fields = ['id', 'created_at']
 
 
 # Serializers for API requests

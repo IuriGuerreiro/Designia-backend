@@ -215,6 +215,7 @@ class Order(models.Model):
         ('paid', 'Paid'),
         ('failed', 'Failed'),
         ('refunded', 'Refunded'),
+        ('failed_refund', 'Failed Refund'),
         ('partial_refund', 'Partial Refund'),
     ]
 
