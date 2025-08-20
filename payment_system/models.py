@@ -15,6 +15,8 @@ class PaymentTracker(models.Model):
         ('payment', 'Payment'),
         ('refund', 'Refund'),
         ('partial_refund', 'Partial Refund'),
+        ('payment_intent', 'Payment Intent'),
+        ('transfer', 'Transfer'),
     ]
     
     STATUS_CHOICES = [
@@ -30,6 +32,7 @@ class PaymentTracker(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     stripe_payment_intent_id = models.CharField(max_length=255, blank=True, db_index=True)
     stripe_refund_id = models.CharField(max_length=255, blank=True, db_index=True)
+    stripe_transfer_id = models.CharField(max_length=255, blank=True, db_index=True)
     
     # Relations
     order = models.ForeignKey(
@@ -54,6 +57,34 @@ class PaymentTracker(models.Model):
     # Optional tracking fields
     notes = models.TextField(blank=True)
     
+    # Payment Intent failure tracking (for payment_intent events)
+    failure_code = models.CharField(
+        max_length=50, 
+        blank=True,
+        help_text="Stripe failure code for failed payment intents"
+    )
+    failure_reason = models.TextField(
+        blank=True,
+        help_text="Detailed failure reason for payment intent failures"
+    )
+    stripe_error_data = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="Complete Stripe error data for payment intent failures"
+    )
+    
+    # Additional payment intent tracking
+    latest_charge_id = models.CharField(
+        max_length=255, 
+        blank=True,
+        help_text="Latest charge ID from payment intent"
+    )
+    payment_method_id = models.CharField(
+        max_length=255, 
+        blank=True,
+        help_text="Payment method ID used"
+    )
+    
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -73,50 +104,6 @@ class PaymentTracker(models.Model):
         ]
 
 
-class WebhookEvent(models.Model):
-    """Log of Stripe webhook events for debugging and tracking"""
-    
-    EVENT_STATUS_CHOICES = [
-        ('received', 'Received'),
-        ('processing', 'Processing'),
-        ('processed', 'Processed'),
-        ('failed', 'Failed'),
-        ('ignored', 'Ignored'),
-    ]
-    
-    # Event details
-    stripe_event_id = models.CharField(max_length=255, unique=True)
-    event_type = models.CharField(max_length=100)
-    
-    # Processing status
-    status = models.CharField(max_length=20, choices=EVENT_STATUS_CHOICES, default='received')
-    processing_attempts = models.IntegerField(default=0)
-    last_processing_error = models.TextField(blank=True)
-    
-    # Event data
-    event_data = models.JSONField()
-    
-    # Optional relation to payment tracker
-    payment_tracker = models.ForeignKey(
-        PaymentTracker,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='webhook_events'
-    )
-    
-    # Timestamps
-    created_at = models.DateTimeField(auto_now_add=True)
-    processed_at = models.DateTimeField(null=True, blank=True)
-    
-    def __str__(self):
-        return f"Webhook: {self.event_type} - {self.status}"
-    
-    class Meta:
-        db_table = 'webhook_events'
-        ordering = ['-created_at']
-
-
 class PaymentTransaction(models.Model):
     """
     Simplified payment tracking for sellers with integrated 30-day hold system
@@ -130,8 +117,11 @@ class PaymentTransaction(models.Model):
         ('completed', 'Completed'),
         ('released', 'Released to Seller'),
         ('disputed', 'Disputed'),
+        ('waiting_refund', 'Waiting for Refund'),
         ('refunded', 'Refunded'),
+        ('failed_refund', 'Failed Refund'),
         ('failed', 'Failed'),
+        ('cancelled', 'Cancelled'),
     ]
     
     HOLD_REASON_CHOICES = [
@@ -336,6 +326,18 @@ class PaymentTransaction(models.Model):
             ])
             return True
         return False
+    
+    def cancel_payment(self, cancellation_reason="", notes=""):
+        """Mark payment as cancelled due to order cancellation"""
+        self.status = 'cancelled'
+        self.payment_failure_code = 'cancelled'
+        self.payment_failure_reason = cancellation_reason or 'Payment cancelled due to order cancellation'
+        if notes:
+            self.notes = f"{self.notes}\n{notes}" if self.notes else notes
+        self.save(update_fields=[
+            'status', 'payment_failure_code', 'payment_failure_reason', 'notes', 'updated_at'
+        ])
+        return True
 
     def release_payment(self, released_by=None, notes=""):
         """Release payment to seller (legacy method - now redirects to complete_transfer)"""

@@ -1,6 +1,0 @@
-name,username,email,language,account_type
-John Doe,johndoe,john.doe@example.com,en,personal
-Jane Smith,janesmith,jane.smith@example.com,en,business
-Carlos Rodriguez,carlosrod,carlos.rodriguez@example.com,es,creator
-Marie Dubois,mariedub,marie.dubois@example.com,fr,personal
-Hans Mueller,hansmueller,hans.mueller@example.com,de,business

@@ -366,3 +366,118 @@ This is an automated message. For support, contact us at support@designia.com
     except Exception as e:
         logger.error(f"Error in send_order_cancellation_receipt_email: {str(e)}")
         return False, f"Error sending cancellation email: {str(e)}"
+
+
+def send_failed_refund_notification_email(order, failure_reason, refund_amount=None, request=None):
+    """
+    Send failed refund notification email to customer
+    Notifies customer that refund failed and they need to contact support
+    """
+    try:
+        user = order.buyer
+        
+        # Check rate limit
+        can_send, time_remaining = get_email_rate_limit_status_for_receipts(user, user.email, 'failed_refund_notification')
+        if not can_send:
+            logger.warning(f"Rate limit exceeded for failed refund notification email to {user.email}")
+            return False, f"Rate limit exceeded for failed refund notifications"
+        
+        # Record the attempt
+        record_email_attempt_for_receipts(user, user.email, 'failed_refund_notification', request)
+        
+        # Get frontend URL
+        frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:5173')
+        support_email = os.getenv('SUPPORT_EMAIL', 'support@designia.com')
+        
+        # Subject line
+        subject = f"❌ Refund Processing Failed - Order #{str(order.id)[:8]} - Action Required"
+        
+        # Check if we're in development mode
+        if settings.EMAIL_BACKEND == 'django.core.mail.backends.console.EmailBackend':
+            print("\n" + "="*80)
+            print("📧 FAILED REFUND NOTIFICATION EMAIL")
+            print("="*80)
+            print(f"📧 To: {user.email}")
+            print(f"👤 Customer: {user.first_name or user.username}")
+            print(f"🛒 Order: #{str(order.id)[:8]}")
+            print(f"❌ Failure Reason: {failure_reason}")
+            print(f"💰 Refund Amount: ${refund_amount}" if refund_amount else "💰 Refund Amount: Not specified")
+            print(f"📅 Failed: {timezone.now()}")
+            print(f"📋 Subject: {subject}")
+            print("-" * 80)
+            print("❌ REFUND PROCESSING FAILED")
+            print(f"Unfortunately, we were unable to process your refund automatically.")
+            print(f"Reason: {failure_reason}")
+            print()
+            print("📞 NEXT STEPS:")
+            print("• Contact our support team immediately")
+            print(f"• Email: {support_email}")
+            print(f"• Reference Order Number: #{str(order.id)[:8]}")
+            print("• We will arrange an alternative refund method (bank transfer, etc.)")
+            print(f"\nView order details: {frontend_url}/my-orders/{order.id}")
+            print("="*80)
+            print("✅ Failed refund notification email printed to console (development mode)")
+            print("="*80 + "\n")
+            
+            return True, "Failed refund notification email sent successfully (development mode)"
+        
+        else:
+            # Send actual email in production
+            text_content = f"""
+Hello {user.first_name or user.username},
+
+❌ REFUND PROCESSING FAILED
+
+We apologize, but we encountered an issue processing your refund for Order #{str(order.id)[:8]}.
+
+Issue Details:
+- Order Number: #{str(order.id)[:8]}
+- Order Total: ${order.total_amount}
+- Refund Amount: ${refund_amount or order.total_amount}
+- Failure Reason: {failure_reason}
+- Date: {timezone.now().strftime('%B %d, %Y at %I:%M %p')}
+
+📞 IMMEDIATE ACTION REQUIRED
+
+Please contact our support team to arrange an alternative refund method:
+
+• Email: {support_email}
+• Reference your Order Number: #{str(order.id)[:8]}
+• Your account email: {user.email}
+
+We will process your refund via bank transfer or another secure method. Our support team will respond within 24 hours to resolve this issue.
+
+Order Details:
+View your order: {frontend_url}/my-orders/{order.id}
+
+We sincerely apologize for the inconvenience and will ensure your refund is processed promptly through alternative means.
+
+Best regards,
+The Designia Team
+
+---
+This is an automated message regarding a failed refund processing.
+For immediate assistance, contact us at {support_email}
+            """
+            
+            try:
+                from django.core.mail import send_mail
+                
+                send_mail(
+                    subject=subject,
+                    message=text_content,
+                    from_email=settings.DEFAULT_FROM_EMAIL,
+                    recipient_list=[user.email],
+                    fail_silently=False,
+                )
+                
+                logger.info(f"Failed refund notification email sent to {user.email} for order {order.id}")
+                return True, "Failed refund notification email sent successfully"
+                
+            except Exception as email_error:
+                logger.error(f"Failed to send failed refund notification email: {str(email_error)}")
+                return False, f"Failed to send failed refund notification email: {str(email_error)}"
+    
+    except Exception as e:
+        logger.error(f"Error in send_failed_refund_notification_email: {str(e)}")
+        return False, f"Error sending failed refund notification email: {str(e)}"

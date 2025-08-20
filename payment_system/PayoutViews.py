@@ -30,9 +30,9 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 from marketplace.models import Cart, Order, OrderItem
-from .models import PaymentTracker, WebhookEvent, PaymentTransaction, Payout, PayoutItem
+from .models import PaymentTracker, PaymentTransaction, Payout, PayoutItem
 from .serializers import (
-    PaymentTrackerSerializer, WebhookEventSerializer, PayoutSerializer, 
+    PaymentTrackerSerializer, PayoutSerializer, 
     PayoutSummarySerializer, PayoutItemSerializer
 )
 

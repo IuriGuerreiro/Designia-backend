@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.utils.html import format_html
 from django.urls import reverse
 from django.utils import timezone
-from .models import PaymentTracker, WebhookEvent, PaymentTransaction
+from .models import PaymentTracker, PaymentTransaction
 
 
 @admin.register(PaymentTracker)
@@ -92,51 +92,6 @@ class PaymentTrackerAdmin(admin.ModelAdmin):
     def amount_display(self, obj):
         return f"${obj.amount:.2f} {obj.currency}"
     amount_display.short_description = 'Amount'
-
-
-@admin.register(WebhookEvent)
-class WebhookEventAdmin(admin.ModelAdmin):
-    """Simple admin interface for webhook events"""
-    
-    list_display = [
-        'stripe_event_id_short', 'event_type', 'status',
-        'processing_attempts', 'payment_tracker_link', 'created_at'
-    ]
-    
-    list_filter = ['status', 'event_type', 'created_at']
-    
-    search_fields = ['stripe_event_id', 'event_type']
-    
-    readonly_fields = ['stripe_event_id', 'event_data', 'created_at', 'processed_at']
-    
-    fieldsets = (
-        ('Event Details', {
-            'fields': ('stripe_event_id', 'event_type', 'status')
-        }),
-        ('Processing', {
-            'fields': ('processing_attempts', 'last_processing_error')
-        }),
-        ('Relations', {
-            'fields': ('payment_tracker',)
-        }),
-        ('Data', {
-            'fields': ('event_data',)
-        }),
-        ('Timestamps', {
-            'fields': ('created_at', 'processed_at')
-        }),
-    )
-    
-    def stripe_event_id_short(self, obj):
-        return obj.stripe_event_id[:20] + '...' if len(obj.stripe_event_id) > 20 else obj.stripe_event_id
-    stripe_event_id_short.short_description = 'Event ID'
-    
-    def payment_tracker_link(self, obj):
-        if obj.payment_tracker:
-            url = reverse('admin:payment_system_paymenttracker_change', args=[obj.payment_tracker.id])
-            return format_html('<a href="{}">{}</a>', url, str(obj.payment_tracker.id)[:8])
-        return '-'
-    payment_tracker_link.short_description = 'Payment Tracker'
 
 
 # PaymentItem inline removed - items are now tracked in item_names field

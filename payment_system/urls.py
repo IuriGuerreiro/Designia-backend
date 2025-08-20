@@ -7,6 +7,7 @@ app_name = 'payment_system'
 urlpatterns = [
     # Stripe Checkout endpoints
     path('checkout_session/', views.create_checkout_session, name='create_checkout_session'),
+    path('checkout_session/retry/<uuid:order_id>/', views.create_checkout_failed_checkout, name='create_retry_checkout_session'),
 
     # Order Management
     path('orders/<uuid:order_id>/cancel/', views.cancel_order, name='cancel_order'),
