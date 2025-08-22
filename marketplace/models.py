@@ -142,7 +142,14 @@ class Product(models.Model):
 
 class ProductImage(models.Model):
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='images')
-    image = models.ImageField(upload_to='products/')
+    image = models.ImageField(upload_to='products/', blank=True)  # Keep for backward compatibility
+    # S3 storage fields
+    s3_key = models.CharField(max_length=500, blank=True, help_text="S3 object key for the image")
+    s3_bucket = models.CharField(max_length=100, blank=True, help_text="S3 bucket name")
+    original_filename = models.CharField(max_length=255, blank=True, help_text="Original filename")
+    file_size = models.PositiveIntegerField(null=True, blank=True, help_text="File size in bytes")
+    content_type = models.CharField(max_length=100, blank=True, help_text="MIME type")
+    # Existing fields
     alt_text = models.CharField(max_length=200, blank=True)
     is_primary = models.BooleanField(default=False)
     order = models.PositiveIntegerField(default=0)
@@ -157,6 +164,64 @@ class ProductImage(models.Model):
             ProductImage.objects.filter(product=self.product, is_primary=True).update(is_primary=False)
         super().save(*args, **kwargs)
 
+    def get_presigned_url(self, expires_in=3600):
+        """Generate a pre-signed URL for S3 image access"""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        logger.info(f"=== GET PRESIGNED URL DEBUG ===")
+        logger.info(f"Image ID: {self.id}")
+        logger.info(f"Product: {self.product.name}")
+        logger.info(f"S3 Key: {self.s3_key}")
+        logger.info(f"S3 Bucket: {self.s3_bucket}")
+        logger.info(f"Has image field: {bool(self.image)}")
+        print(f"🔍 Getting presigned URL for image {self.id} (Product: {self.product.name})")
+        print(f"   S3 Key: {self.s3_key}")
+        print(f"   S3 Bucket: {self.s3_bucket}")
+        
+        if not self.s3_key or not self.s3_bucket:
+            logger.warning(f"Missing S3 data for image {self.id} - s3_key: {self.s3_key}, s3_bucket: {self.s3_bucket}")
+            print(f"❌ No S3 data for image {self.id} - returning None")
+            return None
+        
+        try:
+            from utils.s3_storage import get_s3_storage
+            s3_storage = get_s3_storage()
+            presigned_url = s3_storage.generate_presigned_url(self.s3_bucket, self.s3_key, expires_in)
+            logger.info(f"Generated presigned URL for image {self.id}: {presigned_url}")
+            print(f"✅ Generated presigned URL for image {self.id}: {presigned_url}")
+            return presigned_url
+        except Exception as e:
+            logger.error(f"Failed to generate presigned URL for image {self.id}: {e}")
+            print(f"❌ Failed to generate presigned URL for image {self.id}: {e}")
+            return None
+    
+    @property
+    def image_url(self):
+        """Get the image URL - prioritize S3 presigned URL, fallback to regular image field"""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        logger.info(f"=== IMAGE URL PROPERTY DEBUG ===")
+        logger.info(f"Image ID: {self.id}")
+        logger.info(f"Product: {self.product.name}")
+        print(f"🔍 Getting image_url for image {self.id} (Product: {self.product.name})")
+        
+        if self.s3_key and self.s3_bucket:
+            logger.info(f"Using S3 presigned URL path")
+            print(f"   Using S3 presigned URL path")
+            presigned_url = self.get_presigned_url()
+            print(f"   Result: {presigned_url}")
+            return presigned_url
+        elif self.image:
+            logger.info(f"Using traditional image field: {self.image.url}")
+            print(f"   Using traditional image field: {self.image.url}")
+            return self.image.url
+        else:
+            logger.warning(f"No image data available for image {self.id}")
+            print(f"❌ No image data available for image {self.id}")
+            return None
+    
     def __str__(self):
         return f"Image for {self.product.name}"
 
@@ -305,7 +370,7 @@ class OrderItem(models.Model):
     # Product snapshot at time of purchase
     product_name = models.CharField(max_length=200)
     product_description = models.TextField()
-    product_image = models.URLField(blank=True)
+    product_image = models.URLField(max_length=2000, blank=True)
 
     def save(self, *args, **kwargs):
         self.total_price = self.quantity * self.unit_price

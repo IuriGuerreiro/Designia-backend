@@ -3,7 +3,7 @@ from rest_framework.routers import DefaultRouter
 
 from .views import (
     CategoryViewSet, ProductViewSet, ProductImageViewSet, ProductReviewViewSet,
-    CartViewSet, OrderViewSet, ProductMetricsViewSet
+    CartViewSet, OrderViewSet, ProductMetricsViewSet, UserProfileViewSet
 )
 
 # Create the main router
@@ -14,6 +14,7 @@ router.register(r'reviews', ProductReviewViewSet, basename='review')
 router.register(r'cart', CartViewSet, basename='cart')
 router.register(r'orders', OrderViewSet, basename='order')
 router.register(r'metrics', ProductMetricsViewSet, basename='metrics')
+router.register(r'profiles', UserProfileViewSet, basename='profile')
 
 app_name = 'marketplace'
 
