@@ -28,7 +28,8 @@ from .email_utils import send_order_receipt_email, send_order_status_update_emai
 from utils.transaction_utils import (
     financial_transaction, serializable_transaction, 
     atomic_with_isolation, rollback_safe_operation, log_transaction_performance,
-    retry_on_deadlock, DeadlockError, TransactionError, get_current_isolation_level
+    retry_on_deadlock, DeadlockError, TransactionError, get_current_isolation_level,
+    ISOLATION_LEVELS, payment_webhook_transaction
 )
 
 # Set the Stripe API key from Django settings
@@ -98,6 +99,7 @@ def stripe_webhook(request):
             
             # Pass the entire checkout session to handle_sucessfull_checkout
             handle_sucessfull_checkout(checkout_session)
+            return HttpResponse(status=200, content='checkout.session.completed event successfully processed')
         else:
             print("⚠️ No user_id found in checkout session metadata")
             print(f"⚠️ Available metadata keys: {list(metadata.keys()) if metadata else 'None'}")
@@ -129,17 +131,31 @@ def stripe_webhook(request):
         print(f"🔔 Refund updated event received")
         print(f"full object", json.dumps(dict(refund_object), indent=2, default=str))
         
-        # Extract refund details
-        refund_id = getattr(refund_object, 'id', '')
-        refund_status = getattr(refund_object, 'status', '')
-        refund_amount = getattr(refund_object, 'amount', 0) / 100  # Convert from cents
-        refund_metadata = getattr(refund_object, 'metadata', {})
+        # Extract refund details with comprehensive error handling
+        try:
+            refund_id = getattr(refund_object, 'id', '')
+            refund_status = getattr(refund_object, 'status', '')
+            refund_amount = getattr(refund_object, 'amount', 0) / 100  # Convert from cents
+            refund_metadata = getattr(refund_object, 'metadata', {})
+            
+            print(f"🔔 Processing refund: {refund_id}, status: {refund_status}, amount: ${refund_amount}")
+            print(f"🔔 Refund metadata: {refund_metadata}")
+            
+            # Handle refund status
+            # Use getattr to safely access failure_balance_transaction (may not exist on all refund objects)
+            failure_balance_transaction = getattr(refund_object, 'failure_balance_transaction', None)
+            failure_code = getattr(refund_object, 'failure_code', None)
+            failure_reason = getattr(refund_object, 'failure_reason', None)
+            
+            print(f"🔔 Refund failure details - balance_transaction: {failure_balance_transaction}, code: {failure_code}, reason: {failure_reason}")
+            
+        except Exception as e:
+            print(f"⚠️ Error extracting refund details: {str(e)}")
+            logger.error(f"Stripe refund object attribute extraction failed: {str(e)}")
+            return HttpResponse(f"Error processing refund object: {str(e)}", status=400)
         
-        print(f"🔔 Processing refund: {refund_id}, status: {refund_status}, amount: ${refund_amount}")
-        print(f"🔔 Refund metadata: {refund_metadata}")
-        
-        # Handle refund status
-        if refund_status == 'succeeded':
+        if refund_status == 'succeeded' and failure_balance_transaction is None:
+            print(f"🔔 Refund succeeded")
             # Try to get order ID from refund metadata first
             order_id = refund_metadata.get('order_id')
             
@@ -150,7 +166,7 @@ def stripe_webhook(request):
                     from marketplace.models import Order
                     order = Order.objects.get(id=order_id)
                     
-                    with atomic_with_isolation('SERIALIZABLE'):
+                    with atomic_with_isolation('READ COMMITTED'):
                         # Update order status to refunded
                         order.status = 'refunded'
                         order.payment_status = 'refunded'
@@ -228,72 +244,10 @@ def stripe_webhook(request):
                     print(f"❌ Order {order_id} not found")
                 except Exception as e:
                     print(f"❌ Error processing refund for order {order_id}: {e}")
-            else:
-                # Fallback: try to find order by payment tracker
-                print("🔍 No order_id in metadata, searching by payment tracker")
-                try:
-                    payment_tracker = PaymentTracker.objects.filter(
-                        stripe_refund_id=refund_id
-                    ).first()
-                    
-                    if payment_tracker and payment_tracker.order:
-                        order = payment_tracker.order
-                        print(f"🔔 Found order {order.id} via payment tracker")
-                        
-                        with atomic_with_isolation('SERIALIZABLE'):
-                            # Update order status to refunded
-                            order.status = 'refunded'
-                            order.payment_status = 'refunded'
-                            order.save(update_fields=['status', 'payment_status'])
-                            
-                            # Restore stock for cancelled items
-                            for item in order.items.all():
-                                product = item.product
-                                product.stock_quantity += item.quantity
-                                product.save(update_fields=['stock_quantity'])
-                                print(f"✅ Restored {item.quantity} units to product {product.name}")
-                            
-                            print(f"✅ Order {order.id} marked as cancelled due to refund")
-                            
-                            # Update PaymentTransaction status from 'waiting_refund' to 'refunded'
-                            payment_transactions = PaymentTransaction.objects.filter(
-                                order=order,
-                                status='waiting_refund'
-                            )
-                            for transaction in payment_transactions:
-                                transaction.status = 'refunded'
-                                transaction.notes = f"{transaction.notes}\nRefund succeeded via webhook (fallback): {refund_id}" if transaction.notes else f"Refund succeeded via webhook (fallback): {refund_id}"
-                                transaction.save(update_fields=['status', 'notes', 'updated_at'])
-                                print(f"✅ Updated PaymentTransaction {transaction.id} status to 'refunded' (fallback)")
-                            
-                            # Update existing tracker to success status
-                            payment_tracker.status = 'success_refund'
-                            payment_tracker.notes = f"{payment_tracker.notes}\nRefund succeeded: Order cancelled due to refund processing"
-                            payment_tracker.save(update_fields=['status', 'notes', 'updated_at'])
-                            print(f"✅ Updated tracker to success_refund status")
-                            
-                            # Send cancellation confirmation email to customer (fallback path)
-                            try:
-                                email_sent, email_message = send_order_cancellation_receipt_email(
-                                    order, 
-                                    'Order cancelled due to refund processing', 
-                                    refund_amount
-                                )
-                                if email_sent:
-                                    print(f"📧 Cancellation email sent to {order.buyer.email} (fallback)")
-                                else:
-                                    print(f"⚠️ Failed to send cancellation email (fallback): {email_message}")
-                            except Exception as email_error:
-                                print(f"❌ Error sending cancellation email (fallback): {str(email_error)}")
-                                # Don't fail the refund processing if email fails
-                    else:
-                        print(f"⚠️ No payment tracker found for refund {refund_id}")
-                        
-                except Exception as e:
-                    print(f"❌ Error processing refund webhook: {e}")
-                    
         else:
             print(f"ℹ️ Refund status is '{refund_status}' - will be handled by appropriate webhook event")
+        
+        return HttpResponse(status=200, content='refund.updated event successfully processed')
     
     # Handle refund.failed event (for failed refund processing)
     elif event.type == 'refund.failed':
@@ -318,7 +272,7 @@ def stripe_webhook(request):
                 from marketplace.models import Order
                 order = Order.objects.get(id=order_id)
                 
-                with atomic_with_isolation('SERIALIZABLE'):
+                with atomic_with_isolation('READ COMMITTED'):
                     # Update order status to cancelled and payment_status to failed_refund
                     order.status = 'cancelled'
                     order.payment_status = 'failed_refund'
@@ -396,7 +350,7 @@ def stripe_webhook(request):
                     # Update order and PaymentTransaction if we have them
                     if payment_tracker.order:
                         order = payment_tracker.order
-                        with atomic_with_isolation('SERIALIZABLE'):
+                        with atomic_with_isolation('READ COMMITTED'):
                             # Update order status to cancelled and payment_status to failed_refund
                             order.status = 'cancelled'
                             order.payment_status = 'failed_refund'
@@ -451,7 +405,7 @@ def stripe_webhook(request):
                             if related_tracker and related_tracker.order:
                                 order = related_tracker.order
                                 
-                                with atomic_with_isolation('SERIALIZABLE'):
+                                with atomic_with_isolation('READ COMMITTED'):
                                     # Update order status to cancelled and payment_status to failed_refund
                                     order.status = 'cancelled'
                                     order.payment_status = 'failed_refund'
@@ -508,6 +462,8 @@ def stripe_webhook(request):
                     
             except Exception as e:
                 print(f"❌ Error updating failed refund tracker: {e}")
+        
+        return HttpResponse(status=200, content='refund.failed event successfully processed')
     
     # Handle account.updated event (for Stripe Connect seller account updates)
     elif event.type == 'account.updated':
@@ -534,6 +490,8 @@ def stripe_webhook(request):
         except Exception as e:
             print(f"❌ Error processing account.updated webhook: {e}")
             # Don't fail the webhook for account update errors
+        
+        return HttpResponse(status=200, content='account.updated event successfully processed')
     
     # Handle transfer.created events for payment verification
     elif event.type == 'transfer.created':
@@ -569,8 +527,14 @@ def stripe_webhook(request):
             print(f"   Buyer ID: {buyer_id}")
             
             if transaction_id:
+                # Define deadlock-safe operation for transfer success processing
+                @retry_on_deadlock(max_retries=3, delay=0.01, backoff=2.0)  # 10ms deadlock retry
+                def process_transfer_success():
+                    """Process transfer.created success with deadlock protection"""
+                    return PaymentTransaction.objects.get(id=transaction_id)
+                
                 try:
-                    payment_transaction = PaymentTransaction.objects.get(id=transaction_id)
+                    payment_transaction = process_transfer_success()
                     logger.info(f"[WEBHOOK] Found payment transaction {transaction_id}")
                     print(f"✅ Found PaymentTransaction: {payment_transaction.id}")
                     print(f"   Current status: {payment_transaction.status}")
@@ -578,6 +542,7 @@ def stripe_webhook(request):
 
                     # Create a PaymentTracker entry for the transfer
                     try:
+                        from marketplace.models import Order
                         order = Order.objects.get(id=order_id)
                         seller = User.objects.get(id=seller_id)
                         PaymentTracker.objects.create(
@@ -603,36 +568,67 @@ def stripe_webhook(request):
                         print(f"❌ Failed to create PaymentTracker for transfer {transfer_id}: {e}")
                     
                     # Since this is transfer.created, the transfer was successfully created
-                    # This means the transfer is now "paid" and completed
+                    # This means the payment is now successfully released to the seller
                     if not reversed:
-                        success = payment_transaction.complete_transfer(
-                            notes=f"Transfer completed via webhook: {transfer_id} (amount: {amount/100:.2f} {currency.upper()})"
-                        )
-                        if success:
-                            logger.info(f"[SUCCESS] Payment transaction {transaction_id} marked as completed")
-                            print(f"✅ Transfer {transfer_id} completed successfully - payment released to seller")
-                            print(f"   Amount: {amount/100:.2f} {currency.upper()}")
-                            print(f"   New status: {payment_transaction.status}")
-                        else:
-                            logger.error(f"[ERROR] Failed to mark transaction {transaction_id} as completed")
-                            print(f"❌ Failed to update transaction status")
+                        # Use READ COMMITTED transaction with proper model ordering for transfer success
+                        with atomic_with_isolation('READ COMMITTED'):
+                            # Model Ordering: PaymentTransaction -> PaymentTracker (both inside same isolation)
+                            transaction_for_update = PaymentTransaction.objects.select_for_update().get(id=transaction_id)
+                            
+                            # Update status to "released" indicating successful transfer to seller
+                            old_status = transaction_for_update.status
+                            if transaction_for_update.status == 'processing':
+                                transaction_for_update.status = 'released'  # Success status - money released to seller
+                                transaction_for_update.actual_release_date = timezone.now()
+                                transaction_for_update.transfer_id = transfer_id
+                                transaction_for_update.notes = f"{transaction_for_update.notes}\nTransfer succeeded via webhook: {transfer_id} (amount: {amount/100:.2f} {currency.upper()})"
+                                transaction_for_update.save(update_fields=[
+                                    'status', 'actual_release_date', 'transfer_id', 'notes', 'updated_at'
+                                ])
+                                
+                                logger.info(f"[SUCCESS] Payment transaction {transaction_id} status updated: {old_status} -> released")
+                                print(f"✅ Transfer {transfer_id} SUCCESS - payment released to seller")
+                                print(f"   Amount: {amount/100:.2f} {currency.upper()}")
+                                print(f"   Status: {old_status} -> released (SUCCESS)")
+                                
+                                # Then update PaymentTracker status (PaymentTracker model - second in same isolation)
+                                existing_tracker = PaymentTracker.objects.filter(stripe_transfer_id=transfer_id).select_for_update().first()
+                                if existing_tracker:
+                                    existing_tracker.status = 'succeeded'  # Mark tracker as succeeded
+                                    existing_tracker.save(update_fields=['status', 'updated_at'])
+                                    print(f"✅ PaymentTracker status updated to succeeded (inside same transaction)")
+                                else:
+                                    print(f"⚠️ No existing PaymentTracker found for transfer {transfer_id}")
+                                
+                            else:
+                                logger.warning(f"[WARNING] Transaction {transaction_id} not in processing status (current: {transaction_for_update.status})")
+                                print(f"⚠️ Transaction not in processing status: {transaction_for_update.status}")
+                                
                     else:
                         # Transfer was reversed - this would be unusual for a .created event
                         logger.warning(f"[REVERSED] Transfer {transfer_id} was reversed")
                         print(f"⚠️ Transfer {transfer_id} was reversed - unusual for created event")
                         
-                    # Update metadata with webhook information
-                    if hasattr(payment_transaction, 'metadata') and payment_transaction.metadata:
-                        payment_transaction.metadata.update({
-                            'webhook_transfer_id': transfer_id,
-                            'webhook_received': timezone.now().isoformat(),
-                            'webhook_amount': amount,
-                            'webhook_currency': currency,
-                            'webhook_destination': destination,
-                            'webhook_event_type': 'transfer.created'
-                        })
-                        payment_transaction.save(update_fields=['metadata', 'updated_at'])
-                        print(f"📝 Updated transaction metadata with webhook info")
+                    # Update metadata with webhook information (outside main transaction to avoid conflicts)
+                    try:
+                        if hasattr(payment_transaction, 'metadata') and payment_transaction.metadata:
+                            with atomic_with_isolation('READ COMMITTED'):
+                                # Refresh the transaction to get latest data
+                                transaction_for_metadata = PaymentTransaction.objects.select_for_update().get(id=transaction_id)
+                                transaction_for_metadata.metadata.update({
+                                    'webhook_transfer_id': transfer_id,
+                                    'webhook_received': timezone.now().isoformat(),
+                                    'webhook_amount': amount,
+                                    'webhook_currency': currency,
+                                    'webhook_destination': destination,
+                                    'webhook_event_type': 'transfer.created',
+                                    'transfer_success_status': 'released'
+                                })
+                                transaction_for_metadata.save(update_fields=['metadata', 'updated_at'])
+                                print(f"📝 Updated transaction metadata with webhook success info")
+                    except Exception as metadata_error:
+                        logger.warning(f"Failed to update metadata: {metadata_error}")
+                        print(f"⚠️ Failed to update metadata: {metadata_error}")
                         
                 except PaymentTransaction.DoesNotExist:
                     logger.error(f"[ERROR] Payment transaction {transaction_id} not found")
@@ -649,6 +645,8 @@ def stripe_webhook(request):
             import traceback
             traceback.print_exc()
             # Don't fail the webhook for transfer processing errors
+        
+        return HttpResponse(status=200, content='transfer.created event successfully processed')
 
     # Handle payout payment events from the checkout since the checkout never realy says paid or not
     elif event.type == 'payment_intent.succeeded':
@@ -673,11 +671,14 @@ def stripe_webhook(request):
                 return HttpResponse(status=200, content='Payment intent succeeded processed successfully.')
             else:
                 print(f"⚠️ Payment intent succeeded processing had issues: {result.get('errors', [])}")
+                return HttpResponse(status=200, content='payment_intent.succeeded event processed with issues')
         except Exception as e:
             print(f"❌ Error processing payment_intent.succeeded: {e}")
             logger.error(f"Error processing payment_intent.succeeded: {e}")
+            return HttpResponse(status=200, content='payment_intent.succeeded event processed with errors')
         
         print(f"🔔 ================================================================")
+        return HttpResponse(status=200, content='payment_intent.succeeded event successfully processed')
         
     # Handle payment intent failures
     elif event.type == 'payment_intent.payment_failed':
@@ -708,17 +709,252 @@ def stripe_webhook(request):
                 return HttpResponse(status=200, content='Payment intent failure processed successfully')
             else:
                 print(f"⚠️ Payment intent failure processing had issues: {result.get('errors', [])}")
+                return HttpResponse(status=200, content='payment_intent.payment_failed event processed with issues')
         except Exception as e:
             print(f"❌ Error processing payment_intent.payment_failed: {e}")
             logger.error(f"Error processing payment_intent.payment_failed: {e}")
+            return HttpResponse(status=200, content='payment_intent.payment_failed event processed with errors')
         
         print(f"🔔 ================================================================")
+        return HttpResponse(status=200, content='payment_intent.payment_failed event successfully processed')
         
     else:
         print(f"ℹ️ Unhandled event type: {event.type}")
+        return HttpResponse(status=200, content=f'{event.type} event received but not processed')
     
     print("🔵 ==================== END OF WEBHOOK EVENT ====================")
-    return HttpResponse(status=200, content='Webhook received but not processed.')
+    # Fallback return (should not be reached with explicit returns above)
+    return HttpResponse(status=200, content='Webhook event successfully processed')
+
+
+def update_payment_trackers_for_payout(payout, event_type):
+    """
+    Update PaymentTracker records based on payout webhook events.
+    Creates PaymentTracker records for transactions in this payout if they don't exist.
+    
+    Args:
+        payout (Payout): The payout instance that was updated
+        event_type (str): The webhook event type (payout.paid, payout.failed, etc.)
+    """
+    try:
+        from .models import PaymentTracker, PayoutItem, PaymentTransaction
+        
+        # Determine the new tracker status based on event and payout status
+        if event_type == 'payout.paid' or payout.status == 'paid':
+            new_status = 'payout_success'
+            success_msg = f"✅ PaymentTracker updated to payout_success for payout {payout.id}"
+        elif event_type == 'payout.failed' or payout.status == 'failed':
+            new_status = 'payout_failed'
+            success_msg = f"❌ PaymentTracker updated to payout_failed for payout {payout.id}"
+        elif payout.status == 'pending':
+            new_status = 'pending'
+            success_msg = f"⏳ PaymentTracker updated to pending for payout {payout.id}"
+        else:
+            # For other statuses (in_transit, canceled, etc.), mark as pending
+            new_status = 'pending'
+            success_msg = f"📊 PaymentTracker updated to pending for payout {payout.id} (status: {payout.status})"
+        
+        with atomic_with_isolation('READ COMMITTED'):
+            # Find PaymentTransactions associated with this payout through PayoutItems
+            payout_items = PayoutItem.objects.filter(payout=payout).select_related('payment_transfer')
+            
+            created_count = 0
+            updated_count = 0
+            
+            # Process each transaction in this payout
+            for payout_item in payout_items:
+                transaction_obj = payout_item.payment_transfer
+                
+                if transaction_obj:
+                    # Find existing PaymentTracker records for this transaction and seller
+                    stripe_intent_id = transaction_obj.stripe_payment_intent_id or f'payout_{transaction_obj.id}'
+                    existing_trackers = PaymentTracker.objects.filter(
+                        stripe_payment_intent_id=stripe_intent_id,
+                        user=payout.seller,
+                        transaction_type='payout'
+                    )
+                    
+                    if existing_trackers.exists():
+                        # Update all existing trackers for this transaction
+                        update_count = existing_trackers.update(
+                            status=new_status,
+                            updated_at=timezone.now()
+                        )
+                        updated_count += update_count
+                        print(f"✅ Updated {update_count} PaymentTracker(s) for transaction {transaction_obj.id} (status: {new_status})")
+                        logger.info(f"Updated {update_count} PaymentTracker records to {new_status} for payout {payout.id} transaction {transaction_obj.id}")
+                        
+                        # Update notes on each tracker individually (bulk update doesn't support notes concatenation)
+                        for tracker in existing_trackers:
+                            tracker.notes = f"{tracker.notes}\nPayout {event_type}: {payout.stripe_payout_id}" if tracker.notes else f"Payout {event_type}: {payout.stripe_payout_id}"
+                            tracker.save(update_fields=['notes'])
+                    else:
+                        # Create new PaymentTracker if none exist
+                        tracker = PaymentTracker.objects.create(
+                            stripe_payment_intent_id=stripe_intent_id,
+                            user=payout.seller,
+                            status=new_status,
+                            amount=transaction_obj.gross_amount,
+                            currency=transaction_obj.currency,
+                            order=transaction_obj.order,
+                            transaction_type='payout',
+                            notes=f"Payout {event_type}: {payout.stripe_payout_id}",
+                            created_at=timezone.now(),
+                        )
+                        created_count += 1
+                        print(f"✅ Created PaymentTracker {tracker.id} for transaction {transaction_obj.id} (status: {new_status})")
+                        logger.info(f"Created PaymentTracker {tracker.id} for payout {payout.id} transaction {transaction_obj.id}")
+                else:
+                    print(f"⚠️ PayoutItem {payout_item.id} has no associated payment_transfer")
+                    logger.warning(f"PayoutItem {payout_item.id} in payout {payout.id} has no payment_transfer")
+            
+            # Fallback: if no PayoutItems found, try to find related transactions by seller
+            if not payout_items.exists():
+                print(f"⚠️ No PayoutItems found for payout {payout.id}, trying fallback approach")
+                logger.warning(f"No PayoutItems found for payout {payout.id}, attempting fallback tracker search")
+                
+                # Find existing trackers by seller that might be related to this payout
+                related_trackers = PaymentTracker.objects.filter(
+                    user=payout.seller,
+                    status__in=['payout_processing', 'pending'],
+                    transaction_type='payout'
+                ).select_for_update()
+                
+                for tracker in related_trackers:
+                    # Basic validation: currency match
+                    if tracker.currency == payout.currency:
+                        tracker.status = new_status
+                        tracker.notes = f"{tracker.notes}\nPayout {event_type}: {payout.stripe_payout_id}" if tracker.notes else f"Payout {event_type}: {payout.stripe_payout_id}"
+                        tracker.save(update_fields=['status', 'notes', 'updated_at'])
+                        updated_count += 1
+                        print(f"✅ Updated PaymentTracker {tracker.id} via fallback method (status: {new_status})")
+                        logger.info(f"Updated PaymentTracker {tracker.id} via fallback for payout {payout.id}")
+            
+            total_processed = created_count + updated_count
+            if total_processed > 0:
+                print(success_msg + f" ({created_count} created, {updated_count} updated)")
+                logger.info(f"Processed {total_processed} PaymentTracker records for payout {payout.id}: {created_count} created, {updated_count} updated")
+            else:
+                print(f"ℹ️ No PaymentTracker records processed for payout {payout.id}")
+                logger.info(f"No PaymentTracker records found or created for payout {payout.id}")
+                
+    except Exception as e:
+        logger.error(f"Error updating PaymentTracker records for payout {payout.id}: {str(e)}")
+        print(f"❌ Error updating PaymentTracker records: {str(e)}")
+        # Don't fail the webhook for tracker update errors
+
+
+def create_payout_from_webhook(stripe_payout_id, payout_object, event_type):
+    """
+    Create a new payout record from Stripe webhook data when payout doesn't exist in database.
+    
+    Args:
+        stripe_payout_id (str): Stripe payout ID
+        payout_object: Stripe payout object from webhook
+        event_type (str): The webhook event type
+    
+    Returns:
+        Payout: Created payout instance or None if creation fails
+    """
+    try:
+        # Extract payout data from Stripe object
+        payout_amount = getattr(payout_object, 'amount', 0)
+        payout_currency = getattr(payout_object, 'currency', 'EUR').upper()
+        payout_status = getattr(payout_object, 'status', 'pending')
+        payout_created = getattr(payout_object, 'created', None)
+        payout_arrival_date = getattr(payout_object, 'arrival_date', None)
+        payout_description = getattr(payout_object, 'description', '')
+        payout_metadata = getattr(payout_object, 'metadata', {})
+        
+        # Try to determine seller from metadata or description
+        seller_id = payout_metadata.get('seller_id') or payout_metadata.get('user_id')
+        
+        if not seller_id:
+            # Try to extract from description or find from existing PaymentTransactions
+            logger.warning(f"No seller_id found in payout metadata for {stripe_payout_id}")
+            print(f"⚠️ No seller_id in payout metadata for {stripe_payout_id}")
+            
+            # Try to find seller from existing PaymentTransactions that might be included
+            from django.contrib.auth import get_user_model
+            from .models import PaymentTransaction
+            User = get_user_model()
+            
+            # Look for PaymentTransactions that match this payout amount and currency
+            # This is a fallback approach when seller info is missing
+            try:
+                potential_transactions = PaymentTransaction.objects.filter(
+                    gross_amount=Decimal(payout_amount) / 100,  # Convert from cents
+                    currency=payout_currency,
+                    payed_out=False,
+                    status__in=['completed', 'released']
+                ).select_related('seller')
+            except Exception as tx_error:
+                logger.error(f"Error querying PaymentTransactions for fallback seller: {tx_error}")
+                print(f"❌ Error finding fallback seller: {tx_error}")
+                potential_transactions = PaymentTransaction.objects.none()
+            
+            if potential_transactions.exists():
+                # Use the seller from the first matching transaction
+                seller = potential_transactions.first().seller
+                logger.info(f"Found potential seller {seller.id} for payout {stripe_payout_id}")
+                print(f"🔍 Found potential seller: {seller.username}")
+            else:
+                logger.error(f"Cannot determine seller for payout {stripe_payout_id}")
+                print(f"❌ Cannot determine seller for payout {stripe_payout_id}")
+                return None
+        else:
+            # Get seller from metadata
+            from django.contrib.auth import get_user_model
+            User = get_user_model()
+            try:
+                seller = User.objects.get(id=seller_id)
+                logger.info(f"Found seller {seller.id} from metadata for payout {stripe_payout_id}")
+                print(f"✅ Found seller from metadata: {seller.username}")
+            except User.DoesNotExist:
+                logger.error(f"Seller {seller_id} not found for payout {stripe_payout_id}")
+                print(f"❌ Seller {seller_id} not found for payout {stripe_payout_id}")
+                return None
+        
+        # Import Payout model
+        from .models import Payout
+        
+        # Create the payout record using READ COMMITTED isolation
+        with atomic_with_isolation('READ COMMITTED'):
+            payout_record = Payout.objects.create(
+                stripe_payout_id=stripe_payout_id,
+                seller=seller,
+                status=payout_status,
+                payout_type='standard',  # Default type for webhook-created payouts
+                amount_cents=payout_amount,
+                currency=payout_currency,
+                stripe_created_at=timezone.datetime.fromtimestamp(payout_created, tz=timezone.utc) if payout_created else timezone.now(),
+                arrival_date=timezone.datetime.fromtimestamp(payout_arrival_date, tz=timezone.utc) if payout_arrival_date else None,
+                description=payout_description or f"Webhook-created payout for seller {seller.username}",
+                metadata={
+                    'created_via_webhook': True,
+                    'webhook_event_type': event_type,
+                    'original_stripe_metadata': dict(payout_metadata),
+                    'seller_id': str(seller.id),
+                    'webhook_created_at': timezone.now().isoformat(),
+                }
+            )
+            
+            logger.info(f"Successfully created payout {payout_record.id} from webhook for seller {seller.id}")
+            print(f"✅ Created payout record: {payout_record.id}")
+            print(f"   Stripe Payout ID: {stripe_payout_id}")
+            print(f"   Seller: {seller.username}")
+            print(f"   Amount: {payout_record.amount_formatted}")
+            print(f"   Status: {payout_status}")
+            
+            # Update PaymentTracker records for this new payout
+            update_payment_trackers_for_payout(payout_record, event_type)
+            
+            return payout_record
+            
+    except Exception as e:
+        logger.error(f"Failed to create payout from webhook {stripe_payout_id}: {str(e)}")
+        print(f"❌ Failed to create payout from webhook: {str(e)}")
+        return None
 
 
 def update_payout_from_webhook(event, payout_object):
@@ -741,10 +977,10 @@ def update_payout_from_webhook(event, payout_object):
         return None
     
     # Define a deadlock-safe operation for complete payout update in a single SERIALIZABLE transaction
-    @retry_on_deadlock(max_retries=3, delay=0.1, backoff=2.0)
+    @retry_on_deadlock(max_retries=3, delay=0.01, backoff=2.0)  # 10ms initial delay
     def update_payout_safe():
         """Update payout and related transactions in a single SERIALIZABLE transaction with deadlock retry protection"""
-        with atomic_with_isolation('SERIALIZABLE'):
+        with atomic_with_isolation('READ COMMITTED'):
             with rollback_safe_operation("Complete Payout Webhook Update"):
                 try:
                     # Step 1: Retrieve payout with row-level locking for consistency
@@ -756,7 +992,7 @@ def update_payout_from_webhook(event, payout_object):
                     print(f"   Seller: {payout.seller.username}")
                     
                     # Step 2: Handle specific payout events according to requirements
-                    if event.type in ['payout.updated', 'payout.paid']:
+                    if event.type in ['payout.paid']:
                         # For payout updated and paid events, set status to 'paid' as requested
                         payout.status = 'paid'
                         print(f"🎯 Setting payout status to 'paid' for event type: {event.type}")
@@ -783,12 +1019,8 @@ def update_payout_from_webhook(event, payout_object):
                         logger.error(f"[WEBHOOK] Payout {payout.id} failed: {failure_code} - {failure_message}")
                         print(f"❌ Payout failed: {failure_code} - {failure_message}")
                         
-                        # Print entire event for failed payouts as requested
-                        print(f"🔴 ==================== FAILED PAYOUT EVENT ====================")
-                        print(f"🔴 Event Type: {event.type}")
-                        print(f"🔴 Complete Event Object:")
-                        print(f"🔴 {json.dumps(dict(event), indent=2, default=str)}")
-                        print(f"🔴 ===========================================================")
+                        # Log failure for monitoring
+                        print(f"❌ Payout {payout.id} failed: {failure_code} - {failure_message}")
                         
                         # Step 5: Reset payed_out flag for all transactions in this failed payout atomically
                         # Query payout items with row-level locking within the same transaction
@@ -835,7 +1067,7 @@ def update_payout_from_webhook(event, payout_object):
                         print(f"📝 Updated payout metadata with webhook info")
                     
                     # Step 8: Mark related transfers as paid out when payout is successful
-                    if event.type in ['payout.paid', 'payout.updated'] and payout.status == 'paid':
+                    if event.type in ['payout.paid'] and payout.status == 'paid':
                         print(f"🎯 Payout marked as paid, updating related transfers...")
                         
                         if event.type == 'payout.updated' and payout.status != 'paid':
@@ -860,13 +1092,26 @@ def update_payout_from_webhook(event, payout_object):
                     logger.info(f"[SUCCESS] Payout {payout.id} updated with status: {payout.status}")
                     print(f"✅ Payout status updated to: {payout.status}")
                     
+                    # Update PaymentTracker records based on payout status
+                    update_payment_trackers_for_payout(payout, event.type)
+                    
                     return payout
                     
                 except Payout.DoesNotExist:
-                    logger.error(f"[ERROR] Payout with stripe_payout_id {stripe_payout_id} not found")
-                    print(f"❌ Payout {stripe_payout_id} not found in database")
-                    # Re-raise as TransactionError to trigger rollback
-                    raise TransactionError(f"Payout with stripe_payout_id {stripe_payout_id} not found")
+                    logger.warning(f"[CREATE] Payout with stripe_payout_id {stripe_payout_id} not found, creating new one")
+                    print(f"🔄 Payout {stripe_payout_id} not found in database, creating new payout...")
+                    
+                    # Create new payout from webhook data
+                    new_payout = create_payout_from_webhook(stripe_payout_id, payout_object, event.type)
+                    
+                    if new_payout:
+                        logger.info(f"[SUCCESS] Created new payout {new_payout.id} from webhook")
+                        print(f"✅ Successfully created new payout: {new_payout.id}")
+                        return new_payout
+                    else:
+                        logger.error(f"[ERROR] Failed to create payout from webhook for {stripe_payout_id}")
+                        print(f"❌ Failed to create payout from webhook")
+                        raise TransactionError(f"Failed to create payout for stripe_payout_id {stripe_payout_id}")
                 except Exception as e:
                     logger.error(f"[ERROR] Unexpected error updating payout {stripe_payout_id}: {str(e)}")
                     print(f"❌ Error updating payout: {str(e)}")
@@ -939,13 +1184,7 @@ def stripe_webhook_connect(request):
         
 
 
-        print(f"🔔 ==================== PAYOUT WEBHOOK EVENT ====================")
-        print(f"🔔 Event Type: {event.type}")
-        print(f"🔔 Event ID: {getattr(event, 'id', 'unknown')}")
-        print(f"🔔 Created: {getattr(event, 'created', 'unknown')}")
-        print(f"🔔 Payout Object:")
-        print(f"🔔 {json.dumps(payout_object, indent=2, default=str)}")
-        print(f"🔔 ===============================================================")
+        print(f"🔔 Processing payout webhook: {event.type} for payout {getattr(payout_object, 'id', 'unknown')}")
         
         try:
             # Extract basic payout info for logging
@@ -958,13 +1197,15 @@ def stripe_webhook_connect(request):
             print(f"   Status: {payout_status}")
             
             # Use transaction-wrapped function to handle payout updates
-            # CRITICAL: Each webhook event processed in complete isolation
+            # CRITICAL: Each webhook event processed with proper model ordering
             def process_webhook_event():
-                """Process single webhook event in isolated transaction with retry."""
-                @retry_on_deadlock(max_retries=3, delay=0.1, backoff=2.0)
-                @financial_transaction
+                """Process single webhook event with READ COMMITTED isolation and proper model ordering."""
+                @retry_on_deadlock(max_retries=3, delay=0.01, backoff=2.0)  # 10ms initial delay
                 def isolated_webhook_update():
-                    return update_payout_from_webhook(event, payout_object)
+                    """Use READ COMMITTED isolation with 10ms deadlock retry for optimal webhook processing."""
+                    with atomic_with_isolation('READ COMMITTED'):
+                        with rollback_safe_operation("Payout Webhook Processing"):
+                            return update_payout_from_webhook(event, payout_object)
                 
                 return isolated_webhook_update()
             
@@ -989,99 +1230,97 @@ def stripe_webhook_connect(request):
             traceback.print_exc()
             # Don't fail the webhook for payout processing errors
     else :
-        # Print comprehensive event info for all other payout-related events
-        print(f"🔵 ==================== PAYOUT EVENT ====================")
-        print(f"🔵 Event Type: {event.type}")
-        print(f"🔵 Complete Event Object:")
-        print(f"🔵 {json.dumps(dict(event), indent=2, default=str)}")
-        print(f"🔵 ======================================================")
-        print(f"ℹ️ Unhandled event type: {event.type}")
+        print(f"ℹ️ Unhandled payout event type: {event.type}")
 
-    return HttpResponse(status=200, content='Webhook received but not successfully.')
+    return HttpResponse(status=200, content=f'{event.type} connect webhook successfully processed')
 
 # Create PaymentTransaction records for each seller in the order
 def create_payment_transactions(order, session):
     """
     Create PaymentTransaction records for each seller in the order
     This tracks payments per seller with integrated 30-day holding periods
+    Uses READ COMMITTED isolation for transaction safety.
     """
     from collections import defaultdict
     from decimal import Decimal
     
-    try:
-        print(f"🔄 Creating payment transactions for order {order.id}")
-        
-        # Get Stripe session info
-        stripe_payment_intent_id = session.get('payment_intent', '')
-        stripe_checkout_session_id = session.get('id', '')
-        total_amount = Decimal(session['amount_total']) / 100  # Convert from cents
-        
-        # Group order items by seller
-        sellers_data = defaultdict(lambda: {
-            'items': [],
-            'total_amount': Decimal('0.00'),
-            'item_count': 0,
-            'item_names': []
-        })
-        
-        for order_item in order.items.all():
-            seller = order_item.seller
-            sellers_data[seller]['items'].append(order_item)
-            sellers_data[seller]['total_amount'] += order_item.total_price
-            sellers_data[seller]['item_count'] += order_item.quantity
-            sellers_data[seller]['item_names'].append(order_item.product_name)
-        
-        print(f"📊 Found {len(sellers_data)} sellers in order")
-        
-        # Create PaymentTransaction for each seller
-        for seller, seller_data in sellers_data.items():
-            print(f"💰 Creating payment transaction for seller: {seller.username}")
+    with atomic_with_isolation('READ COMMITTED'):
+        with rollback_safe_operation("Create Payment Transactions"):
+            try:
+                print(f"🔄 Creating payment transactions for order {order.id}")
+                
+                # Get Stripe session info
+                stripe_payment_intent_id = session.get('payment_intent', '')
+                stripe_checkout_session_id = session.get('id', '')
+                total_amount = Decimal(session['amount_total']) / 100  # Convert from cents
+                
+                # Group order items by seller
+                sellers_data = defaultdict(lambda: {
+                    'items': [],
+                    'total_amount': Decimal('0.00'),
+                    'item_count': 0,
+                    'item_names': []
+                })
+                
+                for order_item in order.items.all():
+                    seller = order_item.seller
+                    sellers_data[seller]['items'].append(order_item)
+                    sellers_data[seller]['total_amount'] += order_item.total_price
+                    sellers_data[seller]['item_count'] += order_item.quantity
+                    sellers_data[seller]['item_names'].append(order_item.product_name)
+                
+                print(f"📊 Found {len(sellers_data)} sellers in order")
+                
+                # Create PaymentTransaction for each seller
+                for seller, seller_data in sellers_data.items():
+                    print(f"💰 Creating payment transaction for seller: {seller.username}")
+                    
+                    # Calculate fees (you can adjust these percentages)
+                    gross_amount = seller_data['total_amount']
+                    platform_fee_rate = Decimal('0.05')  # 5% platform fee
+                    stripe_fee_rate = Decimal('0.029')   # 2.9% Stripe fee + $0.30
+                    stripe_fixed_fee = Decimal('0.30')
+                    
+                    platform_fee = gross_amount * platform_fee_rate
+                    stripe_fee = (gross_amount * stripe_fee_rate) + stripe_fixed_fee
+                    net_amount = gross_amount - platform_fee - stripe_fee
+                    
+                    # Create PaymentTransaction with integrated hold system
+                    payment_transaction = PaymentTransaction.objects.create(
+                        stripe_payment_intent_id=stripe_payment_intent_id,
+                        stripe_checkout_session_id=stripe_checkout_session_id,
+                        order=order,
+                        seller=seller,
+                        buyer=order.buyer,
+                        status='pending',  # Start with pending status (waiting payment processing)
+                        gross_amount=gross_amount,
+                        platform_fee=platform_fee,
+                        stripe_fee=stripe_fee,
+                        net_amount=net_amount,
+                        currency='USD',
+                        item_count=seller_data['item_count'],
+                        item_names=', '.join(seller_data['item_names']),
+                        payment_received_date=timezone.now(),
+                        # Integrated hold fields - all payments held for 30 days
+                        hold_reason='standard',
+                        days_to_hold=30,  # Standard 30-day hold
+                        hold_start_date=timezone.now(),
+                        hold_notes=f"Standard 30-day hold period for marketplace transactions",
+                        metadata={
+                            'order_id': str(order.id),
+                            'stripe_session_id': stripe_checkout_session_id,
+                            'seller_id': str(seller.id),
+                            'buyer_id': str(order.buyer.id)
+                        }
+                    )
+                
+                    print(f"✅ Created payment transaction {payment_transaction.id} for ${net_amount} with pending status (waiting payment processing)")
+                    
+                print(f"✅ Successfully created payment tracking for order {order.id}")
             
-            # Calculate fees (you can adjust these percentages)
-            gross_amount = seller_data['total_amount']
-            platform_fee_rate = Decimal('0.05')  # 5% platform fee
-            stripe_fee_rate = Decimal('0.029')   # 2.9% Stripe fee + $0.30
-            stripe_fixed_fee = Decimal('0.30')
-            
-            platform_fee = gross_amount * platform_fee_rate
-            stripe_fee = (gross_amount * stripe_fee_rate) + stripe_fixed_fee
-            net_amount = gross_amount - platform_fee - stripe_fee
-            
-            # Create PaymentTransaction with integrated hold system
-            payment_transaction = PaymentTransaction.objects.create(
-                stripe_payment_intent_id=stripe_payment_intent_id,
-                stripe_checkout_session_id=stripe_checkout_session_id,
-                order=order,
-                seller=seller,
-                buyer=order.buyer,
-                status='pending',  # Start with pending status (waiting payment processing)
-                gross_amount=gross_amount,
-                platform_fee=platform_fee,
-                stripe_fee=stripe_fee,
-                net_amount=net_amount,
-                currency='USD',
-                item_count=seller_data['item_count'],
-                item_names=', '.join(seller_data['item_names']),
-                payment_received_date=timezone.now(),
-                # Integrated hold fields - all payments held for 30 days
-                hold_reason='standard',
-                days_to_hold=30,  # Standard 30-day hold
-                hold_start_date=timezone.now(),
-                hold_notes=f"Standard 30-day hold period for marketplace transactions",
-                metadata={
-                    'order_id': str(order.id),
-                    'stripe_session_id': stripe_checkout_session_id,
-                    'seller_id': str(seller.id),
-                    'buyer_id': str(order.buyer.id)
-                }
-            )
-            
-            print(f"✅ Created payment transaction {payment_transaction.id} for ${net_amount} with pending status (waiting payment processing)")
-        
-        print(f"✅ Successfully created payment tracking for order {order.id}")
-        
-    except Exception as e:
-        print(f"❌ Error creating payment transactions: {str(e)}")
+            except Exception as e:
+                print(f"❌ Error creating payment transactions: {str(e)}")
+                raise
         raise
 
 # Handle successful payment by updating existing order status this is for Stripe Webhook handling
@@ -1096,7 +1335,7 @@ def handle_sucessfull_checkout(session):
     print(f"Session data keys: {list(session.keys()) if isinstance(session, dict) else 'Not a dict'}")
     
     try:
-        with atomic_with_isolation('SERIALIZABLE'):
+        with atomic_with_isolation('READ COMMITTED'):
             # Extract user_id and order_id from metadata
             user_id = session['metadata'].get('user_id')
             order_id = session['metadata'].get('order_id')
@@ -1302,6 +1541,47 @@ def handle_sucessfull_checkout(session):
         print(f"❌ Error handling sucessfull checkout: {str(e)}")
         return False
 
+def get_product_image_url(product):
+    """
+    Get the best available image URL for a product, prioritizing presigned URLs
+    """
+    if not product.images.exists():
+        return ''
+    
+    primary_image = product.images.filter(is_primary=True).first()
+    if not primary_image:
+        primary_image = product.images.first()
+    
+    if not primary_image:
+        return ''
+    
+    # Try to get presigned URL first (best option)
+    try:
+        presigned_url = primary_image.get_presigned_url(expires_in=3600)
+        if presigned_url:
+            print(f"🔗 Using presigned URL for product {product.name}: {presigned_url[:50]}...")
+            return presigned_url
+    except Exception as e:
+        print(f"⚠️ Failed to get presigned URL for product {product.name}: {str(e)}")
+    
+    # Fallback to image_url property
+    try:
+        image_url = primary_image.image_url
+        if image_url:
+            print(f"🔗 Using image_url for product {product.name}: {image_url[:50]}...")
+            return image_url
+    except Exception as e:
+        print(f"⚠️ Failed to get image_url for product {product.name}: {str(e)}")
+    
+    # Final fallback to basic URL
+    try:
+        basic_url = primary_image.image.url
+        print(f"🔗 Using basic image URL for product {product.name}: {basic_url[:50]}...")
+        return basic_url
+    except Exception as e:
+        print(f"❌ Failed to get any image URL for product {product.name}: {str(e)}")
+        return ''
+
 # Create a Stripe Embedded Checkout Session
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
@@ -1348,7 +1628,7 @@ def create_checkout_session(request):
                     'product_data': {
                         'name': item.product.name,
                         'description': item.product.short_description or item.product.description[:100],
-                        'images': [item.product.images.filter(is_primary=True).first().image.url] if item.product.images.filter(is_primary=True).exists() else [],
+                        'images': [get_product_image_url(item.product)] if get_product_image_url(item.product) else [],
                     },
                 },
                 'quantity': item.quantity,
@@ -1370,7 +1650,7 @@ def create_checkout_session(request):
         # Create order with pending_payment status before Stripe session
         print(f"🔔 Creating order with pending_payment status for user {request.user.id}")
         
-        with atomic_with_isolation('SERIALIZABLE'):
+        with atomic_with_isolation('READ COMMITTED'):
             # Calculate totals from cart
             subtotal = sum(item.total_price for item in cart_items)
             shipping_cost = Decimal('19.99')  # Fixed shipping for now
@@ -1405,7 +1685,7 @@ def create_checkout_session(request):
                     total_price=cart_item.total_price,
                     product_name=product.name,
                     product_description=product.description,
-                    product_image=product.images.filter(is_primary=True).first().image.url if product.images.filter(is_primary=True).exists() else '',
+                    product_image=get_product_image_url(product),
                 )
                 
                 # Reserve stock (reduce stock quantity immediately)
@@ -1526,7 +1806,7 @@ def create_checkout_failed_checkout(request, order_id):
                     'product_data': {
                         'name': item.product.name,
                         'description': item.product.short_description or item.product.description[:100],
-                        'images': [item.product.images.filter(is_primary=True).first().image.url] if item.product.images.filter(is_primary=True).exists() else [],
+                        'images': [get_product_image_url(item.product)] if get_product_image_url(item.product) else [],
                     },
                 },
                 'quantity': item.quantity,
@@ -1600,7 +1880,7 @@ def cancel_order(request, order_id):
     Cancel an order and process Stripe refund if payment was made
     """
     try:
-        with atomic_with_isolation('SERIALIZABLE'):
+        with atomic_with_isolation('READ COMMITTED'):
             # Get the order
             try:
                 order = Order.objects.get(id=order_id)
@@ -2043,6 +2323,13 @@ def transfer_payment_to_seller(request):
                 'detail': f'Payment transaction must be in "held" status to transfer. Current status: {payment_transaction.status}',
                 'payment_status': payment_transaction.status
             }, status=status.HTTP_400_BAD_REQUEST)
+
+        if payment_transaction.order.status not in ['delivered']:
+            return Response({
+                'error': 'INVALID_ORDER_STATUS',
+                'detail': f'Order must be in "delivered" status to transfer payment. Current status: {payment_transaction.order.status}',
+                'order_status': payment_transaction.order.status
+            }, status=status.HTTP_400_BAD_REQUEST)
         
         # Use transfer group from request or default to order ID
         if not transfer_group:
@@ -2331,11 +2618,16 @@ def transfer_payment_to_seller(request):
 
 
 # Payment Intent Event Handlers
+@financial_transaction
 def handle_payment_intent_succeeded(payment_intent):
     """
     Handle payment_intent.succeeded webhook events.
+    Uses READ COMMITTED isolation level and follows proper model ordering:
+    1. Stripe API call (outside transaction)
+    2. Order model updates
+    3. PaymentTracker model updates  
+    4. PaymentTransaction model updates
     Only processes payment intents that have order_id in metadata.
-    Updates PaymentTracker and PaymentTransaction records with success status.
     """
     payment_intent_id = getattr(payment_intent, 'id', None)
     
@@ -2382,8 +2674,47 @@ def handle_payment_intent_succeeded(payment_intent):
     }
     
     try:
-        with atomic_with_isolation('SERIALIZABLE'):
-            # Update PaymentTracker records
+        # Use READ COMMITTED isolation level as requested for consistency
+        with atomic_with_isolation('READ COMMITTED'):
+            # STEP 1: Get and update Order model first (follows required ordering)
+            from marketplace.models import Order
+            try:
+                order = Order.objects.select_for_update().get(id=order_id)
+            except Order.DoesNotExist:
+                logger.error(f"Order {order_id} not found for payment intent {payment_intent_id}")
+                return {
+                    'success': False,
+                    'error': f'Order {order_id} not found',
+                    'trackers_updated': 0,
+                    'transactions_updated': 0,
+                    'orders_updated': 0,
+                    'errors': [f'Order {order_id} not found']
+                }
+            
+            # Only process if order is in pending_payment status
+            if order.status != 'pending_payment':
+                logger.info(f"Order {order_id} status is {order.status}, not pending_payment - skipping")
+                return {
+                    'success': True,
+                    'message': f'Order {order_id} status is {order.status}, not pending_payment - skipping',
+                    'trackers_updated': 0,
+                    'transactions_updated': 0,
+                    'orders_updated': 0,
+                    'errors': []
+                }
+
+            # Update order payment status to 'paid' and status to 'payment_confirmed'
+            from django.utils import timezone
+            order.status = 'payment_confirmed'
+            order.processed_at = timezone.now()
+            order.admin_notes = f"{order.admin_notes}\nPayment confirmed via payment intent {payment_intent_id}" if order.admin_notes else f"Payment confirmed via payment intent {payment_intent_id}"
+            order.payment_status = 'paid'
+            order.is_locked = True
+            order.save(update_fields=['status','processed_at', 'admin_notes','payment_status', 'is_locked', 'updated_at'])
+            results['orders_updated'] += 1
+            logger.info(f"Updated Order {order.id} payment_status to 'paid'")
+            
+            # STEP 2: Update PaymentTracker records (follows required ordering)
             trackers = PaymentTracker.objects.filter(
                 stripe_payment_intent_id=payment_intent_id
             ).select_for_update()
@@ -2406,46 +2737,8 @@ def handle_payment_intent_succeeded(payment_intent):
                 results['trackers_updated'] += 1
                 
                 logger.info(f"Updated PaymentTracker {tracker.id} to succeeded status")
-            
-            # First, get the specific order from metadata
-            from marketplace.models import Order
-            try:
-                order = Order.objects.select_for_update().get(id=order_id)
-            except Order.DoesNotExist:
-                logger.error(f"Order {order_id} not found for payment intent {payment_intent_id}")
-                return {
-                    'success': False,
-                    'error': f'Order {order_id} not found',
-                    'trackers_updated': 0,
-                    'transactions_updated': 0,
-                    'orders_updated': 0,
-                    'errors': [f'Order {order_id} not found']
-                }
-            
-            # Only process if order is in pending_payment status
-            if order.status != 'pending_payment':
-                logger.info(f"Order {order_id} status is {order.status}, not pending_payment - skipping")
-                return {
-                    'success': True,
-                    'message': f'Order {order_id} status is {order.status}, not pending_payment - skipping',
-                    'trackers_updated': results['trackers_updated'],
-                    'transactions_updated': 0,
-                    'orders_updated': 0,
-                    'errors': []
-                }
 
-            # Update order payment status to 'paid' and status to 'payment_confirmed'
-            from django.utils import timezone
-            order.status = 'payment_confirmed'
-            order.processed_at = timezone.now()
-            order.admin_notes = f"{order.admin_notes}\nPayment confirmed via payment intent {payment_intent_id}" if order.admin_notes else f"Payment confirmed via payment intent {payment_intent_id}"
-            order.payment_status = 'paid'
-            order.is_locked = True
-            order.save(update_fields=['status','processed_at', 'admin_notes','payment_status', 'is_locked', 'updated_at'])
-            results['orders_updated'] += 1
-            logger.info(f"Updated Order {order.id} payment_status to 'paid'")
-
-            # Update PaymentTransaction records for this order - set to 'held'
+            # STEP 3: Update PaymentTransaction records for this order - set to 'held' (follows required ordering)
             payment_transactions = PaymentTransaction.objects.filter(
                 order=order,
                 status='pending' # Only update pending transactions
@@ -2468,14 +2761,6 @@ def handle_payment_intent_succeeded(payment_intent):
                 ])
                 results['transactions_updated'] += 1
                 logger.info(f"Updated PaymentTransaction {txn.id} to 'held' status for order {order_id}")
-                return {
-                    'success': True,
-                    'message': f'Order {order_id} status is {order.status}, not pending_payment',
-                    'trackers_updated': results['trackers_updated'],
-                    'transactions_updated': 0,
-                    'orders_updated': 0,
-                    'errors': []
-                }
             
 
             if not payment_transactions:
@@ -2575,6 +2860,7 @@ def handle_payment_intent_succeeded(payment_intent):
     return results
 
 
+@financial_transaction
 def handle_payment_intent_failed(payment_intent):
     """
     Handle payment_intent.payment_failed webhook events.
@@ -2635,8 +2921,9 @@ def handle_payment_intent_failed(payment_intent):
     }
     
     try:
-        with atomic_with_isolation('SERIALIZABLE'):
-            # Get the specific order from metadata first
+        # Use READ COMMITTED isolation level as requested for consistency and proper ordering
+        with atomic_with_isolation('READ COMMITTED'):
+            # STEP 1: Get and update Order model first (follows required ordering)
             from marketplace.models import Order
             try:
                 order = Order.objects.select_for_update().get(id=order_id)

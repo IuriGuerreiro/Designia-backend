@@ -26,6 +26,9 @@ class PaymentTracker(models.Model):
         ('canceled', 'Canceled'),
         ('refunded', 'Refunded'),
         ('partially_refunded', 'Partially Refunded'),
+        ('payout_processing', 'Payout Processing'),
+        ('payout_success', 'Payout Success'),
+        ('payout_failed', 'Payout Failed'),
     ]
     
     # Basic identifiers
@@ -749,6 +752,12 @@ class Payout(models.Model):
     description = models.TextField(blank=True, help_text="Description of the payout")
     metadata = models.JSONField(default=dict, blank=True, help_text="Additional metadata")
     
+    # Simple retry tracking
+    retry_count = models.PositiveIntegerField(
+        default=0, 
+        help_text="Number of retry attempts for failed payouts"
+    )
+    
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -761,6 +770,7 @@ class Payout(models.Model):
             models.Index(fields=['status', '-created_at']),
             models.Index(fields=['stripe_payout_id']),
             models.Index(fields=['currency', '-created_at']),
+            models.Index(fields=['retry_count']),
         ]
     
     def save(self, *args, **kwargs):
@@ -821,6 +831,23 @@ class Payout(models.Model):
             'total_gross_amount', 'total_fees', 'transfer_count', 
             'amount_cents', 'amount_decimal', 'updated_at'
         ])
+    
+    def update_status(self, new_status):
+        """
+        Simple status update without complex tracking.
+        """
+        self.status = new_status
+        self.save(update_fields=['status', 'updated_at'])
+    
+    def increment_retry_count(self):
+        """Increment retry count for failed payouts."""
+        self.retry_count += 1
+        self.save(update_fields=['retry_count', 'updated_at'])
+    
+    
+    
+    
+    
     
     def __str__(self):
         return f"Payout {str(self.id)[:8]} - {self.seller.username} - {self.amount_formatted} ({self.status})"

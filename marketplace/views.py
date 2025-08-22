@@ -9,12 +9,25 @@ from django.db import transaction, models
 from django_filters.rest_framework import DjangoFilterBackend
 import logging
 import json
+import uuid
+import os
+
+try:
+    from PIL import Image
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
+    logger.warning("PIL/Pillow not available - image validation will be limited")
 
 # Import transaction utilities
 from utils.transaction_utils import (
     product_transaction, atomic_with_isolation, 
     rollback_safe_operation, log_transaction_performance
 )
+
+# Import S3 storage utilities
+from utils.s3_storage import S3StorageError, get_s3_storage
+from django.conf import settings
 
 from .models import (
     Category, Product, ProductImage, ProductReview, ProductFavorite,
@@ -33,6 +46,56 @@ from .permissions import IsSellerOrReadOnly, IsOwnerOrReadOnly
 
 # Set up logger
 logger = logging.getLogger(__name__)
+
+def validate_and_process_image(image_file, max_size_mb=10):
+    """
+    Validate image file extension, size, and generate random filename
+    """
+    # Allowed extensions
+    ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp'}
+    MAX_SIZE = max_size_mb * 1024 * 1024  # Convert MB to bytes
+    
+    # Get file extension
+    file_ext = os.path.splitext(image_file.name.lower())[1]
+    
+    # Validate extension
+    if file_ext not in ALLOWED_EXTENSIONS:
+        raise ValidationError(f"Invalid file extension {file_ext}. Allowed: {', '.join(ALLOWED_EXTENSIONS)}")
+    
+    # Validate file size
+    if image_file.size > MAX_SIZE:
+        raise ValidationError(f"File size {image_file.size} bytes exceeds maximum {max_size_mb}MB")
+    
+    # Generate random filename
+    random_name = f"{uuid.uuid4().hex}{file_ext}"
+    
+    # Additional validation: try to open as image (if PIL is available)
+    if PIL_AVAILABLE:
+        try:
+            # Reset file pointer
+            image_file.seek(0)
+            # Verify it's a valid image
+            with Image.open(image_file) as img:
+                img.verify()
+            # Reset file pointer again for upload
+            image_file.seek(0)
+        except Exception as e:
+            raise ValidationError(f"Invalid image file: {str(e)}")
+    else:
+        # Basic validation without PIL - just check if file has content
+        image_file.seek(0)
+        content = image_file.read(1024)  # Read first 1KB
+        if not content:
+            raise ValidationError("Empty image file")
+        image_file.seek(0)
+    
+    return {
+        'file': image_file,
+        'original_name': image_file.name,
+        'random_name': random_name,
+        'extension': file_ext,
+        'size': image_file.size
+    }
 
 
 def start_background_tracking(tracking_func):
@@ -164,26 +227,209 @@ class ProductViewSet(viewsets.ModelViewSet):
         return queryset
     
     def create(self, request, *args, **kwargs):
-        """Override create method without heavy transactions"""
-        serializer = self.get_serializer(data=request.data)
-        
-        if serializer.is_valid():
-            self.perform_create(serializer)
-            headers = self.get_success_headers(serializer.data)
-            return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
-        else:
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        """Override create method with enhanced error handling for file uploads"""
+        try:
+            serializer = self.get_serializer(data=request.data)
+            
+            if serializer.is_valid():
+                product = self.perform_create(serializer)
+                headers = self.get_success_headers(serializer.data)
+                
+                # Add image information with presigned URLs to response
+                response_data = serializer.data.copy()
+                try:
+                    # Get all product images with presigned URLs
+                    product_images = product.images.order_by('order', 'id')
+                    if product_images:
+                        images_data = ProductImageSerializer(product_images, many=True).data
+                        response_data['images'] = images_data
+                        response_data['primary_image'] = next(
+                            (img for img in images_data if img['is_primary']), 
+                            images_data[0] if images_data else None
+                        )
+                        response_data['total_images'] = len(images_data)
+                    else:
+                        response_data['images'] = []
+                        response_data['primary_image'] = None
+                        response_data['total_images'] = 0
+                except Exception as e:
+                    logger.warning(f"Could not fetch product images for response: {str(e)}")
+                    response_data['images'] = []
+                    response_data['primary_image'] = None
+                    response_data['total_images'] = 0
+                
+                return Response(response_data, status=status.HTTP_201_CREATED, headers=headers)
+            else:
+                logger.error(f"Product creation validation errors: {serializer.errors}")
+                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+                
+        except Exception as e:
+            logger.error(f"Unexpected error during product creation: {str(e)}")
+            return Response({
+                'detail': 'An error occurred while creating the product. Please try again.',
+                'error': str(e) if settings.DEBUG else 'Internal server error'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def perform_create(self, serializer):
-        """Create a new product with async metrics initialization"""
+        """Create a new product with async metrics initialization and S3 image handling"""
         user = self.request.user
-        # Create the product without heavy transactions
+        
+        # Create the product first
         product = serializer.save(seller=user)
+        
+        # Handle S3 image uploads after product creation (if S3 is enabled)
+        if getattr(settings, 'USE_S3', False):
+            uploaded_images = []
+            
+            # Debug: Log all available files
+            logger.info(f"=== FILES DEBUG ===")
+            logger.info(f"request.FILES keys: {list(self.request.FILES.keys())}")
+            if settings.DEBUG:
+                logger.info(f"request.data keys: {list(self.request.data.keys())}")
+                for key, value in self.request.FILES.items():
+                    logger.info(f"FILES[{key}]: {value} (type: {type(value).__name__})")
+            
+            # Get image files from request - try all possible field names
+            image_files = self.request.FILES.getlist('images', [])  # Gallery images
+            main_image = self.request.FILES.get('main_image')  # Main image
+            uploaded_images_field = self.request.FILES.getlist('uploaded_images', [])  # Alternative field name
+            
+            # Also try to get all file-like objects from any field
+            all_file_fields = []
+            for key, file_obj in self.request.FILES.items():
+                if hasattr(file_obj, 'read') and hasattr(file_obj, 'name'):
+                    all_file_fields.append(('uploaded', file_obj))
+                    logger.info(f"Found file in field '{key}': {file_obj.name}")
+            
+            # Debug: Log what we found
+            logger.info(f"Found {len(image_files)} gallery images")
+            logger.info(f"Found main_image: {main_image is not None}")
+            logger.info(f"Found {len(uploaded_images_field)} uploaded_images")
+            logger.info(f"Found {len(all_file_fields)} total file objects")
+            
+            # Combine all image sources
+            all_images = []
+            if main_image:
+                all_images.append(('main', main_image))
+            
+            # Add gallery images
+            for img in image_files:
+                all_images.append(('gallery', img))
+                
+            # Add uploaded_images as gallery
+            for img in uploaded_images_field:
+                all_images.append(('gallery', img))
+            
+            # If no images found in traditional fields, use all file objects found
+            if not all_images and all_file_fields:
+                logger.info("No images found in traditional fields, using all file objects")
+                all_images = all_file_fields
+            
+            # Upload to S3 if we have images
+            logger.info(f"=== S3 UPLOAD PHASE ===")
+            logger.info(f"Total images to process: {len(all_images)}")
+            
+            if all_images:
+                try:
+                    s3_storage = get_s3_storage()
+                    
+                    for i, (image_type, image_file) in enumerate(all_images):
+                        try:
+                            # Validate and process image (extension, size, random name)
+                            logger.info(f"Processing image {i}: {image_file.name} ({image_file.size} bytes)")
+                            validated_image = validate_and_process_image(image_file, max_size_mb=10)
+                            logger.info(f"Image validated: {validated_image['random_name']} (was {validated_image['original_name']})")
+                            
+                            # Validate encoding metadata if provided
+                            encoding_metadata = {}
+                            try:
+                                # Extract encoding metadata sent from frontend
+                                encoding = self.request.data.get(f'image_{i}_encoding')
+                                quality = self.request.data.get(f'image_{i}_quality')
+                                original_size = self.request.data.get(f'image_{i}_original_size')
+                                encoded_size = self.request.data.get(f'image_{i}_encoded_size')
+                                compression_ratio = self.request.data.get(f'image_{i}_compression_ratio')
+                                
+                                if all([encoding, quality, original_size, encoded_size, compression_ratio]):
+                                    # Validate encoding metadata
+                                    encoding_validation = s3_storage._validate_encoding_metadata(
+                                        encoding=encoding,
+                                        quality=float(quality),
+                                        original_size=int(original_size),
+                                        encoded_size=int(encoded_size),
+                                        compression_ratio=float(compression_ratio)
+                                    )
+                                    encoding_metadata = encoding_validation
+                                    logger.info(f"Encoding metadata validated for image {i}: {encoding_metadata}")
+                                else:
+                                    logger.info(f"No encoding metadata provided for image {i}, proceeding with basic validation")
+                                    
+                            except (ValueError, TypeError, S3StorageError) as e:
+                                logger.warning(f"Invalid encoding metadata for image {i}: {str(e)}")
+                                # Continue with upload but log the issue
+                            
+                            # Set random filename
+                            original_filename = image_file.name
+                            image_file.name = validated_image['random_name']
+                            
+                            result = s3_storage.upload_product_image(
+                                product_id=str(product.id),
+                                image_file=image_file,
+                                image_type=image_type
+                            )
+                            
+                            # Create ProductImage record with S3 information
+                            from .models import ProductImage
+                            product_image = ProductImage.objects.create(
+                                product=product,
+                                s3_key=result['key'],
+                                s3_bucket=s3_storage.bucket_name,
+                                original_filename=original_filename,
+                                file_size=result['size'],
+                                content_type=validated_image.get('content_type', ''),
+                                is_primary=(image_type == 'main' or i == 0),  # First image or main is primary
+                                order=i + 1  # Order starts from 1, 2, 3, 4, 5, 6
+                            )
+                            
+                            uploaded_images.append({
+                                'id': product_image.id,
+                                'type': image_type,
+                                'url': result['url'],
+                                'presigned_url': product_image.get_presigned_url(),
+                                'key': result['key'],
+                                'size': result['size'],
+                                'filename': validated_image['random_name'],
+                                'original_filename': original_filename,
+                                'validated_extension': validated_image['extension'],
+                                'validated_size': validated_image['size']
+                            })
+                            logger.info(f"Uploaded {image_type} image for product {product.id}: {result['key']} (DB record: {product_image.id})")
+                        except ValidationError as e:
+                            logger.error(f"Image validation failed for {image_file.name}: {str(e)}")
+                            continue
+                        except S3StorageError as e:
+                            logger.error(f"Failed to upload {image_type} image for product {product.id}: {str(e)}")
+                            continue
+                        except Exception as e:
+                            logger.error(f"Unexpected error processing image {image_file.name}: {str(e)}")
+                            continue
+                    
+                    if uploaded_images:
+                        logger.info(f"Successfully uploaded {len(uploaded_images)} images for product {product.id}")
+                        # Store S3 info in product metadata if needed
+                        # product.s3_images = uploaded_images  # If you have such a field
+                        # product.save()
+                        
+                except Exception as e:
+                    logger.error(f"S3 storage error during product creation for {product.id}: {str(e)}")
+                    # Don't fail product creation if S3 upload fails
+            else:
+                logger.warning(f"No images found to upload for product {product.id}")
+                logger.warning(f"This might indicate an issue with file detection or FormData processing")
         
         # Queue async metrics initialization for the new product
         try:
             from .async_tracking import AsyncTracker
-            # Initialize the async tracker which will handle metrics creation in background
             AsyncTracker.initialize()
             logger.info(f"Product created: {product.name} - metrics will be initialized asynchronously")
         except Exception as e:
@@ -199,7 +445,25 @@ class ProductViewSet(viewsets.ModelViewSet):
         page = self.paginate_queryset(queryset)
         if page is not None:
             serializer = self.get_serializer(page, many=True)
-            response = self.get_paginated_response(serializer.data)
+            response_data = serializer.data
+            
+            # Log AWS presigned URLs for product listing
+            logger.info(f"=== PRODUCT LIST - AWS PRESIGNED URLS DEBUG ===")
+            logger.info(f"Total products in page: {len(page)}")
+            
+            for i, product_data in enumerate(response_data['results'] if 'results' in response_data else response_data):
+                logger.info(f"Product {i+1}: {product_data.get('name')} (ID: {product_data.get('id')})")
+                primary_image = product_data.get('primary_image')
+                if primary_image:
+                    logger.info(f"  - Primary Image ID: {primary_image.get('id')}")
+                    logger.info(f"  - S3 Key: {primary_image.get('s3_key')}")
+                    logger.info(f"  - Presigned URL: {primary_image.get('presigned_url')}")
+                    print(f"📋 LIST - AWS PRESIGNED URL for {product_data.get('name')}: {primary_image.get('presigned_url')}")
+                else:
+                    logger.info(f"  - No primary image found")
+                    print(f"⚠️  LIST - No primary image for: {product_data.get('name')}")
+            
+            response = self.get_paginated_response(response_data)
             
             # Queue async tracking AFTER response is ready
             from .async_tracking import AsyncTracker
@@ -208,7 +472,25 @@ class ProductViewSet(viewsets.ModelViewSet):
             return response
 
         serializer = self.get_serializer(queryset, many=True)
-        response = Response(serializer.data)
+        response_data = serializer.data
+        
+        # Log AWS presigned URLs for non-paginated listing
+        logger.info(f"=== PRODUCT LIST (NON-PAGINATED) - AWS PRESIGNED URLS DEBUG ===")
+        logger.info(f"Total products: {len(response_data)}")
+        
+        for i, product_data in enumerate(response_data):
+            logger.info(f"Product {i+1}: {product_data.get('name')} (ID: {product_data.get('id')})")
+            primary_image = product_data.get('primary_image')
+            if primary_image:
+                logger.info(f"  - Primary Image ID: {primary_image.get('id')}")
+                logger.info(f"  - S3 Key: {primary_image.get('s3_key')}")
+                logger.info(f"  - Presigned URL: {primary_image.get('presigned_url')}")
+                print(f"📋 LIST - AWS PRESIGNED URL for {product_data.get('name')}: {primary_image.get('presigned_url')}")
+            else:
+                logger.info(f"  - No primary image found")
+                print(f"⚠️  LIST - No primary image for: {product_data.get('name')}")
+        
+        response = Response(response_data)
         
         # Queue async tracking AFTER response is ready  
         from .async_tracking import AsyncTracker
@@ -221,7 +503,29 @@ class ProductViewSet(viewsets.ModelViewSet):
         instance = self.get_object()
         
         serializer = self.get_serializer(instance)
-        response = Response(serializer.data)
+        response_data = serializer.data
+        
+        # Log AWS presigned URLs for debugging
+        logger.info(f"=== PRODUCT RETRIEVE - AWS PRESIGNED URLS DEBUG ===")
+        logger.info(f"Product: {instance.name} (ID: {instance.id}, Slug: {instance.slug})")
+        
+        if 'images' in response_data and response_data['images']:
+            logger.info(f"Total images found: {len(response_data['images'])}")
+            for i, image in enumerate(response_data['images']):
+                logger.info(f"Image {i+1}:")
+                logger.info(f"  - ID: {image.get('id')}")
+                logger.info(f"  - Order: {image.get('order')}")
+                logger.info(f"  - Is Primary: {image.get('is_primary')}")
+                logger.info(f"  - S3 Key: {image.get('s3_key')}")
+                logger.info(f"  - Original Filename: {image.get('original_filename')}")
+                logger.info(f"  - Presigned URL: {image.get('presigned_url')}")
+                logger.info(f"  - Image URL (fallback): {image.get('image_url')}")
+                print(f"🖼️  AWS PRESIGNED URL {i+1}: {image.get('presigned_url')}")
+        else:
+            logger.info("No images found for this product")
+            print(f"⚠️  No images found for product: {instance.name}")
+        
+        response = Response(response_data)
         
         # Queue async tracking AFTER response is ready
         from .async_tracking import AsyncTracker
@@ -333,6 +637,255 @@ class ProductViewSet(viewsets.ModelViewSet):
         favorites = ProductFavorite.objects.filter(user=request.user).select_related('product')
         serializer = ProductFavoriteSerializer(favorites, many=True)
         return Response(serializer.data)
+
+    @action(detail=True, methods=['get'])
+    def images(self, request, slug=None):
+        """Get all S3 images for a product"""
+        if not getattr(settings, 'USE_S3', False):
+            return Response({
+                'detail': 'S3 storage is not enabled',
+                'images': []
+            })
+        
+        product = self.get_object()
+        
+        try:
+            s3_storage = get_s3_storage()
+            images = s3_storage.get_product_images(str(product.id))
+            
+            return Response({
+                'product_id': str(product.id),
+                'product_name': product.name,
+                'images': images,
+                'total_images': len(images)
+            })
+            
+        except S3StorageError as e:
+            logger.error(f"Failed to get images for product {product.id}: {str(e)}")
+            return Response({
+                'detail': f'Failed to retrieve images: {str(e)}',
+                'images': []
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
+    def upload_image(self, request, slug=None):
+        """Upload additional images to S3 for a product"""
+        if not getattr(settings, 'USE_S3', False):
+            return Response({
+                'detail': 'S3 storage is not enabled'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        product = self.get_object()
+        
+        # Check if user owns the product
+        if product.seller != request.user:
+            return Response({
+                'detail': 'You can only upload images to your own products'
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        # Get image file from request
+        image_file = request.FILES.get('image')
+        if not image_file:
+            return Response({
+                'detail': 'Image file is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Get image type (default to gallery)
+        image_type = request.data.get('image_type', 'gallery')
+        if image_type not in ['main', 'gallery', 'thumbnail']:
+            image_type = 'gallery'
+        
+        try:
+            s3_storage = get_s3_storage()
+            result = s3_storage.upload_product_image(
+                product_id=str(product.id),
+                image_file=image_file,
+                image_type=image_type
+            )
+            
+            logger.info(f"User {request.user.username} uploaded {image_type} image for product {product.id}")
+            
+            return Response({
+                'success': True,
+                'message': f'{image_type.title()} image uploaded successfully',
+                'image': {
+                    'url': result['url'],
+                    'key': result['key'],
+                    'size': result['size'],
+                    'type': image_type,
+                    'uploaded_at': result['uploaded_at']
+                }
+            }, status=status.HTTP_201_CREATED)
+            
+        except S3StorageError as e:
+            logger.error(f"Failed to upload image for product {product.id}: {str(e)}")
+            return Response({
+                'detail': f'Failed to upload image: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=True, methods=['delete'], permission_classes=[IsAuthenticated])
+    def delete_image(self, request, slug=None):
+        """Delete a specific S3 image for a product"""
+        if not getattr(settings, 'USE_S3', False):
+            return Response({
+                'detail': 'S3 storage is not enabled'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        product = self.get_object()
+        
+        # Check if user owns the product
+        if product.seller != request.user:
+            return Response({
+                'detail': 'You can only delete images from your own products'
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        # Get image key from request
+        image_key = request.data.get('image_key')
+        if not image_key:
+            return Response({
+                'detail': 'image_key is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            s3_storage = get_s3_storage()
+            success = s3_storage.delete_specific_product_image(
+                product_id=str(product.id),
+                image_key=image_key
+            )
+            
+            if success:
+                logger.info(f"User {request.user.username} deleted image {image_key} for product {product.id}")
+                return Response({
+                    'success': True,
+                    'message': 'Image deleted successfully',
+                    'deleted_key': image_key
+                })
+            else:
+                return Response({
+                    'detail': 'Failed to delete image'
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                
+        except S3StorageError as e:
+            logger.error(f"Failed to delete image {image_key} for product {product.id}: {str(e)}")
+            return Response({
+                'detail': f'Failed to delete image: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=True, methods=['delete'], permission_classes=[IsAuthenticated])
+    def delete_all_images(self, request, slug=None):
+        """Delete all S3 images for a product"""
+        if not getattr(settings, 'USE_S3', False):
+            return Response({
+                'detail': 'S3 storage is not enabled'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        product = self.get_object()
+        
+        # Check if user owns the product
+        if product.seller != request.user:
+            return Response({
+                'detail': 'You can only delete images from your own products'
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        try:
+            s3_storage = get_s3_storage()
+            deleted_count = s3_storage.delete_product_images(str(product.id))
+            
+            logger.info(f"User {request.user.username} deleted {deleted_count} images for product {product.id}")
+            
+            return Response({
+                'success': True,
+                'message': f'Deleted {deleted_count} images successfully',
+                'deleted_count': deleted_count
+            })
+            
+        except S3StorageError as e:
+            logger.error(f"Failed to delete images for product {product.id}: {str(e)}")
+            return Response({
+                'detail': f'Failed to delete images: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=True, methods=['get'])
+    def main_image(self, request, slug=None):
+        """Get the main image for a product with presigned URL"""
+        product = self.get_object()
+        
+        # Get primary image from database (supports both S3 and traditional storage)
+        primary_image = product.images.filter(is_primary=True).first()
+        if not primary_image:
+            primary_image = product.images.order_by('order').first()
+        
+        if primary_image:
+            # Use the ProductImageSerializer to get presigned URL
+            image_data = ProductImageSerializer(primary_image).data
+            
+            # Log the AWS presigned URL
+            logger.info(f"=== MAIN IMAGE ENDPOINT - AWS PRESIGNED URL ===")
+            logger.info(f"Product: {product.name} (ID: {product.id}, Slug: {product.slug})")
+            logger.info(f"Main Image ID: {image_data['id']}")
+            logger.info(f"S3 Key: {image_data['s3_key']}")
+            logger.info(f"Presigned URL: {image_data['presigned_url']}")
+            print(f"🖼️  MAIN IMAGE - AWS PRESIGNED URL for {product.name}: {image_data['presigned_url']}")
+            
+            return Response({
+                'product_id': str(product.id),
+                'product_name': product.name,
+                'product_slug': product.slug,
+                'main_image': {
+                    'id': image_data['id'],
+                    'presigned_url': image_data['presigned_url'],
+                    'image_url': image_data['image_url'],
+                    'alt_text': image_data['alt_text'],
+                    'is_primary': image_data['is_primary'],
+                    'order': image_data['order'],
+                    's3_key': image_data['s3_key'],
+                    'original_filename': image_data['original_filename']
+                }
+            })
+        else:
+            logger.info(f"=== MAIN IMAGE ENDPOINT - NO IMAGE FOUND ===")
+            logger.info(f"Product: {product.name} (ID: {product.id}, Slug: {product.slug})")
+            print(f"⚠️  MAIN IMAGE - No image found for product: {product.name}")
+            
+            return Response({
+                'product_id': str(product.id),
+                'product_name': product.name,
+                'product_slug': product.slug,
+                'main_image': None,
+                'message': 'No images found for this product'
+            })
+
+    @action(detail=True, methods=['get'])
+    def images_with_presigned_urls(self, request, slug=None):
+        """Get all images for a product with presigned URLs"""
+        product = self.get_object()
+        
+        # Get all product images ordered by order field
+        images = product.images.order_by('order', 'id')
+        
+        if images:
+            # Use the ProductImageSerializer to get presigned URLs for all images
+            images_data = ProductImageSerializer(images, many=True).data
+            
+            return Response({
+                'product_id': str(product.id),
+                'product_name': product.name,
+                'product_slug': product.slug,
+                'total_images': len(images_data),
+                'images': images_data,
+                'primary_image': next((img for img in images_data if img['is_primary']), 
+                                    images_data[0] if images_data else None)
+            })
+        else:
+            return Response({
+                'product_id': str(product.id),
+                'product_name': product.name,
+                'product_slug': product.slug,
+                'total_images': 0,
+                'images': [],
+                'primary_image': None,
+                'message': 'No images found for this product'
+            })
 
 
 class ProductImageViewSet(viewsets.ModelViewSet):
@@ -1475,3 +2028,126 @@ class ProductMetricsViewSet(viewsets.ReadOnlyModelViewSet):
         }
         
         return Response(product_data)
+
+
+class UserProfileViewSet(viewsets.ViewSet):
+    """
+    ViewSet for user profile operations including S3 profile pictures
+    """
+    permission_classes = [IsAuthenticated]
+
+    @action(detail=False, methods=['get'])
+    def profile_picture(self, request):
+        """Get current user's profile picture from S3"""
+        if not getattr(settings, 'USE_S3', False):
+            return Response({
+                'detail': 'S3 storage is not enabled',
+                'profile_picture': None
+            })
+        
+        try:
+            s3_storage = get_s3_storage()
+            profile_pic = s3_storage.get_profile_picture(str(request.user.id))
+            
+            return Response({
+                'user_id': str(request.user.id),
+                'username': request.user.username,
+                'profile_picture': profile_pic
+            })
+            
+        except S3StorageError as e:
+            logger.error(f"Failed to get profile picture for user {request.user.id}: {str(e)}")
+            return Response({
+                'detail': f'Failed to retrieve profile picture: {str(e)}',
+                'profile_picture': None
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['post'])
+    def upload_profile_picture(self, request):
+        """Upload or update user's profile picture to S3"""
+        if not getattr(settings, 'USE_S3', False):
+            return Response({
+                'detail': 'S3 storage is not enabled'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Get image file from request
+        image_file = request.FILES.get('profile_picture') or request.FILES.get('image')
+        if not image_file:
+            return Response({
+                'detail': 'Profile picture file is required (use "profile_picture" or "image" field)'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Validate image file
+        max_size = 5 * 1024 * 1024  # 5MB
+        if image_file.size > max_size:
+            return Response({
+                'detail': f'Image file too large. Maximum size is {max_size // (1024*1024)}MB'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Check file type
+        allowed_types = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp']
+        if hasattr(image_file, 'content_type') and image_file.content_type not in allowed_types:
+            return Response({
+                'detail': f'Invalid file type. Allowed types: {", ".join(allowed_types)}'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            s3_storage = get_s3_storage()
+            result = s3_storage.upload_profile_picture(
+                user_id=str(request.user.id),
+                image_file=image_file,
+                replace_existing=True
+            )
+            
+            logger.info(f"User {request.user.username} uploaded profile picture")
+            
+            return Response({
+                'success': True,
+                'message': 'Profile picture uploaded successfully',
+                'profile_picture': {
+                    'url': result['url'],
+                    'key': result['key'],
+                    'size': result['size'],
+                    'uploaded_at': result['uploaded_at']
+                }
+            }, status=status.HTTP_201_CREATED)
+            
+        except S3StorageError as e:
+            logger.error(f"Failed to upload profile picture for user {request.user.id}: {str(e)}")
+            return Response({
+                'detail': f'Failed to upload profile picture: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['delete'])
+    def delete_profile_picture(self, request):
+        """Delete user's profile picture from S3"""
+        if not getattr(settings, 'USE_S3', False):
+            return Response({
+                'detail': 'S3 storage is not enabled'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            s3_storage = get_s3_storage()
+            success = s3_storage.delete_profile_picture(str(request.user.id))
+            
+            if success:
+                logger.info(f"User {request.user.username} deleted profile picture")
+                return Response({
+                    'success': True,
+                    'message': 'Profile picture deleted successfully'
+                })
+            else:
+                return Response({
+                    'detail': 'No profile picture found to delete'
+                }, status=status.HTTP_404_NOT_FOUND)
+                
+        except S3StorageError as e:
+            logger.error(f"Failed to delete profile picture for user {request.user.id}: {str(e)}")
+            return Response({
+                'detail': f'Failed to delete profile picture: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['patch'])
+    def update_profile_picture(self, request):
+        """Update user's profile picture (alias for upload_profile_picture)"""
+        return self.upload_profile_picture(request)

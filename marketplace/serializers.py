@@ -60,11 +60,20 @@ class CategorySerializer(serializers.ModelSerializer):
 
 
 class ProductImageSerializer(serializers.ModelSerializer):
-    """Product image serializer"""
+    """Product image serializer with presigned URL support"""
+    presigned_url = serializers.SerializerMethodField()
+    image_url = serializers.ReadOnlyField()  # Uses the property from model
+    
     class Meta:
         model = ProductImage
-        fields = ['id', 'image', 'alt_text', 'is_primary', 'order']
-        read_only_fields = ['id']
+        fields = ['id', 'image', 'alt_text', 'is_primary', 'order', 
+                 'presigned_url', 'image_url', 's3_key', 'original_filename', 
+                 'file_size', 'content_type']
+        read_only_fields = ['id', 's3_key', 'original_filename', 'file_size', 'content_type']
+    
+    def get_presigned_url(self, obj):
+        """Get presigned URL with 1 hour expiration"""
+        return obj.get_presigned_url(expires_in=3600)
 
 
 class ProductReviewSerializer(serializers.ModelSerializer):
@@ -194,9 +203,9 @@ class ProductDetailSerializer(serializers.ModelSerializer):
 class ProductCreateUpdateSerializer(serializers.ModelSerializer):
     """Serializer for creating and updating products"""
     images = ProductImageSerializer(many=True, read_only=True)
-    uploaded_images = serializers.ListField(
-        child=serializers.ImageField(), write_only=True, required=False
-    )
+    # Note: uploaded_images are handled directly in the view via request.FILES.getlist()
+    # They are not included in serializer fields to avoid validation issues with encoded files
+    
     # Use custom field for JSON data that can come as strings from FormData
     colors = FlexibleJSONField(required=False)
     tags = FlexibleJSONField(required=False)
@@ -207,7 +216,7 @@ class ProductCreateUpdateSerializer(serializers.ModelSerializer):
                  'price', 'original_price', 'stock_quantity', 'condition', 'brand',
                  'model', 'weight', 'dimensions_length', 'dimensions_width',
                  'dimensions_height', 'colors', 'materials', 'tags', 'is_featured',
-                 'is_digital', 'images', 'uploaded_images']
+                 'is_digital', 'images']
         read_only_fields = ['id', 'images']
 
     def to_internal_value(self, data):
@@ -216,8 +225,17 @@ class ProductCreateUpdateSerializer(serializers.ModelSerializer):
         logger.info(f"Raw data type: {type(data)}")
         logger.info(f"Raw data keys: {list(data.keys()) if hasattr(data, 'keys') else 'No keys method'}")
         
-        # Create a mutable copy for processing
-        processed_data = data.copy() if hasattr(data, 'copy') else dict(data)
+        # Create a mutable copy for processing, but handle file objects carefully
+        if hasattr(data, 'copy'):
+            # For QueryDict, create a shallow copy to avoid deep copying file objects
+            processed_data = {}
+            for key, value in data.items():
+                if hasattr(value, 'read'):  # File-like object - don't copy, just reference
+                    processed_data[key] = value
+                else:
+                    processed_data[key] = value
+        else:
+            processed_data = dict(data)
         
         # Log each field safely
         for key, value in processed_data.items():

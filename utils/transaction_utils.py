@@ -93,19 +93,20 @@ def atomic_with_isolation(isolation_level='REPEATABLE READ', using='default', sa
             yield
             logger.debug("Transaction committed successfully")
     except (IntegrityError, OperationalError) as e:
+        
         logger.error(f"Database error in transaction: {e}")
         raise TransactionError(f"Transaction failed: {e}")
     except Exception as e:
         logger.error(f"Unexpected error in transaction: {e}")
         raise
 
-def retry_on_deadlock(max_retries=3, delay=0.1, backoff=2.0):
+def retry_on_deadlock(max_retries=3, delay=0.01, backoff=2.0):
     """
     Decorator to retry operations on deadlock with exponential backoff.
     
     Args:
         max_retries (int): Maximum number of retry attempts
-        delay (float): Initial delay between retries in seconds
+        delay (float): Initial delay between retries in seconds (default: 0.01 = 10ms)
         backoff (float): Backoff multiplier for delay
     """
     def decorator(func):
@@ -273,6 +274,25 @@ def product_transaction(func):
             pass
     """
     return log_transaction_performance(repeatable_read_transaction()(func))
+
+# Convenience function for payment webhook operations
+def payment_webhook_transaction(func):
+    """
+    Convenience decorator for payment webhook operations requiring fast deadlock recovery.
+    Uses READ COMMITTED isolation with 10ms deadlock retry for optimal webhook processing.
+    
+    Usage:
+        @payment_webhook_transaction
+        def handle_stripe_webhook(event_data):
+            # Webhook processing logic
+            pass
+    """
+    @retry_on_deadlock(max_retries=3, delay=0.01, backoff=2.0)  # 10ms initial delay
+    @log_transaction_performance
+    def wrapper(*args, **kwargs):
+        with atomic_with_isolation('READ COMMITTED'):
+            return func(*args, **kwargs)
+    return wrapper
 
 def get_current_isolation_level(using='default'):
     """
