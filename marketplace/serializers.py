@@ -478,11 +478,44 @@ class CartSerializer(serializers.ModelSerializer):
 
 class OrderItemSerializer(serializers.ModelSerializer):
     """Order item serializer"""
+    product_image_fresh = serializers.SerializerMethodField()
+    
     class Meta:
         model = OrderItem
         fields = ['id', 'product', 'seller', 'quantity', 'unit_price', 'total_price',
-                 'product_name', 'product_description', 'product_image']
+                 'product_name', 'product_description', 'product_image', 'product_image_fresh']
         read_only_fields = ['id', 'total_price']
+    
+    def get_product_image_fresh(self, obj):
+        """Get fresh product image URL from S3"""
+        try:
+            from utils.s3_storage import get_s3_storage
+            s3_storage = get_s3_storage()
+            
+            # Get fresh images from the product
+            product_images = s3_storage.get_product_images(str(obj.product.id))
+            
+            if product_images:
+                # Return the main image or first available image
+                main_image = next((img for img in product_images if img.get('is_main')), product_images[0])
+                
+                # Generate fresh presigned URL
+                fresh_url = s3_storage.generate_presigned_url(
+                    bucket=s3_storage.bucket_name,
+                    key=main_image['key'],
+                    expires_in=3600  # 1 hour
+                )
+                
+                return fresh_url
+            
+            return None
+            
+        except Exception as e:
+            # Log error but don't fail the serializer
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Failed to get fresh product image for order item {obj.id}: {str(e)}")
+            return None
 
 
 class OrderShippingSerializer(serializers.ModelSerializer):
