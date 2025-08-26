@@ -51,6 +51,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'channels',  # WebSocket support
     'rest_framework',
     'corsheaders',
     'django_filters',
@@ -60,6 +61,7 @@ INSTALLED_APPS = [
     'marketplace',
     'activity',
     'payment_system',
+    'chat',
 ]
 
 MIDDLEWARE = [
@@ -95,6 +97,7 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'designiaBackend.wsgi.application'
+ASGI_APPLICATION = 'designiaBackend.asgi.application'
 
 
 # Database
@@ -204,6 +207,7 @@ CORS_ALLOWED_ORIGIN_REGEXES = [
     r"^https://.*\.google\.com$",
     r"^https://.*\.gstatic\.com$",
 ]
+
 
 # Security headers for Google OAuth
 SECURE_CROSS_ORIGIN_OPENER_POLICY = None
@@ -383,6 +387,22 @@ CACHES = {
             'MAX_ENTRIES': 1000,
         }
     }
+}
+
+# ===============================
+# DJANGO CHANNELS CONFIGURATION
+# ===============================
+
+# Channel layer configuration (using Redis)
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        'CONFIG': {
+            'hosts': [os.getenv('REDIS_URL', 'redis://localhost:6379/2')],
+            'capacity': 1500,
+            'expiry': 60,
+        },
+    },
 }
 
 # ===============================

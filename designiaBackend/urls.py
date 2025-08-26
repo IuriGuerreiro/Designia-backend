@@ -25,6 +25,7 @@ urlpatterns = [
     path('api/marketplace/', include('marketplace.urls')),
     path('api/activity/', include('activity.urls')),
     path('api/payments/', include('payment_system.urls')),
+    path('api/chat/', include('chat.urls')),
 ]
 
 # Serve media files during development

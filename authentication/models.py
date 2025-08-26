@@ -4,6 +4,7 @@ import uuid
 import random
 import string
 from datetime import timedelta
+from typing import Optional
 from django.utils import timezone
 from django.conf import settings
 from django.db.models.signals import post_save
@@ -153,6 +154,9 @@ class Profile(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     profile_completion_percentage = models.IntegerField(default=0)
     
+    # Profile Picture (S3 Storage)
+    profile_picture_url = models.CharField(max_length=500, blank=True, null=True, help_text='S3 object key for profile picture')
+    
     # Marketing Preferences
     marketing_emails_enabled = models.BooleanField(default=True)
     newsletter_enabled = models.BooleanField(default=True)
@@ -165,7 +169,7 @@ class Profile(models.Model):
         
         fields_to_check = [
             'bio', 'location', 'birth_date', 'phone_number', 'job_title',
-            'company', 'city', 'country'
+            'company', 'city', 'country', 'profile_picture_url'
         ]
         
         completed_fields = []
@@ -188,6 +192,25 @@ class Profile(models.Model):
         
         return self.profile_completion_percentage
 
+    def get_profile_picture_temp_url(self, expires_in: int = 3600) -> Optional[str]:
+        """Get temporary URL for profile picture if it exists in S3"""
+        if not self.profile_picture_url:
+            return None
+            
+        try:
+            from django.conf import settings
+            if not getattr(settings, 'USE_S3', False):
+                return None
+                
+            from utils.s3_storage import get_s3_storage
+            s3_storage = get_s3_storage()
+            return s3_storage.get_file_url(self.profile_picture_url, expires_in=expires_in)
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Failed to generate temp URL for profile picture {self.profile_picture_url}: {str(e)}")
+            return None
+
     def save(self, *args, **kwargs):
         import logging
         logger = logging.getLogger(__name__)
@@ -197,7 +220,7 @@ class Profile(models.Model):
         old_completion = self.profile_completion_percentage
         self.calculate_profile_completion()
         
-        logger.info(f"Profile completion updated: {old_completion}% → {self.profile_completion_percentage}%")
+        logger.info(f"Profile completion updated: {old_completion}% -> {self.profile_completion_percentage}%")
         
         super().save(*args, **kwargs)
         logger.info("Profile saved successfully to database")
