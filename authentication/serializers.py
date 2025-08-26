@@ -5,6 +5,7 @@ from .models import CustomUser, Profile
 
 class ProfileSerializer(serializers.ModelSerializer):
     profile_completion_percentage = serializers.ReadOnlyField()
+    profile_picture_temp_url = serializers.SerializerMethodField()
     
     class Meta:
         model = Profile
@@ -36,12 +37,15 @@ class ProfileSerializer(serializers.ModelSerializer):
             # Metadata (read-only)
             'created_at', 'updated_at', 'profile_completion_percentage',
             
+            # Profile Picture
+            'profile_picture_url', 'profile_picture_temp_url',
+            
             # Marketing Preferences
             'marketing_emails_enabled', 'newsletter_enabled', 'notifications_enabled'
         )
         read_only_fields = (
             'is_verified', 'is_verified_seller', 'seller_type',
-            'created_at', 'updated_at', 'profile_completion_percentage'
+            'created_at', 'updated_at', 'profile_completion_percentage', 'profile_picture_temp_url'
         )
 
     def validate_website(self, value):
@@ -108,6 +112,10 @@ class ProfileSerializer(serializers.ModelSerializer):
         except DjangoValidationError as e:
             logger.error(f"URL validation failed for {field_type}: {e}")
             raise serializers.ValidationError(f"Please enter a valid URL. Example: https://example.com")
+
+    def get_profile_picture_temp_url(self, obj):
+        """Get temporary URL for profile picture"""
+        return obj.get_profile_picture_temp_url()
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -289,9 +297,15 @@ class SetPasswordVerifySerializer(serializers.Serializer):
 
 
 class PublicProfileSerializer(serializers.ModelSerializer):
+    profile_picture_temp_url = serializers.SerializerMethodField()
+    
     class Meta:
         model = Profile
-        fields = ('bio', 'location', 'website')
+        fields = ('bio', 'location', 'website', 'profile_picture_temp_url')
+    
+    def get_profile_picture_temp_url(self, obj):
+        """Get temporary URL for profile picture"""
+        return obj.get_profile_picture_temp_url()
 
 
 class PublicUserSerializer(serializers.ModelSerializer):

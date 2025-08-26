@@ -49,6 +49,26 @@ class ProfileUpdateView(generics.RetrieveUpdateAPIView):
         instance = self.get_object()
         logger.info(f"Instance to update: User {instance.id} ({instance.username})")
         
+        # Check if user is trying to update restricted fields without being a verified seller
+        if not instance.profile.is_verified_seller:
+            restricted_fields = [
+                'phone_number', 'country_code', 'website', 'location',
+                'job_title', 'company', 'account_type',
+                'instagram_url', 'twitter_url', 'linkedin_url', 'facebook_url'
+            ]
+            
+            # Check if any restricted fields are being updated
+            profile_data = request.data.get('profile', {})
+            restricted_updates = [field for field in restricted_fields if field in profile_data]
+            
+            if restricted_updates:
+                logger.warning(f"User {instance.id} attempted to update restricted fields: {restricted_updates}")
+                return Response({
+                    'error': 'Access denied',
+                    'message': 'Professional, contact, and social media fields can only be updated by verified sellers.',
+                    'restricted_fields': restricted_updates
+                }, status=status.HTTP_403_FORBIDDEN)
+        
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
         
         try:
@@ -929,4 +949,173 @@ def change_language(request):
         return Response({
             'error': 'Service may be unavailable. Please try again later.'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@csrf_exempt
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def upload_profile_picture(request):
+    """Upload user's profile picture to S3"""
+    try:
+        from django.conf import settings
+        from utils.s3_storage import get_s3_storage, S3StorageError
+        
+        if not getattr(settings, 'USE_S3', False):
+            return Response({
+                'error': 'S3 storage is not enabled'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Get image file from request
+        image_file = request.FILES.get('profile_picture') or request.FILES.get('image')
+        if not image_file:
+            return Response({
+                'error': 'Profile picture file is required (use "profile_picture" or "image" field)'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Validate image file size
+        max_size = 10 * 1024 * 1024  # 10MB (matches S3Storage validation)
+        if image_file.size > max_size:
+            return Response({
+                'error': f'Image file too large. Maximum size is {max_size // (1024*1024)}MB'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Check file type - let S3Storage handle detailed validation
+        allowed_types = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
+        if hasattr(image_file, 'content_type') and image_file.content_type not in allowed_types:
+            return Response({
+                'error': f'Invalid file type. Allowed types: {", ".join(allowed_types)}'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            s3_storage = get_s3_storage()
+            
+            # Upload to S3 using existing utility method
+            result = s3_storage.upload_profile_picture(
+                user_id=str(request.user.id),
+                image_file=image_file,
+                replace_existing=True
+            )
+            
+            # Update user's profile with S3 key
+            profile = request.user.profile
+            profile.profile_picture_url = result['key']
+            profile.save()
+            
+            # Generate temporary URL for response
+            temp_url = profile.get_profile_picture_temp_url()
+            
+            return Response({
+                'message': 'Profile picture uploaded successfully',
+                'profile_picture_url': result['key'],
+                'profile_picture_temp_url': temp_url,
+                'size': result['size'],
+                'content_type': result['content_type'],
+                'uploaded_at': result['uploaded_at']
+            }, status=status.HTTP_200_OK)
+            
+        except S3StorageError as e:
+            return Response({
+                'error': f'Failed to upload profile picture: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+    except Exception as e:
+        return Response({
+            'error': 'Service may be unavailable. Please try again later.'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@csrf_exempt
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def delete_profile_picture(request):
+    """Delete user's profile picture from S3"""
+    try:
+        from django.conf import settings
+        from utils.s3_storage import get_s3_storage, S3StorageError
+        
+        if not getattr(settings, 'USE_S3', False):
+            return Response({
+                'error': 'S3 storage is not enabled'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        profile = request.user.profile
+        if not profile.profile_picture_url:
+            return Response({
+                'error': 'No profile picture to delete'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            s3_storage = get_s3_storage()
+            
+            # Delete from S3
+            success = s3_storage.delete_file(profile.profile_picture_url)
+            
+            if success:
+                # Clear profile picture URL from database
+                profile.profile_picture_url = None
+                profile.save()
+                
+                return Response({
+                    'message': 'Profile picture deleted successfully'
+                }, status=status.HTTP_200_OK)
+            else:
+                return Response({
+                    'error': 'Failed to delete profile picture from S3'
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                
+        except S3StorageError as e:
+            return Response({
+                'error': f'Failed to delete profile picture: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+    except Exception as e:
+        return Response({
+            'error': 'Service may be unavailable. Please try again later.'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class SellerProfileView(generics.RetrieveAPIView):
+    """API endpoint to retrieve user profile information"""
+    permission_classes = [AllowAny]  # Public endpoint
+    
+    def get_queryset(self):
+        """Return all users"""
+        return CustomUser.objects.all()
+    
+    def get_object(self):
+        """Get seller by ID"""
+        seller_id = self.kwargs.get('seller_id')
+        try:
+            seller = CustomUser.objects.get(id=seller_id)
+            return seller
+        except CustomUser.DoesNotExist:
+            from rest_framework.exceptions import NotFound
+            raise NotFound(f"Seller with ID {seller_id} not found")
+    
+    def retrieve(self, request, *args, **kwargs):
+        """Custom retrieve method to format seller data"""
+        seller = self.get_object()
+        
+        # Format seller data for frontend
+        seller_data = {
+            'id': seller.id,
+            'username': seller.username,
+            'first_name': seller.first_name,
+            'last_name': seller.last_name,
+            'avatar': seller.profile.profile_picture_url,
+            'bio': seller.profile.bio,
+            'location': seller.profile.location,
+            'website': seller.profile.website,
+            'job_title': seller.profile.job_title,
+            'company': seller.profile.company,
+            'instagram_url': seller.profile.instagram_url,
+            'twitter_url': seller.profile.twitter_url,
+            'linkedin_url': seller.profile.linkedin_url,
+            'facebook_url': seller.profile.facebook_url,
+            'is_verified_seller': seller.profile.is_verified_seller,
+            'seller_type': seller.profile.seller_type,
+            'created_at': seller.date_joined.isoformat() if seller.date_joined else None
+        }
+        
+        return Response(seller_data)
 

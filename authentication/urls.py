@@ -35,4 +35,11 @@ urlpatterns = [
 
     # Public user profile
     path('users/<int:pk>/', views.PublicProfileDetailView.as_view(), name='public_profile_detail'),
+    
+    # Seller profile endpoint
+    path('seller/<int:seller_id>/', views.SellerProfileView.as_view(), name='seller_profile'),
+    
+    # Profile picture endpoints
+    path('profile/picture/upload/', views.upload_profile_picture, name='upload_profile_picture'),
+    path('profile/picture/delete/', views.delete_profile_picture, name='delete_profile_picture'),
 ]
