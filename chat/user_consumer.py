@@ -229,6 +229,14 @@ class UserConsumer(AsyncWebsocketConsumer):
     # Group message handlers
     async def chat_message(self, event):
         """Send chat message to WebSocket"""
+        # Validate event structure
+        required_keys = ['message', 'chat_id']
+        missing_keys = [key for key in required_keys if key not in event]
+        
+        if missing_keys:
+            logger.error(f"❌ chat_message event missing keys: {missing_keys}, event: {event}")
+            return
+            
         await self.send(text_data=json.dumps({
             'type': 'chat_message',
             'message': event['message'],
@@ -237,6 +245,14 @@ class UserConsumer(AsyncWebsocketConsumer):
 
     async def typing_start(self, event):
         """Send typing start notification to WebSocket"""
+        # Validate event structure
+        required_keys = ['user_id', 'username', 'chat_id']
+        missing_keys = [key for key in required_keys if key not in event]
+        
+        if missing_keys:
+            logger.error(f"❌ typing_start event missing keys: {missing_keys}, event: {event}")
+            return
+        
         # Don't send to the user who is typing
         if event['user_id'] != self.user.id:
             logger.info(f"📤 Sending typing_start to user {self.user.username}: {event['username']} is typing in chat {event['chat_id']}")
@@ -249,6 +265,14 @@ class UserConsumer(AsyncWebsocketConsumer):
 
     async def typing_stop(self, event):
         """Send typing stop notification to WebSocket"""
+        # Validate event structure
+        required_keys = ['user_id', 'username', 'chat_id']
+        missing_keys = [key for key in required_keys if key not in event]
+        
+        if missing_keys:
+            logger.error(f"❌ typing_stop event missing keys: {missing_keys}, event: {event}")
+            return
+        
         # Don't send to the user who stopped typing
         if event['user_id'] != self.user.id:
             logger.info(f"📤 Sending typing_stop to user {self.user.username}: {event['username']} stopped typing in chat {event['chat_id']}")
@@ -265,6 +289,16 @@ class UserConsumer(AsyncWebsocketConsumer):
             'type': 'messages_read',
             'user_id': event['user_id'],
             'chat_id': event['chat_id']
+        }))
+
+    async def new_chat(self, event):
+        """Send new chat notification to WebSocket"""
+        chat_id = event['chat'].get('id', 'unknown')
+        logger.info(f"📤 Sending new chat notification to user {self.user.username}: chat {chat_id}")
+        
+        await self.send(text_data=json.dumps({
+            'type': 'new_chat',
+            'chat': event['chat']
         }))
 
     # Database operations
@@ -372,3 +406,27 @@ class UserConsumer(AsyncWebsocketConsumer):
             'type': 'error',
             'message': error_message
         }))
+
+    @staticmethod
+    async def notify_new_chat(user_id, chat_data):
+        """Static method to notify a user about a new chat from outside the consumer"""
+        from channels.layers import get_channel_layer
+        
+        try:
+            channel_layer = get_channel_layer()
+            user_group_name = f'user_{user_id}'
+            
+            logger.info(f"📤 Notifying user {user_id} about new chat {chat_data.get('id')}")
+            
+            await channel_layer.group_send(
+                user_group_name,
+                {
+                    'type': 'new_chat',
+                    'chat': chat_data
+                }
+            )
+            
+            logger.info(f"✅ New chat notification sent to user {user_id}")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to send new chat notification to user {user_id}: {str(e)}")
