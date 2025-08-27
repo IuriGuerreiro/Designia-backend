@@ -7,12 +7,14 @@ from django.contrib.auth import get_user_model
 from django.db.models import Q
 from django.conf import settings
 from django.utils import timezone
+from asgiref.sync import async_to_sync
 
 from .models import Chat, Message
 from .serializers import (
     ChatSerializer, ChatCreateSerializer, MessageSerializer, 
     MessageCreateSerializer
 )
+from .user_consumer import UserConsumer
 
 User = get_user_model()
 
@@ -48,9 +50,41 @@ class ChatListView(generics.ListCreateAPIView):
             # Get or create chat
             chat, created = Chat.get_or_create_chat(request.user, other_user)
             
-            # Serialize and return chat
+            # Serialize chat for response and WebSocket notification
             chat_serializer = ChatSerializer(chat, context={'request': request})
-            return Response(chat_serializer.data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+            chat_data = chat_serializer.data
+            
+            # If chat was newly created, notify the other user via WebSocket
+            if created:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.info(f"📬 New chat created between {request.user.username} and {other_user.username} (chat_id: {chat.id})")
+                
+                try:
+                    # Create a context for the other user to get the correct "other_user" field
+                    other_user_request = type('Request', (), {'user': other_user})()
+                    other_user_serializer = ChatSerializer(chat, context={'request': other_user_request})
+                    other_user_chat_data = other_user_serializer.data
+                    
+                    logger.info(f"📤 Attempting to notify user {other_user.username} (id: {other_user.id}) about new chat")
+                    
+                    # Notify the other user about the new chat
+                    async_to_sync(UserConsumer.notify_new_chat)(
+                        user_id=other_user.id,
+                        chat_data=other_user_chat_data
+                    )
+                    
+                    logger.info(f"✅ Successfully initiated WebSocket notification for new chat {chat.id}")
+                    
+                except Exception as e:
+                    # Log the error but don't fail the chat creation
+                    logger.error(f"❌ Failed to notify user {other_user.id} about new chat: {str(e)}")
+            else:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.info(f"🔄 Existing chat returned between {request.user.username} and {other_user.username} (chat_id: {chat.id})")
+            
+            return Response(chat_data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 

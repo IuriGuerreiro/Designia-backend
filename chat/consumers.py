@@ -53,7 +53,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
             {
                 'type': 'user_joined',
                 'user_id': self.user.id,
-                'username': self.user.username
+                'username': self.user.username,
+                'chat_id': self.chat_id
             }
         )
 
@@ -72,7 +73,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 {
                     'type': 'user_left',
                     'user_id': self.user.id,
-                    'username': self.user.username
+                    'username': self.user.username,
+                    'chat_id': self.chat_id
                 }
             )
             
@@ -128,7 +130,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
             self.room_group_name,
             {
                 'type': 'chat_message',
-                'message': message_data
+                'message': message_data,
+                'chat_id': self.chat_id
             }
         )
         
@@ -142,7 +145,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
             {
                 'type': 'typing_start',
                 'user_id': self.user.id,
-                'username': self.user.username
+                'username': self.user.username,
+                'chat_id': self.chat_id
             }
         )
 
@@ -154,7 +158,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
             {
                 'type': 'typing_stop',
                 'user_id': self.user.id,
-                'username': self.user.username
+                'username': self.user.username,
+                'chat_id': self.chat_id
             }
         )
 
@@ -176,9 +181,11 @@ class ChatConsumer(AsyncWebsocketConsumer):
     async def chat_message(self, event):
         """Send chat message to WebSocket"""
         message = event['message']
+        chat_id = event.get('chat_id', self.chat_id)
         await self.send(text_data=json.dumps({
             'type': 'chat_message',
-            'message': message
+            'message': message,
+            'chat_id': chat_id
         }))
 
     async def user_joined(self, event):
@@ -186,7 +193,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
         await self.send(text_data=json.dumps({
             'type': 'user_joined',
             'user_id': event['user_id'],
-            'username': event['username']
+            'username': event['username'],
+            'chat_id': event.get('chat_id', self.chat_id)
         }))
 
     async def user_left(self, event):
@@ -194,7 +202,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
         await self.send(text_data=json.dumps({
             'type': 'user_left',
             'user_id': event['user_id'],
-            'username': event['username']
+            'username': event['username'],
+            'chat_id': event.get('chat_id', self.chat_id)
         }))
 
     async def typing_start(self, event):
@@ -205,7 +214,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
             await self.send(text_data=json.dumps({
                 'type': 'typing_start',
                 'user_id': event['user_id'],
-                'username': event['username']
+                'username': event['username'],
+                'chat_id': event.get('chat_id', self.chat_id)
             }))
         else:
             logger.info(f"🚫 Not sending typing_start to self ({self.user.username})")
@@ -218,7 +228,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
             await self.send(text_data=json.dumps({
                 'type': 'typing_stop',
                 'user_id': event['user_id'],
-                'username': event['username']
+                'username': event['username'],
+                'chat_id': event.get('chat_id', self.chat_id)
             }))
         else:
             logger.info(f"🚫 Not sending typing_stop to self ({self.user.username})")
