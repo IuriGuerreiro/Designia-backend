@@ -51,7 +51,7 @@ class Command(BaseCommand):
         
         if missing_count == 0:
             self.stdout.write(
-                self.style.SUCCESS("✅ All products already have ProductMetrics!")
+                self.style.SUCCESS("  All products already have ProductMetrics!")
             )
             return
         
@@ -102,7 +102,7 @@ class Command(BaseCommand):
                         self.stdout.write(f"  Created batch: {created_count}/{missing_count} metrics")
                 
                 self.stdout.write(
-                    self.style.SUCCESS(f"✅ Successfully created {created_count} ProductMetrics records")
+                    self.style.SUCCESS(f"  Successfully created {created_count} ProductMetrics records")
                 )
                 
         except Exception as e:
@@ -127,5 +127,5 @@ class Command(BaseCommand):
         self.stdout.write(f"Total products: {Product.objects.count()}")
         self.stdout.write(f"Total ProductMetrics: {ProductMetrics.objects.count()}")
         self.stdout.write(
-            self.style.SUCCESS("✅ ProductMetrics creation completed successfully!")
+            self.style.SUCCESS("  ProductMetrics creation completed successfully!")
         )

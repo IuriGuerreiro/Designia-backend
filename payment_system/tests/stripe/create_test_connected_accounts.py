@@ -43,13 +43,13 @@ load_dotenv()
 # Configuration
 STRIPE_API_KEY = os.getenv("STRIPE_SECRET_KEY")
 if not STRIPE_API_KEY:
-    print("❌ ERROR: STRIPE_SECRET_KEY not found in environment variables")
+    print(" ERROR: STRIPE_SECRET_KEY not found in environment variables")
     print("   Please add STRIPE_SECRET_KEY to your .env file")
     sys.exit(1)
 
 # Verify it's a test key
 if not STRIPE_API_KEY.startswith("sk_test_"):
-    print("❌ ERROR: Not a test API key! This script only works with test keys.")
+    print(" ERROR: Not a test API key! This script only works with test keys.")
     print("   Found key starting with:", STRIPE_API_KEY[:10] + "...")
     sys.exit(1)
 
@@ -104,12 +104,12 @@ def validate_stripe_connection() -> bool:
     try:
         log_message("INFO", "Validating Stripe API connection...")
         account = stripe.Account.retrieve()
-        log_message("INFO", f"✅ Connected to Stripe account: {account.id}")
+        log_message("INFO", f"  Connected to Stripe account: {account.id}")
         log_message("INFO", f"   Country: {account.country}")
         log_message("INFO", f"   Email: {account.email or 'Not specified'}")
         return True
     except Exception as e:
-        log_message("ERROR", f"❌ Failed to connect to Stripe: {e}")
+        log_message("ERROR", f" Failed to connect to Stripe: {e}")
         return False
 
 
@@ -173,7 +173,7 @@ def create_connected_account(iban: str, config: Dict) -> Optional[Dict]:
             },
         )
         
-        log_message("INFO", f"   ✅ Created account: {account.id}")
+        log_message("INFO", f"     Created account: {account.id}")
         
         # Wait a moment for account to be fully created
         time.sleep(1)
@@ -191,7 +191,7 @@ def create_connected_account(iban: str, config: Dict) -> Optional[Dict]:
             },
         )
         
-        log_message("INFO", f"   ✅ Attached bank account: {external_account.id}")
+        log_message("INFO", f"     Attached bank account: {external_account.id}")
         
         # Retrieve full account details for verification
         full_account = stripe.Account.retrieve(account.id)
@@ -215,14 +215,14 @@ def create_connected_account(iban: str, config: Dict) -> Optional[Dict]:
         return account_details
         
     except stripe.error.StripeError as e:
-        log_message("ERROR", f"   ❌ Stripe error for IBAN {iban}: {e}")
+        log_message("ERROR", f"    Stripe error for IBAN {iban}: {e}")
         log_message("ERROR", f"      Error type: {type(e).__name__}")
         if hasattr(e, 'code'):
             log_message("ERROR", f"      Error code: {e.code}")
         return None
         
     except Exception as e:
-        log_message("ERROR", f"   ❌ Unexpected error for IBAN {iban}: {e}")
+        log_message("ERROR", f"    Unexpected error for IBAN {iban}: {e}")
         log_message("ERROR", f"      Error type: {type(e).__name__}")
         return None
 
@@ -251,18 +251,18 @@ def verify_account_setup(account_details: Dict) -> bool:
         )
         
         if len(external_accounts.data) == 0:
-            log_message("ERROR", f"   ❌ No external accounts found")
+            log_message("ERROR", f"    No external accounts found")
             return False
             
         bank_account = external_accounts.data[0]
-        log_message("INFO", f"   ✅ Bank account verified: {bank_account.last4}")
+        log_message("INFO", f"     Bank account verified: {bank_account.last4}")
         log_message("INFO", f"   Currency: {bank_account.currency}")
         log_message("INFO", f"   Status: {bank_account.status}")
         
         return True
         
     except Exception as e:
-        log_message("ERROR", f"   ❌ Account verification failed: {e}")
+        log_message("ERROR", f"    Account verification failed: {e}")
         return False
 
 
@@ -281,10 +281,10 @@ def save_accounts_summary(accounts: List[Dict]) -> None:
         with open(summary_file, 'w') as f:
             json.dump(summary, f, indent=2)
             
-        log_message("INFO", f"✅ Account summary saved to: {summary_file}")
+        log_message("INFO", f"  Account summary saved to: {summary_file}")
         
     except Exception as e:
-        log_message("ERROR", f"❌ Failed to save summary: {e}")
+        log_message("ERROR", f" Failed to save summary: {e}")
 
 
 def print_usage_instructions(accounts: List[Dict]) -> None:
@@ -348,12 +348,12 @@ def main():
             # Verify the account setup
             if verify_account_setup(account_details):
                 CREATED_ACCOUNTS.append(account_details)
-                log_message("INFO", f"✅ Account {account_details['account_id']} ready for testing")
+                log_message("INFO", f"  Account {account_details['account_id']} ready for testing")
             else:
-                log_message("ERROR", f"❌ Account verification failed for {account_details['account_id']}")
+                log_message("ERROR", f" Account verification failed for {account_details['account_id']}")
                 CREATED_ACCOUNTS.append(account_details)  # Still add it, but mark as potentially problematic
         else:
-            log_message("ERROR", f"❌ Failed to create account for IBAN {iban}")
+            log_message("ERROR", f" Failed to create account for IBAN {iban}")
             CREATED_ACCOUNTS.append(None)
         
         # Small delay between creations
@@ -373,8 +373,8 @@ def main():
     failed = len(CREATED_ACCOUNTS) - successful
     
     print(f"\n🎉 FINAL SUMMARY:")
-    print(f"   ✅ Successfully created: {successful} accounts")
-    print(f"   ❌ Failed: {failed} accounts")
+    print(f"     Successfully created: {successful} accounts")
+    print(f"    Failed: {failed} accounts")
     
     if failed > 0:
         print(f"\n⚠️  Some accounts failed to create. Check the logs above for details.")
@@ -391,8 +391,8 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("\n\n❌ Script interrupted by user")
+        print("\n\n Script interrupted by user")
         sys.exit(1)
     except Exception as e:
-        log_message("ERROR", f"❌ Unexpected error: {e}")
+        log_message("ERROR", f" Unexpected error: {e}")
         sys.exit(1)

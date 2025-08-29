@@ -51,14 +51,14 @@ class LiveWebhookTester:
             time.sleep(3)
             
             if self.webhook_process.poll() is None:
-                print(f"✅ Webhook forwarding active: {self.webhook_url}")
+                print(f"  Webhook forwarding active: {self.webhook_url}")
                 return True
             else:
-                print("❌ Failed to start webhook forwarding")
+                print(" Failed to start webhook forwarding")
                 return False
                 
         except Exception as e:
-            print(f"❌ Error setting up webhook forwarding: {e}")
+            print(f" Error setting up webhook forwarding: {e}")
             return False
     
     def cleanup_webhook_forwarding(self):
@@ -78,16 +78,16 @@ class LiveWebhookTester:
             ], capture_output=True, text=True, timeout=30)
             
             if result.returncode == 0:
-                print(f"✅ {event_type} triggered successfully")
+                print(f"  {event_type} triggered successfully")
                 if description:
                     print(f"   Description: {description}")
                 return True
             else:
-                print(f"❌ Failed to trigger {event_type}: {result.stderr}")
+                print(f" Failed to trigger {event_type}: {result.stderr}")
                 return False
                 
         except Exception as e:
-            print(f"❌ Error triggering {event_type}: {e}")
+            print(f" Error triggering {event_type}: {e}")
             return False
     
     def check_webhook_received(self, event_type, timeout=10):
@@ -104,14 +104,14 @@ class LiveWebhookTester:
             
             if recent_events.exists():
                 event = recent_events.first()
-                print(f"✅ Webhook received: {event.stripe_event_id}")
+                print(f"  Webhook received: {event.stripe_event_id}")
                 print(f"   Status: {event.status}")
                 print(f"   Processing attempts: {event.processing_attempts}")
                 return True, event
             
             time.sleep(1)
         
-        print(f"❌ Webhook {event_type} not received within {timeout}s")
+        print(f" Webhook {event_type} not received within {timeout}s")
         return False, None
     
     def test_webhook_endpoint_health(self):
@@ -121,16 +121,16 @@ class LiveWebhookTester:
         try:
             response = requests.get('http://localhost:8000/api/payments/webhooks/stripe/')
             if response.status_code in [405, 400]:  # Method not allowed or bad request is expected
-                print("✅ Webhook endpoint is accessible")
+                print("  Webhook endpoint is accessible")
                 return True
             else:
                 print(f"⚠️ Unexpected response: {response.status_code}")
                 return False
         except requests.exceptions.ConnectionError:
-            print("❌ Django server not accessible. Make sure server is running.")
+            print(" Django server not accessible. Make sure server is running.")
             return False
         except Exception as e:
-            print(f"❌ Error testing endpoint: {e}")
+            print(f" Error testing endpoint: {e}")
             return False
     
     def run_payment_webhook_test(self):
@@ -252,7 +252,7 @@ class LiveWebhookTester:
         print()
         
         for result in self.test_results:
-            status_icon = "✅" if result['status'] == 'PASSED' else "❌"
+            status_icon = " " if result['status'] == 'PASSED' else "❌"
             print(f"{status_icon} {result['test']}")
             
             if result['status'] == 'PASSED':
@@ -281,12 +281,12 @@ class LiveWebhookTester:
         
         # Test endpoint health
         if not self.test_webhook_endpoint_health():
-            print("❌ Cannot proceed - Django server not accessible")
+            print(" Cannot proceed - Django server not accessible")
             return
         
         # Setup webhook forwarding
         if not self.setup_webhook_forwarding():
-            print("❌ Cannot proceed - webhook forwarding failed")
+            print(" Cannot proceed - webhook forwarding failed")
             return
         
         try:

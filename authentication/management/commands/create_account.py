@@ -170,7 +170,7 @@ class Command(BaseCommand):
                 # Success message
                 self.stdout.write(
                     self.style.SUCCESS(
-                        f'✅ Successfully created user account:\n'
+                        f'  Successfully created user account:\n'
                         f'   Username: {username}\n'
                         f'   Email: {email}\n'
                         f'   Name: {first_name} {last_name}\n'

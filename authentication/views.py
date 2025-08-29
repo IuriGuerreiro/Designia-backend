@@ -450,7 +450,7 @@ def google_login(request):
                 return Response(response_data)
                 
             except Exception as e:
-                print(f"❌ Error creating user for Google account: {str(e)}")
+                print(f" Error creating user for Google account: {str(e)}")
                 return Response({
                     'success': False,
                     'error': 'Failed to create user account. Please try again.'
@@ -536,7 +536,7 @@ def google_oauth(request):
         print(f"Platform: {google_data.get('platform', 'unknown')}")
         
         if not email:
-            print("❌ No email provided")
+            print(" No email provided")
             return Response({'error': 'Google email is required'}, status=status.HTTP_400_BAD_REQUEST)
         
         print("🔍 Getting or creating user...")
@@ -544,7 +544,7 @@ def google_oauth(request):
         # Check if user already exists
         try:
             user = CustomUser.objects.get(email=email)
-            print(f"✅ Existing user found: {email}")
+            print(f"  Existing user found: {email}")
             is_new_user = False
         except CustomUser.DoesNotExist:
             print(f"🔍 Creating new user: {email}")
@@ -564,18 +564,18 @@ def google_oauth(request):
                     is_email_verified=True,  # Google accounts are pre-verified
                     is_active=True,
                 )
-                print(f"✅ New user created: {email}")
+                print(f"  New user created: {email}")
                 is_new_user = True
             except Exception as e:
-                print(f"❌ User creation failed: {str(e)}")
+                print(f" User creation failed: {str(e)}")
                 return Response({'error': f'Failed to create user: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
         
         print("🔍 Generating JWT tokens...")
         # Generate JWT tokens
         refresh = RefreshToken.for_user(user)
-        print("✅ JWT tokens generated successfully")
+        print("  JWT tokens generated successfully")
         
-        print("✅ Google OAuth successful - returning response")
+        print("  Google OAuth successful - returning response")
         return Response({
             'user': UserSerializer(user).data,
             'access': str(refresh.access_token),

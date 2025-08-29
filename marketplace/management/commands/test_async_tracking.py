@@ -58,12 +58,12 @@ class Command(BaseCommand):
             self.stdout.write(f"Processor Thread Name: {status.get('processor_thread_name', 'Unknown')}")
             
             if 'error' in status:
-                self.stdout.write(self.style.ERROR(f"❌ Error: {status['error']}"))
+                self.stdout.write(self.style.ERROR(f" Error: {status['error']}"))
             else:
-                self.stdout.write(self.style.SUCCESS("✅ System appears to be running normally"))
+                self.stdout.write(self.style.SUCCESS("  System appears to be running normally"))
                 
         except Exception as e:
-            self.stdout.write(self.style.ERROR(f"❌ Failed to get status: {str(e)}"))
+            self.stdout.write(self.style.ERROR(f" Failed to get status: {str(e)}"))
 
     def run_basic_test(self):
         """Run basic functionality tests."""
@@ -73,12 +73,12 @@ class Command(BaseCommand):
         try:
             # Initialize the system
             AsyncTracker.initialize()
-            self.stdout.write("✅ AsyncTracker initialized")
+            self.stdout.write("  AsyncTracker initialized")
             
             # Get a test product
             product = Product.objects.filter(is_active=True).first()
             if not product:
-                self.stdout.write(self.style.ERROR("❌ No active products found for testing"))
+                self.stdout.write(self.style.ERROR(" No active products found for testing"))
                 return
             
             self.stdout.write(f"📦 Using test product: {product.name}")
@@ -103,11 +103,11 @@ class Command(BaseCommand):
                     self.stdout.write(f"\n🧪 Testing {test_name}...")
                     result = test_func()
                     if result:
-                        self.stdout.write(self.style.SUCCESS(f"✅ {test_name} test passed"))
+                        self.stdout.write(self.style.SUCCESS(f"  {test_name} test passed"))
                     else:
                         self.stdout.write(self.style.WARNING(f"⚠️  {test_name} test returned False"))
                 except Exception as e:
-                    self.stdout.write(self.style.ERROR(f"❌ {test_name} test failed: {str(e)}"))
+                    self.stdout.write(self.style.ERROR(f" {test_name} test failed: {str(e)}"))
             
             # Wait a moment for processing
             self.stdout.write("\n⏳ Waiting 3 seconds for background processing...")
@@ -118,7 +118,7 @@ class Command(BaseCommand):
             self.show_status()
             
         except Exception as e:
-            self.stdout.write(self.style.ERROR(f"❌ Basic test failed: {str(e)}"))
+            self.stdout.write(self.style.ERROR(f" Basic test failed: {str(e)}"))
 
     def run_load_test(self, count):
         """Run a load test with multiple tracking requests."""
@@ -132,7 +132,7 @@ class Command(BaseCommand):
             # Get test data
             products = list(Product.objects.filter(is_active=True)[:10])
             if not products:
-                self.stdout.write(self.style.ERROR("❌ No active products found for testing"))
+                self.stdout.write(self.style.ERROR(" No active products found for testing"))
                 return
             
             users = list(User.objects.all()[:5])
@@ -183,7 +183,7 @@ class Command(BaseCommand):
             self.show_status()
             
         except Exception as e:
-            self.stdout.write(self.style.ERROR(f"❌ Load test failed: {str(e)}"))
+            self.stdout.write(self.style.ERROR(f" Load test failed: {str(e)}"))
 
     def test_listing_view(self, products):
         """Test listing view tracking."""

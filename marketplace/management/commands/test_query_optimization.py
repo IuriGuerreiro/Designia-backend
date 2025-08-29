@@ -43,7 +43,7 @@ class Command(BaseCommand):
         # Get test data
         products = list(Product.objects.filter(is_active=True)[:product_count])
         if not products:
-            self.stdout.write(self.style.ERROR("❌ No active products found for testing"))
+            self.stdout.write(self.style.ERROR(" No active products found for testing"))
             return
         
         user = User.objects.first()
@@ -123,19 +123,19 @@ class Command(BaseCommand):
         # Query efficiency analysis
         queries_per_product = avg_queries / len(products)
         if queries_per_product <= 1.2:
-            self.stdout.write(self.style.SUCCESS(f"✅ EXCELLENT: {queries_per_product:.1f} queries/product - N+1 problem eliminated!"))
+            self.stdout.write(self.style.SUCCESS(f"  EXCELLENT: {queries_per_product:.1f} queries/product - N+1 problem eliminated!"))
         elif queries_per_product <= 2.0:
-            self.stdout.write(self.style.SUCCESS(f"✅ GOOD: {queries_per_product:.1f} queries/product - Significant optimization"))
+            self.stdout.write(self.style.SUCCESS(f"  GOOD: {queries_per_product:.1f} queries/product - Significant optimization"))
         elif queries_per_product <= 3.0:
             self.stdout.write(self.style.WARNING(f"⚠️  FAIR: {queries_per_product:.1f} queries/product - Some optimization achieved"))
         else:
-            self.stdout.write(self.style.ERROR(f"❌ POOR: {queries_per_product:.1f} queries/product - N+1 problem still exists"))
+            self.stdout.write(self.style.ERROR(f" POOR: {queries_per_product:.1f} queries/product - N+1 problem still exists"))
         
         # Response time analysis
         if avg_time < 50:
-            self.stdout.write(self.style.SUCCESS(f"✅ EXCELLENT: {avg_time:.1f}ms average response time"))
+            self.stdout.write(self.style.SUCCESS(f"  EXCELLENT: {avg_time:.1f}ms average response time"))
         elif avg_time < 100:
-            self.stdout.write(self.style.SUCCESS(f"✅ GOOD: {avg_time:.1f}ms average response time"))
+            self.stdout.write(self.style.SUCCESS(f"  GOOD: {avg_time:.1f}ms average response time"))
         elif avg_time < 200:
             self.stdout.write(self.style.WARNING(f"⚠️  FAIR: {avg_time:.1f}ms average response time"))
         else:
@@ -182,9 +182,9 @@ class Command(BaseCommand):
             self.stdout.write(f"   Index test queries executed: {total_queries}")
             
             if total_queries <= 4:
-                self.stdout.write(self.style.SUCCESS("✅ Database indexes appear to be working efficiently"))
+                self.stdout.write(self.style.SUCCESS("  Database indexes appear to be working efficiently"))
             else:
                 self.stdout.write(self.style.WARNING("⚠️  Consider running ANALYZE on database tables"))
                 
         except Exception as e:
-            self.stdout.write(self.style.ERROR(f"❌ Index test failed: {str(e)}"))
+            self.stdout.write(self.style.ERROR(f" Index test failed: {str(e)}"))

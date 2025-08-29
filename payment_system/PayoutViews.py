@@ -206,7 +206,7 @@ def seller_payout(request):
             }
         )
         
-        print(f"✅ Stripe payout created: {stripe_payout.id}")
+        print(f"  Stripe payout created: {stripe_payout.id}")
         print(f"📊 Payout status: {stripe_payout.status}")
         
         # Define a deadlock-safe operation for creating payout record AND payout items in a single transaction
@@ -296,7 +296,7 @@ def seller_payout(request):
                         logger.warning(f"AUDIT: Delivery validation excluded {excluded_count} transactions for seller {user.username}. "
                                      f"Total released: {total_released_transactions}, Eligible: {eligible_count}")
                     else:
-                        print(f"✅ Delivery Validation: All {eligible_count} released transactions have delivered orders")
+                        print(f"  Delivery Validation: All {eligible_count} released transactions have delivered orders")
                         # AUDIT TRAIL: Log successful validation
                         logger.info(f"AUDIT: Delivery validation passed for all {eligible_count} transactions for seller {user.username}")
                     
@@ -326,7 +326,7 @@ def seller_payout(request):
                                 item_names=transaction_obj.item_names
                             )
                             payout_items_created += 1
-                            print(f"✅ Created PayoutItem {payout_item.id} for transaction {transaction_obj.id}")
+                            print(f"  Created PayoutItem {payout_item.id} for transaction {transaction_obj.id}")
                             
                             # AUDIT TRAIL: Log detailed payout processing information
                             logger.info(f"AUDIT: Payout processing - User: {user.username}, "
@@ -348,13 +348,13 @@ def seller_payout(request):
                             )
                             
                             trackers_created += 1
-                            print(f"✅ Created PaymentTracker {tracker.id} for payout processing")
+                            print(f"  Created PaymentTracker {tracker.id} for payout processing")
                             
                         except Exception as e:
                             print(f"⚠️ Failed to create PayoutItem/PaymentTracker for transaction {transaction_obj.id}: {str(e)}")
                             logger.error(f"Failed to process transaction {transaction_obj.id}: {str(e)}")
                             # Track failure
-                            print(f"❌ Payout item creation error: {str(e)}")
+                            print(f" Payout item creation error: {str(e)}")
                             # Re-raise the exception to trigger rollback of the entire operation
                             raise TransactionError(f"Failed to process transaction {transaction_obj.id}: {str(e)}")
                     
@@ -376,13 +376,13 @@ def seller_payout(request):
                             transaction_obj.payed_out = True
                             transaction_obj.save(update_fields=['payed_out', 'updated_at'])
                             transactions_updated += 1
-                            print(f"✅ Updated PaymentTransaction {transaction_obj.id} as payed out")
+                            print(f"  Updated PaymentTransaction {transaction_obj.id} as payed out")
                             
                         except Exception as e:
                             print(f"⚠️ Failed to update PaymentTransaction {transaction_obj.id}: {str(e)}")
                             logger.error(f"Failed to update PaymentTransaction {transaction_obj.id}: {str(e)}")
                             # Track failure but don't fail entire operation since PayoutItems are already created
-                            print(f"❌ Transaction update error: {str(e)}")
+                            print(f" Transaction update error: {str(e)}")
                     
                     transaction_update_duration = (timezone.now() - transaction_update_start).total_seconds() * 1000
                     print(f"📊 Transaction update took {transaction_update_duration}ms")
@@ -504,7 +504,7 @@ def seller_payout(request):
         # Try to track failure if payout record exists
         try:
             if 'payout_record' in locals():
-                print(f"❌ Transaction error: {str(e)}")
+                print(f" Transaction error: {str(e)}")
                 payout_record.update_status('failed')
         except Exception:
             pass  # Don't fail on tracking errors
@@ -555,7 +555,7 @@ def seller_payout(request):
         # Try to track unexpected error
         try:
             if 'payout_record' in locals():
-                print(f"❌ Unexpected error: {str(e)}")
+                print(f" Unexpected error: {str(e)}")
                 payout_record.update_status('failed')
         except Exception:
             pass  # Don't fail on tracking errors

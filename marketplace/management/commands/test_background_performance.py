@@ -37,7 +37,7 @@ class Command(BaseCommand):
         # Get test data
         products = list(Product.objects.filter(is_active=True)[:20])
         if not products:
-            self.stdout.write(self.style.ERROR("❌ No active products found for testing"))
+            self.stdout.write(self.style.ERROR(" No active products found for testing"))
             return
         
         user = User.objects.first()
@@ -92,13 +92,13 @@ class Command(BaseCommand):
         
         # Performance evaluation
         if avg_time < 50:
-            self.stdout.write(self.style.SUCCESS(f"✅ EXCELLENT: Average {avg_time:.1f}ms - True background processing!"))
+            self.stdout.write(self.style.SUCCESS(f"  EXCELLENT: Average {avg_time:.1f}ms - True background processing!"))
         elif avg_time < 100:
-            self.stdout.write(self.style.SUCCESS(f"✅ GOOD: Average {avg_time:.1f}ms - Background processing working"))
+            self.stdout.write(self.style.SUCCESS(f"  GOOD: Average {avg_time:.1f}ms - Background processing working"))
         elif avg_time < 200:
             self.stdout.write(self.style.WARNING(f"⚠️  FAIR: Average {avg_time:.1f}ms - Some blocking still occurring"))
         else:
-            self.stdout.write(self.style.ERROR(f"❌ POOR: Average {avg_time:.1f}ms - Tracking may still be blocking"))
+            self.stdout.write(self.style.ERROR(f" POOR: Average {avg_time:.1f}ms - Tracking may still be blocking"))
         
         # Test individual product view
         self.stdout.write("\n🧪 Testing product detail view...")
@@ -131,9 +131,9 @@ class Command(BaseCommand):
         self.stdout.write(f"   Product Detail Average: {avg_detail_time:.1f}ms")
         
         if avg_detail_time < 30:
-            self.stdout.write(self.style.SUCCESS("✅ Product detail views are instant!"))
+            self.stdout.write(self.style.SUCCESS("  Product detail views are instant!"))
         elif avg_detail_time < 50:
-            self.stdout.write(self.style.SUCCESS("✅ Product detail views are very fast"))
+            self.stdout.write(self.style.SUCCESS("  Product detail views are very fast"))
         else:
             self.stdout.write(self.style.WARNING("⚠️  Product detail views could be faster"))
         

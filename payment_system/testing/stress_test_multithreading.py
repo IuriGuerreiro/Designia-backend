@@ -155,7 +155,7 @@ class PaymentStressTest:
             
             self.orders.append(order)
             
-        print(f"✅ Created {len(self.buyers)} buyers, {len(self.sellers)} sellers, {len(self.products)} products, {len(self.orders)} orders")
+        print(f"  Created {len(self.buyers)} buyers, {len(self.sellers)} sellers, {len(self.products)} products, {len(self.orders)} orders")
         print(f"📊 Ready for {self.total_threads} concurrent threads (50x load multiplier)")
 
     def create_mock_stripe_payment_intent(self, order, status='succeeded'):
@@ -284,7 +284,7 @@ class PaymentStressTest:
                 'error': f'Transaction error: {str(e)}',
                 'execution_time': time.time() - start_time
             })
-            print(f"❌ Thread {thread_id}: Transaction error in {time.time() - start_time:.3f}s")
+            print(f" Thread {thread_id}: Transaction error in {time.time() - start_time:.3f}s")
             
         except Exception as e:
             self.test_results['failed_operations'] += 1
@@ -361,7 +361,7 @@ class PaymentStressTest:
                 'error': f'Error: {str(e)}',
                 'execution_time': time.time() - start_time
             })
-            print(f"❌ Thread {thread_id}: Error: {str(e)}")
+            print(f" Thread {thread_id}: Error: {str(e)}")
             
         return operation_results
 
@@ -443,7 +443,7 @@ class PaymentStressTest:
                 'error': f'Error: {str(e)}',
                 'execution_time': time.time() - start_time
             })
-            print(f"❌ Thread {thread_id}: Payout error: {str(e)}")
+            print(f" Thread {thread_id}: Payout error: {str(e)}")
             
         return operation_results
 
@@ -530,7 +530,7 @@ class PaymentStressTest:
                 'error': f'Error: {str(e)}',
                 'execution_time': time.time() - start_time
             })
-            print(f"❌ Thread {thread_id}: Order race error: {str(e)}")
+            print(f" Thread {thread_id}: Order race error: {str(e)}")
             
         return operation_results
 
@@ -575,7 +575,7 @@ class PaymentStressTest:
                 try:
                     result = future.result(timeout=60)  # 60 second timeout for extreme load
                     all_results.extend(result)
-                    print(f"✅ Thread {thread_id:2d}: {operation_name} completed")
+                    print(f"  Thread {thread_id:2d}: {operation_name} completed")
                 except Exception as e:
                     print(f"💥 Thread {thread_id:2d}: {operation_name} failed: {str(e)}")
                     self.test_results['failed_operations'] += 1
@@ -655,7 +655,7 @@ class PaymentStressTest:
             print(f"\n🔄 DEADLOCK RECOVERY ANALYSIS:")
             print(f"   • Deadlock Rate: {deadlock_rate:.2f}%")
             print(f"   • Recovery Count: {self.test_results['deadlock_recoveries']}")
-            print(f"   • 10ms Retry Delay: ✅ Active")
+            print(f"   • 10ms Retry Delay:   Active")
         
         # Performance Assessment for EXTREME LOAD
         print(f"\n🎯 EXTREME LOAD PERFORMANCE ASSESSMENT:")
@@ -663,18 +663,18 @@ class PaymentStressTest:
         if success_rate >= 90:  # Lower threshold for 50x load
             print(f"   🔥 OUTSTANDING: {success_rate:.1f}% success rate under 50x load!")
         elif success_rate >= 80:
-            print(f"   ✅ EXCELLENT: {success_rate:.1f}% success rate under extreme stress")
+            print(f"     EXCELLENT: {success_rate:.1f}% success rate under extreme stress")
         elif success_rate >= 70:
             print(f"   ⚠️  GOOD: {success_rate:.1f}% success rate (acceptable for 50x load)")
         else:
-            print(f"   ❌ NEEDS TUNING: {success_rate:.1f}% success rate under extreme load")
+            print(f"    NEEDS TUNING: {success_rate:.1f}% success rate under extreme load")
             
         if self.test_results['deadlock_recoveries'] == 0:
-            print(f"   ✅ ZERO DEADLOCKS: Perfect model ordering")
+            print(f"     ZERO DEADLOCKS: Perfect model ordering")
         elif deadlock_rate < 10:  # Higher acceptable rate for 50x load
             print(f"   ⚠️  ACCEPTABLE DEADLOCK RATE: {deadlock_rate:.2f}% with fast 10ms recovery")
         else:
-            print(f"   ❌ HIGH DEADLOCK RATE: {deadlock_rate:.2f}% under extreme load - review connection pools")
+            print(f"    HIGH DEADLOCK RATE: {deadlock_rate:.2f}% under extreme load - review connection pools")
         
         # Recommendations for EXTREME LOAD
         print(f"\n💡 EXTREME LOAD RECOMMENDATIONS:")
@@ -692,14 +692,14 @@ class PaymentStressTest:
         if self.test_results['transaction_errors'] > 0:
             print(f"   • Review transaction error logs for patterns")
             
-        print(f"   • READ COMMITTED isolation level: ✅ Verified")
-        print(f"   • Model ordering (Order→Tracker→Transaction): ✅ Implemented")
+        print(f"   • READ COMMITTED isolation level:   Verified")
+        print(f"   • Model ordering (Order→Tracker→Transaction):   Implemented")
         
         print(f"   • System handled {self.total_threads} concurrent threads under extreme stress")
         print(f"   • READ COMMITTED + 10ms retry validated at 50x scale")
         
         print("\n" + "="*80)
-        print("✅ EXTREME STRESS TEST COMPLETED - 50x LOAD SURVIVED!")
+        print("  EXTREME STRESS TEST COMPLETED - 50x LOAD SURVIVED!")
         print("="*80)
 
 def run_payment_stress_test(concurrency_multiplier=50):
@@ -721,7 +721,7 @@ def run_payment_stress_test(concurrency_multiplier=50):
         # Cleanup test data
         print(f"\n🧹 Cleaning up test data...")
         User.objects.filter(username__startswith='stress_').delete()
-        print(f"✅ Cleanup completed")
+        print(f"  Cleanup completed")
         
     except Exception as e:
         print(f"💥 Stress test failed: {str(e)}")

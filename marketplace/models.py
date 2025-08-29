@@ -181,7 +181,7 @@ class ProductImage(models.Model):
         
         if not self.s3_key or not self.s3_bucket:
             logger.warning(f"Missing S3 data for image {self.id} - s3_key: {self.s3_key}, s3_bucket: {self.s3_bucket}")
-            print(f"❌ No S3 data for image {self.id} - returning None")
+            print(f" No S3 data for image {self.id} - returning None")
             return None
         
         try:
@@ -189,11 +189,11 @@ class ProductImage(models.Model):
             s3_storage = get_s3_storage()
             presigned_url = s3_storage.generate_presigned_url(self.s3_bucket, self.s3_key, expires_in)
             logger.info(f"Generated presigned URL for image {self.id}: {presigned_url}")
-            print(f"✅ Generated presigned URL for image {self.id}: {presigned_url}")
+            print(f"  Generated presigned URL for image {self.id}: {presigned_url}")
             return presigned_url
         except Exception as e:
             logger.error(f"Failed to generate presigned URL for image {self.id}: {e}")
-            print(f"❌ Failed to generate presigned URL for image {self.id}: {e}")
+            print(f" Failed to generate presigned URL for image {self.id}: {e}")
             return None
     
     @property
@@ -219,7 +219,7 @@ class ProductImage(models.Model):
             return self.image.url
         else:
             logger.warning(f"No image data available for image {self.id}")
-            print(f"❌ No image data available for image {self.id}")
+            print(f" No image data available for image {self.id}")
             return None
     
     def __str__(self):
