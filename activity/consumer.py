@@ -39,12 +39,14 @@ class ActivityConsumer(AsyncWebsocketConsumer):
         await self.accept()
         logger.info(f"  User {self.user.username} connected to activity WebSocket")
         
-        # Send connection success with current cart count
+        # Send connection success with current cart count and unread messages
         cart_count = await self.get_user_cart_count()
+        unread_messages = await self.get_user_unread_messages()
         await self.send(text_data=json.dumps({
             'type': 'connection_success',
             'user_id': self.user.id,
             'cart_count': cart_count,
+            'unread_messages_count': unread_messages,
             'message': 'Connected to activity notifications'
         }))
 
@@ -68,6 +70,8 @@ class ActivityConsumer(AsyncWebsocketConsumer):
             
             if message_type == 'get_cart_count':
                 await self.handle_get_cart_count()
+            elif message_type == 'get_unread_count':
+                await self.handle_get_unread_count()
             elif message_type == 'track_activity':
                 await self.handle_track_activity(text_data_json)
             else:
@@ -84,6 +88,14 @@ class ActivityConsumer(AsyncWebsocketConsumer):
         await self.send(text_data=json.dumps({
             'type': 'cart_count_update',
             'cart_count': cart_count
+        }))
+
+    async def handle_get_unread_count(self):
+        """Handle request for current unread messages count"""
+        unread_count = await self.get_user_unread_messages()
+        await self.send(text_data=json.dumps({
+            'type': 'unread_messages_count_update',
+            'unread_messages_count': unread_count
         }))
 
     async def handle_track_activity(self, data):
@@ -117,6 +129,13 @@ class ActivityConsumer(AsyncWebsocketConsumer):
             'title': event['title'],
             'message': event['message'],
             'data': event.get('data', {})
+        }))
+
+    async def unread_messages_count_update(self, event):
+        """Send unread messages count update to WebSocket"""
+        await self.send(text_data=json.dumps({
+            'type': 'unread_messages_count_update',
+            'unread_messages_count': event['unread_count']
         }))
 
     async def send_error(self, error_message):
@@ -169,6 +188,34 @@ class ActivityConsumer(AsyncWebsocketConsumer):
             return sum(item.quantity for item in cart_items)
         except Exception as e:
             logger.error(f"Error getting cart count: {str(e)}")
+            return 0
+
+    @database_sync_to_async
+    def get_user_unread_messages(self):
+        """Get current user's unread messages count"""
+        try:
+            from chat.utils import UnreadMessageTracker
+            # Use sync method since we're already in database_sync_to_async
+            from django.db import models
+            from chat.models import Chat, Message
+            
+            # Get all chats where user is participant
+            user_chats = Chat.objects.filter(
+                models.Q(user1=self.user) | models.Q(user2=self.user)
+            ).values_list('id', flat=True)
+            
+            # Count unread messages in all user's chats (excluding own messages)
+            unread_count = Message.objects.filter(
+                chat_id__in=user_chats,
+                is_read=False
+            ).exclude(
+                sender=self.user  # Exclude own messages
+            ).count()
+            
+            return unread_count
+            
+        except Exception as e:
+            logger.error(f"Error getting unread messages count: {str(e)}")
             return 0
 
     @database_sync_to_async
@@ -240,3 +287,27 @@ class ActivityConsumer(AsyncWebsocketConsumer):
             
         except Exception as e:
             logger.error(f"Failed to send activity notification to user {user_id}: {str(e)}")
+
+    @staticmethod
+    async def notify_unread_count_update(user_id, unread_count):
+        """Static method to notify user about unread messages count update"""
+        from channels.layers import get_channel_layer
+        
+        try:
+            channel_layer = get_channel_layer()
+            user_group_name = f'activity_user_{user_id}'
+            
+            logger.info(f"Notifying user {user_id} about unread count: {unread_count}")
+            
+            await channel_layer.group_send(
+                user_group_name,
+                {
+                    'type': 'unread_messages_count_update',
+                    'unread_count': unread_count
+                }
+            )
+            
+            logger.info(f"Unread count notification sent to user {user_id}")
+            
+        except Exception as e:
+            logger.error(f"Failed to send unread count notification to user {user_id}: {str(e)}")

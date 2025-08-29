@@ -128,6 +128,9 @@ class Message(models.Model):
         if is_new:
             self.chat.last_message = self
             self.chat.save(update_fields=['last_message', 'updated_at'])
+            
+            # Note: Activity WebSocket notifications are handled in chat/views.py for better control
+    
     
     def get_image_temp_url(self, expires_in: int = 3600) -> str:
         """Generate temporary URL for image if it exists in S3"""
@@ -148,13 +151,16 @@ class Message(models.Model):
             logger.warning(f"Failed to generate temp URL for message image {self.image_url}: {str(e)}")
             return None
     
-    def mark_as_read(self):
+    def mark_as_read(self, reading_user=None):
         """Mark message as read"""
         if not self.is_read:
             from django.utils import timezone
             self.is_read = True
             self.read_at = timezone.now()
             self.save(update_fields=['is_read', 'read_at'])
+            
+            # Note: Activity WebSocket notifications are handled in chat/views.py for better control
+    
     
     def __str__(self):
         if self.message_type == 'text':
