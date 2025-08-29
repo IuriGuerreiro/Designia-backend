@@ -29,7 +29,7 @@ def check_recent_webhooks():
     ).order_by('-created_at')
     
     if recent_events.exists():
-        print(f"✅ Found {recent_events.count()} recent webhook event(s):")
+        print(f"  Found {recent_events.count()} recent webhook event(s):")
         print()
         
         for event in recent_events:
@@ -42,7 +42,7 @@ def check_recent_webhooks():
                 print(f"   Error: {event.error_message}")
             print()
     else:
-        print("❌ No recent webhook events found")
+        print(" No recent webhook events found")
         
         # Check all webhook events
         all_events = WebhookEvent.objects.all().order_by('-created_at')

@@ -65,7 +65,7 @@ class Command(BaseCommand):
             
             self.stdout.write(
                 self.style.SUCCESS(
-                    '\n✅ Celery task setup completed successfully!\n'
+                    '\n  Celery task setup completed successfully!\n'
                     'Start Celery worker and beat scheduler:\n'
                     '  celery -A designiaBackend worker -l info -Q payment_tasks,marketplace_tasks\n'
                     '  celery -A designiaBackend beat -l info --scheduler django_celery_beat.schedulers:DatabaseScheduler'
@@ -102,12 +102,12 @@ class Command(BaseCommand):
         for task_name, success in results.items():
             if success:
                 self.stdout.write(
-                    f'  ✅ {task_name.replace("_", " ").title()}: '
+                    f'    {task_name.replace("_", " ").title()}: '
                     f'{self.style.SUCCESS("Configured")}'
                 )
             else:
                 self.stdout.write(
-                    f'  ❌ {task_name.replace("_", " ").title()}: '
+                    f'   {task_name.replace("_", " ").title()}: '
                     f'{self.style.ERROR("Failed")}'
                 )
 
@@ -120,19 +120,19 @@ class Command(BaseCommand):
             
             if 'error' in status:
                 self.stdout.write(
-                    f'  ❌ Error getting status: {self.style.ERROR(status["error"])}'
+                    f'   Error getting status: {self.style.ERROR(status["error"])}'
                 )
                 return
             
             self.stdout.write(f'  📈 Total tasks: {status["total_tasks"]}')
-            self.stdout.write(f'  ✅ Enabled tasks: {status["enabled_tasks"]}')
-            self.stdout.write(f'  ❌ Disabled tasks: {status["disabled_tasks"]}')
+            self.stdout.write(f'    Enabled tasks: {status["enabled_tasks"]}')
+            self.stdout.write(f'   Disabled tasks: {status["disabled_tasks"]}')
             
             # Show individual task details
             if status['tasks']:
                 self.stdout.write('\n📝 Task Details:')
                 for task in status['tasks']:
-                    status_icon = '✅' if task['enabled'] else '❌'
+                    status_icon = ' ' if task['enabled'] else '❌'
                     last_run = task['last_run_at'] or 'Never'
                     
                     self.stdout.write(
@@ -146,7 +146,7 @@ class Command(BaseCommand):
                 
         except Exception as e:
             self.stdout.write(
-                f'  ❌ Error getting task status: {self.style.ERROR(str(e))}'
+                f'   Error getting task status: {self.style.ERROR(str(e))}'
             )
 
     def handle_celery_status(self):
@@ -177,4 +177,4 @@ class Command(BaseCommand):
                 self.stdout.write('  ⚠️  Could not connect to workers (they may not be running)')
                 
         except Exception as e:
-            self.stdout.write(f'  ❌ Celery configuration error: {e}')
+            self.stdout.write(f'   Celery configuration error: {e}')

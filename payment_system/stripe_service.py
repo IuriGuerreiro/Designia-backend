@@ -41,10 +41,10 @@ class StripeConnectService:
         
         # Check if user already has a Stripe account
         if user.stripe_account_id:
-            print(f"❌ User already has Stripe account: {user.stripe_account_id}")
+            print(f" User already has Stripe account: {user.stripe_account_id}")
             errors.append("User already has a Stripe account associated with this profile.")
         else:
-            print("✅ User does not have existing Stripe account")
+            print("  User does not have existing Stripe account")
         
         # For non-OAuth users, require password and 2FA
         if not user.is_oauth_only_user():
@@ -55,27 +55,27 @@ class StripeConnectService:
             print(f"🔑 Has usable password: {has_password}")
             
             if not has_password:
-                print("❌ User doesn't have usable password")
+                print(" User doesn't have usable password")
                 errors.append("Password is required to create a seller account. Please set up a password first.")
             else:
                 # Additional check for passwords starting with '!' (Django's unusable password prefix)
                 if hasattr(user, 'password') and user.password and user.password.startswith('!'):
-                    print("❌ User has invalid password (starts with '!')")
+                    print(" User has invalid password (starts with '!')")
                     errors.append("Invalid password detected. Please reset your password to continue.")
                 else:
-                    print("✅ User has valid password")
+                    print("  User has valid password")
             
             # Check if 2FA is enabled for non-OAuth users
             two_factor_enabled = getattr(user, 'two_factor_enabled', False)
             print(f"🔐 Two-factor enabled: {two_factor_enabled}")
             
             if not two_factor_enabled:
-                print("❌ User doesn't have 2FA enabled")
+                print(" User doesn't have 2FA enabled")
                 errors.append("Two-factor authentication must be enabled to create a seller account.")
             else:
-                print("✅ User has 2FA enabled")
+                print("  User has 2FA enabled")
         else:
-            print("✅ OAuth user - no additional password/2FA requirements")
+            print("  OAuth user - no additional password/2FA requirements")
         
         result = {
             'valid': len(errors) == 0,
@@ -115,27 +115,27 @@ class StripeConnectService:
             print(f"🔑 Has usable password: {has_password}")
             
             if not has_password:
-                print("❌ User doesn't have usable password")
+                print(" User doesn't have usable password")
                 errors.append("Password is required to access seller account. Please set up a password first.")
             else:
                 # Additional check for passwords starting with '!' (Django's unusable password prefix)
                 if hasattr(user, 'password') and user.password and user.password.startswith('!'):
-                    print("❌ User has invalid password (starts with '!')")
+                    print(" User has invalid password (starts with '!')")
                     errors.append("Invalid password detected. Please reset your password to continue.")
                 else:
-                    print("✅ User has valid password")
+                    print("  User has valid password")
             
             # Check if 2FA is enabled for non-OAuth users
             two_factor_enabled = getattr(user, 'two_factor_enabled', False)
             print(f"🔐 Two-factor enabled: {two_factor_enabled}")
             
             if not two_factor_enabled:
-                print("❌ User doesn't have 2FA enabled")
+                print(" User doesn't have 2FA enabled")
                 errors.append("Two-factor authentication must be enabled to access seller account.")
             else:
-                print("✅ User has 2FA enabled")
+                print("  User has 2FA enabled")
         else:
-            print("✅ OAuth user - no additional password/2FA requirements for session")
+            print("  OAuth user - no additional password/2FA requirements for session")
         
         result = {
             'valid': len(errors) == 0,
@@ -165,16 +165,16 @@ class StripeConnectService:
             # First validate user requirements
             print("🔍 Validating user requirements...")
             validation = StripeConnectService.validate_seller_requirements(user)
-            print(f"✅ Validation result: {validation}")
+            print(f"  Validation result: {validation}")
             
             if not validation['valid']:
-                print(f"❌ Validation failed with errors: {validation['errors']}")
+                print(f" Validation failed with errors: {validation['errors']}")
                 return {
                     'success': False,
                     'errors': validation['errors']
                 }
             
-            print("✅ User validation passed, creating Stripe account...")
+            print("  User validation passed, creating Stripe account...")
             
             # Prepare account creation parameters
             account_params = {
@@ -220,7 +220,7 @@ class StripeConnectService:
             print("🚀 Calling Stripe Account.create API...")
             account = stripe.Account.create(**account_params)
             
-            print(f"✅ Stripe account created successfully!")
+            print(f"  Stripe account created successfully!")
             print(f"🆔 Account ID: {account.id}")
             print(f"📊 Account status: charges_enabled={account.charges_enabled}, details_submitted={account.details_submitted}")
             
@@ -229,7 +229,7 @@ class StripeConnectService:
             user.stripe_account_id = account.id
             user.save(update_fields=['stripe_account_id'])
             
-            print(f"✅ Account ID saved to user {user.email}")
+            print(f"  Account ID saved to user {user.email}")
             logger.info(f"Created Stripe account {account.id} for user {user.email}")
             
             return {
@@ -239,7 +239,7 @@ class StripeConnectService:
             }
             
         except stripe.error.StripeError as e:
-            print(f"❌ STRIPE API ERROR: {str(e)}")
+            print(f" STRIPE API ERROR: {str(e)}")
             print(f"🔍 Error type: {type(e).__name__}")
             print(f"📄 Error details: {e.user_message if hasattr(e, 'user_message') else 'No user message'}")
             if hasattr(e, 'error') and hasattr(e.error, 'code'):
@@ -253,7 +253,7 @@ class StripeConnectService:
                 'errors': [f"Failed to create Stripe account: {str(e)}"]
             }
         except Exception as e:
-            print(f"❌ UNEXPECTED ERROR: {str(e)}")
+            print(f" UNEXPECTED ERROR: {str(e)}")
             print(f"🔍 Error type: {type(e).__name__}")
             import traceback
             print(f"📋 Full traceback: {traceback.format_exc()}")
@@ -282,23 +282,23 @@ class StripeConnectService:
             # Validate user requirements for session access (allows existing accounts)
             print("🔍 Validating user session requirements...")
             validation = StripeConnectService.validate_seller_session_requirements(user)
-            print(f"✅ Session validation result: {validation}")
+            print(f"  Session validation result: {validation}")
             
             if not validation['valid']:
-                print(f"❌ Session validation failed with errors: {validation['errors']}")
+                print(f" Session validation failed with errors: {validation['errors']}")
                 return {
                     'success': False,
                     'errors': validation['errors']
                 }
 
             if not user.stripe_account_id:
-                print("❌ User does not have a Stripe account ID")
+                print(" User does not have a Stripe account ID")
                 return {
                     'success': False,
                     'errors': ['User does not have a Stripe account. Please create an account first.']
                 }
             
-            print("✅ User has valid Stripe account, creating account session...")
+            print("  User has valid Stripe account, creating account session...")
             
             # Prepare account session parameters
             session_params = {
@@ -326,7 +326,7 @@ class StripeConnectService:
             print("🚀 Calling Stripe AccountSession.create API...")
             account_session = stripe.AccountSession.create(**session_params)
             
-            print(f"✅ Account session created successfully!")
+            print(f"  Account session created successfully!")
             print(f"🔑 Client secret: {account_session.client_secret[:20]}...{account_session.client_secret[-10:] if len(account_session.client_secret) > 30 else account_session.client_secret}")
             print(f"⏰ Session expires at: {account_session.expires_at}")
             
@@ -339,7 +339,7 @@ class StripeConnectService:
             }
             
         except stripe.error.StripeError as e:
-            print(f"❌ STRIPE API ERROR in session creation: {str(e)}")
+            print(f" STRIPE API ERROR in session creation: {str(e)}")
             print(f"🔍 Error type: {type(e).__name__}")
             print(f"📄 Error details: {e.user_message if hasattr(e, 'user_message') else 'No user message'}")
             if hasattr(e, 'error') and hasattr(e.error, 'code'):
@@ -353,7 +353,7 @@ class StripeConnectService:
                 'errors': [f"Failed to create account session: {str(e)}"]
             }
         except Exception as e:
-            print(f"❌ UNEXPECTED ERROR in session creation: {str(e)}")
+            print(f" UNEXPECTED ERROR in session creation: {str(e)}")
             print(f"🔍 Error type: {type(e).__name__}")
             import traceback
             print(f"📋 Full traceback: {traceback.format_exc()}")

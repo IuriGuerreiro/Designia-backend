@@ -68,7 +68,7 @@ def send_test_webhook(event_type, data):
         print(f"   Response: {response.status_code}")
         
         if response.status_code == 200:
-            print("✅ Webhook sent successfully")
+            print("  Webhook sent successfully")
             
             # Wait a moment and check if it was logged
             time.sleep(1)
@@ -77,7 +77,7 @@ def send_test_webhook(event_type, data):
             ).first()
             
             if webhook_event:
-                print(f"✅ Webhook logged in database")
+                print(f"  Webhook logged in database")
                 print(f"   Status: {webhook_event.status}")
                 print(f"   Processing attempts: {webhook_event.processing_attempts}")
                 return True
@@ -85,12 +85,12 @@ def send_test_webhook(event_type, data):
                 print("⚠️ Webhook not found in database")
                 return False
         else:
-            print(f"❌ Webhook failed: {response.status_code}")
+            print(f" Webhook failed: {response.status_code}")
             print(f"   Response: {response.text[:200]}")
             return False
             
     except Exception as e:
-        print(f"❌ Error sending webhook: {e}")
+        print(f" Error sending webhook: {e}")
         return False
 
 def test_payment_intent_succeeded():
@@ -173,7 +173,7 @@ def run_manual_webhook_tests():
     print()
     
     for test_name, result in results:
-        status_icon = "✅" if result else "❌"
+        status_icon = " " if result else "❌"
         print(f"{status_icon} {test_name}")
     
     print()

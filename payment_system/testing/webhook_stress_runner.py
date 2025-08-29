@@ -181,7 +181,7 @@ class WebhookStressRunner:
             
             if response.status_code == 200:
                 self.successful_webhooks += 1
-                print(f"✅ Thread {thread_id:2d}: {endpoint} - {response.status_code} ({execution_time:.3f}s)")
+                print(f"  Thread {thread_id:2d}: {endpoint} - {response.status_code} ({execution_time:.3f}s)")
                 
                 # Check for deadlock indicators in response
                 response_content = response.content.decode('utf-8', errors='ignore')
@@ -191,7 +191,7 @@ class WebhookStressRunner:
                     
             else:
                 self.failed_webhooks += 1
-                print(f"❌ Thread {thread_id:2d}: {endpoint} - {response.status_code} ({execution_time:.3f}s)")
+                print(f" Thread {thread_id:2d}: {endpoint} - {response.status_code} ({execution_time:.3f}s)")
                 if response.content:
                     print(f"   Error: {response.content.decode('utf-8', errors='ignore')[:100]}")
             
@@ -368,28 +368,28 @@ class WebhookStressRunner:
         if success_rate >= 0.90:  # Lower threshold for extreme load
             print(f"   🔥 OUTSTANDING: {success_rate*100:.1f}% success rate under 50x load!")
         elif success_rate >= 0.80:
-            print(f"   ✅ EXCELLENT: {success_rate*100:.1f}% success rate under extreme stress")
+            print(f"     EXCELLENT: {success_rate*100:.1f}% success rate under extreme stress")
         elif success_rate >= 0.70:
             print(f"   ⚠️  GOOD: {success_rate*100:.1f}% success rate (acceptable for 50x load)")
         else:
-            print(f"   ❌ NEEDS TUNING: {success_rate*100:.1f}% success rate under extreme load")
+            print(f"    NEEDS TUNING: {success_rate*100:.1f}% success rate under extreme load")
         
         if avg_time < 0.1:
-            print(f"   ✅ FAST RESPONSE: <100ms average")
+            print(f"     FAST RESPONSE: <100ms average")
         elif avg_time < 0.5:
             print(f"   ⚠️  ACCEPTABLE: <500ms average")
         else:
-            print(f"   ❌ SLOW RESPONSE: >500ms average")
+            print(f"    SLOW RESPONSE: >500ms average")
         
         if self.deadlock_detections == 0:
-            print(f"   ✅ ZERO DEADLOCKS: Perfect transaction isolation")
+            print(f"     ZERO DEADLOCKS: Perfect transaction isolation")
         else:
             print(f"   🔄 DEADLOCKS DETECTED: {self.deadlock_detections} with recovery")
         
         print(f"\n💡 WEBHOOK RECOMMENDATIONS:")
-        print(f"   • 10ms deadlock retry: ✅ Implemented")
-        print(f"   • READ COMMITTED isolation: ✅ Active")
-        print(f"   • Model ordering: ✅ Order→Tracker→Transaction")
+        print(f"   • 10ms deadlock retry:   Implemented")
+        print(f"   • READ COMMITTED isolation:   Active")
+        print(f"   • Model ordering:   Order→Tracker→Transaction")
         
         if failed_requests > 0:
             print(f"   • Review failed requests for patterns")
@@ -397,7 +397,7 @@ class WebhookStressRunner:
             print(f"   • Monitor deadlock patterns in production")
             
         print(f"\n{'='*60}")
-        print(f"✅ EXTREME WEBHOOK STRESS TEST COMPLETED - 50x LOAD SURVIVED!")
+        print(f"  EXTREME WEBHOOK STRESS TEST COMPLETED - 50x LOAD SURVIVED!")
         print(f"{'='*60}")
 
 def run_webhook_stress_test(concurrency_multiplier=50):

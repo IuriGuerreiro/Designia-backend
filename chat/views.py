@@ -74,11 +74,11 @@ class ChatListView(generics.ListCreateAPIView):
                         chat_data=other_user_chat_data
                     )
                     
-                    logger.info(f"✅ Successfully initiated WebSocket notification for new chat {chat.id}")
+                    logger.info(f"  Successfully initiated WebSocket notification for new chat {chat.id}")
                     
                 except Exception as e:
                     # Log the error but don't fail the chat creation
-                    logger.error(f"❌ Failed to notify user {other_user.id} about new chat: {str(e)}")
+                    logger.error(f" Failed to notify user {other_user.id} about new chat: {str(e)}")
             else:
                 import logging
                 logger = logging.getLogger(__name__)
@@ -112,6 +112,7 @@ class MessageListView(generics.ListCreateAPIView):
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = MessagePagination
     
+    
     def get_queryset(self):
         """Get messages for the specified chat"""
         chat_id = self.kwargs['chat_id']
@@ -121,7 +122,7 @@ class MessageListView(generics.ListCreateAPIView):
         if not chat.has_user(self.request.user):
             return Message.objects.none()
         
-        return Message.objects.filter(chat=chat).select_related('sender', 'sender__profile')
+        return Message.objects.filter(chat=chat).select_related('sender', 'sender__profile').order_by('-created_at')
     
     def create(self, request, *args, **kwargs):
         """Send a new message in the chat"""
@@ -147,7 +148,27 @@ class MessageListView(generics.ListCreateAPIView):
             
             # Return serialized message
             response_serializer = MessageSerializer(message)
-            return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+            message_data = response_serializer.data
+            
+            # Send WebSocket notification to the other user
+            other_user = chat.get_other_user(request.user)
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"📤 New message in chat {chat.id}: {message.text_content[:50]}... -> notifying user {other_user.id}")
+            
+            try:
+                # Notify the other user about the new message
+                async_to_sync(UserConsumer.notify_new_message)(
+                    user_id=other_user.id,
+                    message_data=message_data
+                )
+                logger.info(f"✅ Successfully notified user {other_user.id} about new message")
+                
+            except Exception as e:
+                # Log the error but don't fail the message creation
+                logger.error(f"❌ Failed to notify user {other_user.id} about new message: {str(e)}")
+            
+            return Response(message_data, status=status.HTTP_201_CREATED)
         
         return Response(create_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -252,6 +273,25 @@ def mark_messages_read(request, chat_id):
             is_read=True,
             read_at=timezone.now()
         )
+        
+        # Send WebSocket notification to the other user that messages were read
+        if updated_count > 0:
+            other_user = chat.get_other_user(request.user)
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"📖 Messages marked as read in chat {chat.id} by user {request.user.id} -> notifying user {other_user.id}")
+            
+            try:
+                # Notify the other user that their messages were read
+                async_to_sync(UserConsumer.notify_message_read)(
+                    user_id=other_user.id,
+                    chat_id=chat.id
+                )
+                logger.info(f"✅ Successfully notified user {other_user.id} about messages read")
+                
+            except Exception as e:
+                # Log the error but don't fail the operation
+                logger.error(f"❌ Failed to notify user {other_user.id} about messages read: {str(e)}")
         
         return Response({
             'message': f'{updated_count} messages marked as read'

@@ -103,12 +103,12 @@ def fix_file(filepath):
         if content != original_content:
             with open(filepath, 'w') as f:
                 f.write(content)
-            print(f"✅ Fixed {filepath}")
+            print(f"  Fixed {filepath}")
         else:
             print(f"ℹ️ No changes needed for {filepath}")
             
     except Exception as e:
-        print(f"❌ Error fixing {filepath}: {e}")
+        print(f" Error fixing {filepath}: {e}")
 
 def main():
     """Fix all test files"""
@@ -127,7 +127,7 @@ def main():
         else:
             print(f"⚠️ File not found: {filepath}")
     
-    print("✅ Test file fixes completed!")
+    print("  Test file fixes completed!")
 
 if __name__ == '__main__':
     main()

@@ -11,6 +11,7 @@ import logging
 import json
 import uuid
 import os
+import asyncio
 
 try:
     from PIL import Image
@@ -947,6 +948,41 @@ class ProductReviewViewSet(viewsets.ModelViewSet):
         serializer.save(product=product, reviewer=self.request.user)
 
 
+def send_cart_update_notification(user_id, action, product_id=None, message=None):
+    """Fire-and-forget async cart update notification via WebSocket"""
+    def async_notification():
+        try:
+            from activity.consumer import ActivityConsumer
+            from marketplace.models import Cart, CartItem
+            
+            # Calculate current cart count
+            user_cart = Cart.objects.filter(user_id=user_id).first()
+            cart_count = 0
+            if user_cart:
+                cart_count = sum(item.quantity for item in CartItem.objects.filter(cart=user_cart))
+            
+            # Send WebSocket notification - fire and forget
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(
+                ActivityConsumer.notify_cart_update(
+                    user_id=user_id,
+                    action=action,
+                    product_id=product_id,
+                    cart_count=cart_count,
+                    message=message
+                )
+            )
+            loop.close()
+        except Exception:
+            # Silent failure - if WebSocket notification fails, we don't care
+            pass
+    
+    # Fire and forget in daemon thread
+    import threading
+    threading.Thread(target=async_notification, daemon=True).start()
+
+
 class CartViewSet(viewsets.ModelViewSet):
     """
     ViewSet for shopping cart
@@ -967,16 +1003,7 @@ class CartViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'])
     def add_item(self, request):
         """Add item to cart with comprehensive stock validation"""
-        import logging
-        logger = logging.getLogger(__name__)
-        
-        logger.info("=== CART ADD_ITEM DEBUG START ===")
-        logger.info(f"User: {request.user.username if request.user.is_authenticated else 'Anonymous'}")
-        logger.info(f"Method: {request.method}")
-        logger.info(f"Data: {request.data}")
-        
         cart = Cart.get_or_create_cart(user=request.user)
-        logger.info(f"Cart ID: {cart.id}")
         
                 
         serializer = CartItemSerializer(data=request.data)
@@ -1055,8 +1082,13 @@ class CartViewSet(viewsets.ModelViewSet):
             except Exception as e:
                 logger.error(f"Error starting background tracking: {str(e)}")
             
-            logger.info(f"Response: {response_data}")
-            logger.info("=== CART ADD_ITEM DEBUG END (SUCCESS) ===")
+            # Send WebSocket cart update notification
+            send_cart_update_notification(
+                user_id=request.user.id,
+                action='add_item',
+                product_id=product.id,
+                message=f'Added {quantity} items to cart'
+            )
             
             return Response(response_data, status=status.HTTP_201_CREATED if item_created else status.HTTP_200_OK)
         
@@ -1065,24 +1097,13 @@ class CartViewSet(viewsets.ModelViewSet):
             'detail': 'Invalid data provided',
             'errors': serializer.errors
         }
-        logger.error(f"Validation errors: {serializer.errors}")
-        logger.info("=== CART ADD_ITEM DEBUG END (ERROR) ===")
         
         return Response(error_response, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=False, methods=['patch'])
     def update_item(self, request):
         """Update cart item quantity with comprehensive stock validation"""
-        import logging
-        logger = logging.getLogger(__name__)
-        
-        logger.info("=== CART UPDATE_ITEM DEBUG START ===")
-        logger.info(f"User: {request.user.username if request.user.is_authenticated else 'Anonymous'}")
-        logger.info(f"Method: {request.method}")
-        logger.info(f"Data: {request.data}")
-        
         cart = Cart.get_or_create_cart(user=request.user)
-        logger.info(f"Cart ID: {cart.id}")
         
                 
         item_id = request.data.get('item_id')
@@ -1105,7 +1126,17 @@ class CartViewSet(viewsets.ModelViewSet):
         cart_item = get_object_or_404(CartItem, id=item_id, cart=cart)
         
         if quantity <= 0:
+            product_id = cart_item.product.id
             cart_item.delete()
+            
+            # Send WebSocket cart update notification for removal
+            send_cart_update_notification(
+                user_id=request.user.id,
+                action='remove_item',
+                product_id=product_id,
+                message='Item removed from cart'
+            )
+            
             return Response({'detail': 'Item removed from cart'})
         
         # Enhanced stock validation
@@ -1149,6 +1180,14 @@ class CartViewSet(viewsets.ModelViewSet):
         cart_item.quantity = quantity
         cart_item.save()
         
+        # Send WebSocket cart update notification for quantity update
+        send_cart_update_notification(
+            user_id=request.user.id,
+            action='update_item',
+            product_id=product.id,
+            message=f'Updated cart item quantity to {quantity}'
+        )
+        
         return Response({
             'success': True,
             'item': CartItemSerializer(cart_item).data,
@@ -1191,6 +1230,14 @@ class CartViewSet(viewsets.ModelViewSet):
         except Exception as e:
             logger.error(f"Error starting background tracking: {str(e)}")
         
+        # Send WebSocket cart update notification for item removal
+        send_cart_update_notification(
+            user_id=request.user.id,
+            action='remove_item',
+            product_id=product.id,
+            message=f'Removed {quantity} items from cart'
+        )
+        
         return response
 
     @action(detail=False, methods=['delete'])
@@ -1200,31 +1247,26 @@ class CartViewSet(viewsets.ModelViewSet):
         
                 
         cart.items.all().delete()
+        
+        # Send WebSocket cart update notification for cart clear
+        send_cart_update_notification(
+            user_id=request.user.id,
+            action='clear_cart',
+            message='Cart cleared'
+        )
+        
         return Response({'detail': 'Cart cleared'})
     
     @action(detail=False, methods=['patch'])
     def update_item_status(self, request):
-        """Update cart item status with comprehensive debugging"""
-        import logging
-        logger = logging.getLogger(__name__)
-        
-        logger.info("=== CART UPDATE_ITEM_STATUS DEBUG START ===")
-        logger.info(f"User: {request.user.username if request.user.is_authenticated else 'Anonymous'}")
-        logger.info(f"Method: {request.method}")
-        logger.info(f"Data: {request.data}")
-        
+        """Update cart item status"""
         cart = Cart.get_or_create_cart(user=request.user)
-        logger.info(f"Cart ID: {cart.id}")
         
         
         item_id = request.data.get('item_id')
         new_status = request.data.get('status')
         
-        print(f"DEBUG: item_id={item_id}, new_status={new_status}")
-        logger.info(f"Requested item_id: {item_id}, new_status: {new_status}")
-        
         if not item_id:
-            logger.error("Missing item_id parameter")
             return Response(
                 {'error': 'MISSING_PARAMETERS', 'detail': 'item_id is required'},
                 status=status.HTTP_400_BAD_REQUEST
@@ -1232,7 +1274,6 @@ class CartViewSet(viewsets.ModelViewSet):
         
         try:
             cart_item = CartItem.objects.get(id=item_id, cart=cart)
-            logger.info(f"Found cart item: {cart_item.id} - Product: {cart_item.product.name}")
             
             # For now, just return success since we don't have status field on CartItem
             # This endpoint might be used for frontend state management
@@ -1245,19 +1286,15 @@ class CartViewSet(viewsets.ModelViewSet):
                     'status': new_status  # Echo back the requested status
                 }
             }
-            logger.info(f"Response: {response_data}")
-            logger.info("=== CART UPDATE_ITEM_STATUS DEBUG END ===")
             
             return Response(response_data)
             
         except CartItem.DoesNotExist:
-            logger.error(f"Cart item with id {item_id} not found in user's cart")
             return Response(
                 {'error': 'ITEM_NOT_FOUND', 'detail': 'Item not found in cart'},
                 status=status.HTTP_404_NOT_FOUND
             )
         except Exception as e:
-            logger.error(f"Unexpected error: {str(e)}")
             return Response(
                 {'error': 'INTERNAL_ERROR', 'detail': 'An unexpected error occurred'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -1265,25 +1302,13 @@ class CartViewSet(viewsets.ModelViewSet):
     
     @action(detail=False, methods=['post'])
     def validate_stock(self, request):
-        """Validate stock for all cart items with comprehensive debugging"""
-        import logging
-        logger = logging.getLogger(__name__)
-        
-        logger.info("=== CART VALIDATE_STOCK DEBUG START ===")
-        logger.info(f"User: {request.user.username if request.user.is_authenticated else 'Anonymous'}")
-        logger.info(f"Method: {request.method}")
-        
+        """Validate stock for all cart items"""
         cart = Cart.get_or_create_cart(user=request.user)
-        logger.info(f"Cart ID: {cart.id}, Total items: {cart.items.count()}")
         
         validation_results = []
         all_valid = True
         
         for item in cart.items.all():
-            logger.info(f"Validating item: {item.id} - Product: {item.product.name}")
-            logger.info(f"  Requested quantity: {item.quantity}")
-            logger.info(f"  Available stock: {item.product.stock_quantity}")
-            logger.info(f"  Product active: {item.product.is_active}")
             
             item_result = {
                 'item_id': item.id,
@@ -1300,24 +1325,20 @@ class CartViewSet(viewsets.ModelViewSet):
                 item_result['is_valid'] = False
                 item_result['issues'].append('Product is no longer available')
                 all_valid = False
-                logger.warning(f"  Issue: Product {item.product.name} is inactive")
             
             # Check stock availability
             if item.product.stock_quantity < item.quantity:
                 item_result['is_valid'] = False
                 item_result['issues'].append(f'Insufficient stock. Available: {item.product.stock_quantity}')
                 all_valid = False
-                logger.warning(f"  Issue: Insufficient stock for {item.product.name}")
             
             # Check if stock is zero
             if item.product.stock_quantity <= 0:
                 item_result['is_valid'] = False
                 item_result['issues'].append('Out of stock')
                 all_valid = False
-                logger.warning(f"  Issue: {item.product.name} is out of stock")
             
             validation_results.append(item_result)
-            logger.info(f"  Validation result: {item_result['is_valid']}")
         
         response_data = {
             'cart_valid': all_valid,
@@ -1326,10 +1347,6 @@ class CartViewSet(viewsets.ModelViewSet):
             'invalid_items': sum(1 for r in validation_results if not r['is_valid']),
             'items': validation_results
         }
-        
-        logger.info(f"Overall validation result: {all_valid}")
-        logger.info(f"Response: {response_data}")
-        logger.info("=== CART VALIDATE_STOCK DEBUG END ===")
         
         return Response(response_data)
 

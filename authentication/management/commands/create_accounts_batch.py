@@ -217,11 +217,11 @@ class Command(BaseCommand):
         if validation_errors:
             self.stdout.write(self.style.ERROR('Validation errors found:'))
             for error in validation_errors:
-                self.stdout.write(self.style.ERROR(f'  ❌ {error}'))
+                self.stdout.write(self.style.ERROR(f'   {error}'))
             raise CommandError('Fix validation errors before proceeding')
 
         if dry_run:
-            self.stdout.write(self.style.SUCCESS('✅ Dry run successful - all account data is valid'))
+            self.stdout.write(self.style.SUCCESS('  Dry run successful - all account data is valid'))
             return
 
         # Process accounts
@@ -275,13 +275,13 @@ class Command(BaseCommand):
                     profile.save()
 
                     self.stdout.write(
-                        self.style.SUCCESS(f'  ✅ Account {i + 1}: {username} ({email}) created successfully')
+                        self.style.SUCCESS(f'    Account {i + 1}: {username} ({email}) created successfully')
                     )
                     created_count += 1
 
                 except Exception as e:
                     error_msg = f'Account {i + 1} ({account_data.get("username", "unknown")}): {str(e)}'
-                    self.stdout.write(self.style.ERROR(f'  ❌ {error_msg}'))
+                    self.stdout.write(self.style.ERROR(f'   {error_msg}'))
                     errors_count += 1
                     
                     if not force:
@@ -299,10 +299,10 @@ class Command(BaseCommand):
 
         # Summary
         self.stdout.write('\n' + '='*50)
-        self.stdout.write(self.style.SUCCESS(f'✅ Created: {created_count} accounts'))
+        self.stdout.write(self.style.SUCCESS(f'  Created: {created_count} accounts'))
         if skipped_count > 0:
             self.stdout.write(self.style.WARNING(f'⏭️  Skipped: {skipped_count} accounts'))
         if errors_count > 0:
-            self.stdout.write(self.style.ERROR(f'❌ Errors: {errors_count} accounts'))
+            self.stdout.write(self.style.ERROR(f' Errors: {errors_count} accounts'))
         self.stdout.write(f'📄 Total processed: {len(accounts_data)} accounts')
         self.stdout.write('='*50)

@@ -59,7 +59,7 @@ class PaymentSystemTestRunner:
                     check=True,
                     capture_output=True
                 )
-                print(f"✅ Installed {dep}")
+                print(f"  Installed {dep}")
             except subprocess.CalledProcessError as e:
                 print(f"⚠️ Failed to install {dep}: {e}")
         
@@ -68,7 +68,7 @@ class PaymentSystemTestRunner:
     def run_django_setup(self):
         """Initialize Django for testing"""
         django.setup()
-        print("✅ Django initialized for testing")
+        print("  Django initialized for testing")
     
     def run_unit_tests(self, verbosity=2):
         """Run unit tests for models"""
@@ -81,10 +81,10 @@ class PaymentSystemTestRunner:
         failures = test_runner.run_tests(['payment_system.testing.test_models'])
         
         if failures:
-            print("❌ Unit tests failed")
+            print(" Unit tests failed")
             return False
         else:
-            print("✅ Unit tests passed")
+            print("  Unit tests passed")
             return True
     
     def run_integration_tests(self, verbosity=2):
@@ -98,10 +98,10 @@ class PaymentSystemTestRunner:
         failures = test_runner.run_tests(['payment_system.testing.test_views'])
         
         if failures:
-            print("❌ Integration tests failed")
+            print(" Integration tests failed")
             return False
         else:
-            print("✅ Integration tests passed")
+            print("  Integration tests passed")
             return True
     
     def run_e2e_tests(self, verbosity=2):
@@ -115,10 +115,10 @@ class PaymentSystemTestRunner:
         failures = test_runner.run_tests(['payment_system.testing.test_end_to_end'])
         
         if failures:
-            print("❌ End-to-end tests failed")
+            print(" End-to-end tests failed")
             return False
         else:
-            print("✅ End-to-end tests passed")
+            print("  End-to-end tests passed")
             return True
     
     def run_webhook_tests(self, verbosity=2):
@@ -132,10 +132,10 @@ class PaymentSystemTestRunner:
         failures = test_runner.run_tests(['payment_system.testing.test_webhooks'])
         
         if failures:
-            print("❌ Webhook tests failed")
+            print(" Webhook tests failed")
             return False
         else:
-            print("✅ Webhook tests passed")
+            print("  Webhook tests passed")
             return True
     
     def run_all_tests(self, verbosity=2):
@@ -149,10 +149,10 @@ class PaymentSystemTestRunner:
         failures = test_runner.run_tests(self.test_modules)
         
         if failures:
-            print("❌ Some tests failed")
+            print(" Some tests failed")
             return False
         else:
-            print("✅ All tests passed")
+            print("  All tests passed")
             return True
     
     def run_with_coverage(self, verbosity=2):
@@ -200,7 +200,7 @@ class PaymentSystemTestRunner:
             return success
             
         except ImportError:
-            print("❌ Coverage.py not available")
+            print(" Coverage.py not available")
             return self.run_all_tests(verbosity)
     
     def run_performance_tests(self):
@@ -229,7 +229,7 @@ class PaymentSystemTestRunner:
                 users.append(user)
             
             creation_time = time.time() - start_time
-            print(f"✅ Created 100 users in {creation_time:.2f} seconds")
+            print(f"  Created 100 users in {creation_time:.2f} seconds")
             
             # Test bulk operations
             start_time = time.time()
@@ -245,7 +245,7 @@ class PaymentSystemTestRunner:
             ])
             
             bulk_time = time.time() - start_time
-            print(f"✅ Bulk created 1000 payments in {bulk_time:.2f} seconds")
+            print(f"  Bulk created 1000 payments in {bulk_time:.2f} seconds")
             
             # Cleanup
             Payment.objects.filter(payment_intent_id__startswith='pi_perf_test_').delete()
@@ -255,7 +255,7 @@ class PaymentSystemTestRunner:
             return True
             
         except Exception as e:
-            print(f"❌ Performance tests failed: {e}")
+            print(f" Performance tests failed: {e}")
             return False
     
     def generate_test_report(self, results):
@@ -268,7 +268,7 @@ class PaymentSystemTestRunner:
             
             f.write("## Test Results Summary\n\n")
             for test_type, result in results.items():
-                status = "✅ PASSED" if result else "❌ FAILED"
+                status = "  PASSED" if result else " FAILED"
                 f.write(f"- **{test_type}**: {status}\n")
             
             f.write("\n## Test Categories\n\n")
@@ -392,10 +392,10 @@ class PaymentSystemTestRunner:
         print("=" * 60)
         
         for test_type, result in results.items():
-            status = "✅ PASSED" if result else "❌ FAILED"
+            status = "  PASSED" if result else " FAILED"
             print(f"{test_type}: {status}")
         
-        overall_status = "✅ ALL TESTS PASSED" if success else "❌ SOME TESTS FAILED"
+        overall_status = "  ALL TESTS PASSED" if success else " SOME TESTS FAILED"
         print(f"\nOverall Result: {overall_status}")
         
         if not success:

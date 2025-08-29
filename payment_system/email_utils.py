@@ -107,7 +107,7 @@ def send_order_receipt_email(order, request=None):
             print("-" * 80)
             print(text_content)
             print("="*80)
-            print("✅ Order receipt printed to console (development mode)")
+            print("  Order receipt printed to console (development mode)")
             print("🔗 HTML version would be sent in production")
             print("="*80 + "\n")
             
@@ -216,7 +216,7 @@ def send_order_status_update_email(order, previous_status, new_status, request=N
             print(f"{status_info['message']}")
             print(f"\nTrack your order: {frontend_url}/my-orders/{order.id}")
             print("="*80)
-            print("✅ Status update email printed to console (development mode)")
+            print("  Status update email printed to console (development mode)")
             print("="*80 + "\n")
             
             return True, "Status update email sent successfully (development mode)"
@@ -289,7 +289,7 @@ def send_order_cancellation_receipt_email(order, cancellation_reason, refund_amo
         frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:5173')
         
         # Subject line
-        subject = f"❌ Order Cancelled - #{str(order.id)[:8]} | Refund Processing"
+        subject = f" Order Cancelled - #{str(order.id)[:8]} | Refund Processing"
         
         # Check if we're in development mode
         if settings.EMAIL_BACKEND == 'django.core.mail.backends.console.EmailBackend':
@@ -306,14 +306,14 @@ def send_order_cancellation_receipt_email(order, cancellation_reason, refund_amo
             print(f"📅 Cancelled: {order.cancelled_at or timezone.now()}")
             print(f"📋 Subject: {subject}")
             print("-" * 80)
-            print("❌ ORDER CANCELLATION CONFIRMATION")
+            print(" ORDER CANCELLATION CONFIRMATION")
             print(f"Your order has been successfully cancelled.")
             if refund_amount:
                 print(f"A refund of ${refund_amount} has been processed and will appear in your account within 5-10 business days.")
             print(f"\nReason: {cancellation_reason}")
             print(f"\nView order details: {frontend_url}/my-orders/{order.id}")
             print("="*80)
-            print("✅ Cancellation email printed to console (development mode)")
+            print("  Cancellation email printed to console (development mode)")
             print("="*80 + "\n")
             
             return True, "Cancellation email sent successfully (development mode)"
@@ -390,7 +390,7 @@ def send_failed_refund_notification_email(order, failure_reason, refund_amount=N
         support_email = os.getenv('SUPPORT_EMAIL', 'support@designia.com')
         
         # Subject line
-        subject = f"❌ Refund Processing Failed - Order #{str(order.id)[:8]} - Action Required"
+        subject = f" Refund Processing Failed - Order #{str(order.id)[:8]} - Action Required"
         
         # Check if we're in development mode
         if settings.EMAIL_BACKEND == 'django.core.mail.backends.console.EmailBackend':
@@ -400,12 +400,12 @@ def send_failed_refund_notification_email(order, failure_reason, refund_amount=N
             print(f"📧 To: {user.email}")
             print(f"👤 Customer: {user.first_name or user.username}")
             print(f"🛒 Order: #{str(order.id)[:8]}")
-            print(f"❌ Failure Reason: {failure_reason}")
+            print(f" Failure Reason: {failure_reason}")
             print(f"💰 Refund Amount: ${refund_amount}" if refund_amount else "💰 Refund Amount: Not specified")
             print(f"📅 Failed: {timezone.now()}")
             print(f"📋 Subject: {subject}")
             print("-" * 80)
-            print("❌ REFUND PROCESSING FAILED")
+            print(" REFUND PROCESSING FAILED")
             print(f"Unfortunately, we were unable to process your refund automatically.")
             print(f"Reason: {failure_reason}")
             print()
@@ -416,7 +416,7 @@ def send_failed_refund_notification_email(order, failure_reason, refund_amount=N
             print("• We will arrange an alternative refund method (bank transfer, etc.)")
             print(f"\nView order details: {frontend_url}/my-orders/{order.id}")
             print("="*80)
-            print("✅ Failed refund notification email printed to console (development mode)")
+            print("  Failed refund notification email printed to console (development mode)")
             print("="*80 + "\n")
             
             return True, "Failed refund notification email sent successfully (development mode)"
@@ -426,7 +426,7 @@ def send_failed_refund_notification_email(order, failure_reason, refund_amount=N
             text_content = f"""
 Hello {user.first_name or user.username},
 
-❌ REFUND PROCESSING FAILED
+ REFUND PROCESSING FAILED
 
 We apologize, but we encountered an issue processing your refund for Order #{str(order.id)[:8]}.
 
