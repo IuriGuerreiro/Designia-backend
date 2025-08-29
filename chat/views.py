@@ -164,6 +164,11 @@ class MessageListView(generics.ListCreateAPIView):
                 )
                 logger.info(f"✅ Successfully notified user {other_user.id} about new message")
                 
+                # Also notify Activity WebSocket for global unread count update
+                from chat.utils import UnreadMessageTracker
+                UnreadMessageTracker.notify_unread_count_change_async(other_user.id)
+                logger.info(f"💬 Triggered Activity WebSocket unread count update for user {other_user.id}")
+                
             except Exception as e:
                 # Log the error but don't fail the message creation
                 logger.error(f"❌ Failed to notify user {other_user.id} about new message: {str(e)}")
@@ -288,6 +293,11 @@ def mark_messages_read(request, chat_id):
                     chat_id=chat.id
                 )
                 logger.info(f"✅ Successfully notified user {other_user.id} about messages read")
+                
+                # Also notify Activity WebSocket for global unread count update (for the reader)
+                from chat.utils import UnreadMessageTracker
+                UnreadMessageTracker.notify_unread_count_change_async(request.user.id)
+                logger.info(f"💬 Triggered Activity WebSocket unread count update for reader {request.user.id}")
                 
             except Exception as e:
                 # Log the error but don't fail the operation
