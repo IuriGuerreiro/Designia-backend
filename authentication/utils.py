@@ -115,37 +115,81 @@ def record_email_attempt(user, email, request_type, request=None):
 
 
 def send_verification_email(user, request):
-    """Send email verification email to user (prints to console for development)"""
+    """Send email verification email to user"""
+    from django.conf import settings
+    from django.core.mail import send_mail
+    from django.template.loader import render_to_string
+
     # Check rate limit
     can_send, time_remaining = check_email_rate_limit(user, user.email, 'email_verification', request)
     if not can_send:
         return False, f"Please wait {time_remaining} seconds before requesting another verification email."
-    
+
     # Record the attempt
     record_email_attempt(user, user.email, 'email_verification', request)
-    
+
     # Create verification token
     token = EmailVerificationToken.objects.create(user=user)
-    
+
     # Build verification URL
     frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:5173')
     verification_url = f"{frontend_url}/verify-email/{token.token}"
-    
-    # Print verification details to console
-    print("\n" + "="*80)
-    print("🔐 EMAIL VERIFICATION CODE")
-    print("="*80)
-    print(f"📧 User: {user.email}")
-    print(f"👤 Name: {user.first_name or user.username}")
-    print(f"🔗 Verification URL: {verification_url}")
-    print(f"🎫 Token: {token.token}")
-    print(f"⏰ Expires: {token.expires_at}")
-    print("="*80)
-    print("📱 To verify: Copy the URL above and paste it in your browser")
-    print("="*80 + "\n")
-    
-    # For development, we always return True since we're printing to console
-    return True, "Verification email sent successfully"
+
+    # SECURITY FIX: Handle email sending based on environment
+    if settings.EMAIL_BACKEND == 'django.core.mail.backends.console.EmailBackend':
+        # Development mode - print to console with security notice
+        print("\n" + "="*80)
+        print("🔐 EMAIL VERIFICATION CODE (DEVELOPMENT MODE)")
+        print("="*80)
+        print("⚠️  SECURITY: In production, this will be sent via email")
+        print(f"📧 User: {user.email}")
+        print(f"👤 Name: {user.first_name or user.username}")
+        print(f"🔗 Verification URL: {verification_url}")
+        print(f"🎫 Token: {token.token}")
+        print(f"⏰ Expires: {token.expires_at}")
+        print("="*80)
+        print("📱 To verify: Copy the URL above and paste it in your browser")
+        print("="*80 + "\n")
+        return True, "Verification email printed to console (development mode)"
+    else:
+        # Production mode - send actual email
+        try:
+            subject = "Verify your email address - Designia"
+
+            # Email content
+            email_content = f"""
+Hello {user.first_name or user.username},
+
+Please verify your email address by clicking the link below:
+
+{verification_url}
+
+This link will expire at {token.expires_at.strftime('%Y-%m-%d %H:%M:%S UTC')}.
+
+If you didn't create an account with Designia, please ignore this email.
+
+Best regards,
+The Designia Team
+"""
+
+            # Send email
+            success = send_mail(
+                subject=subject,
+                message=email_content,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[user.email],
+                fail_silently=False
+            )
+
+            if success:
+                return True, "Verification email sent successfully"
+            else:
+                return False, "Failed to send verification email"
+
+        except Exception as e:
+            # Log the error for debugging but don't expose details to user
+            print(f"Email sending error: {str(e)}")
+            return False, "Email service temporarily unavailable"
 
 
 def verify_email_token(token_str):

@@ -29,16 +29,35 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-=7+e-&m5w@jt)1*i&tugnh2+^%6uhkc-c2-!=1&9^2rfbk2uks')
+# SECURITY FIX: Require SECRET_KEY environment variable in production
+SECRET_KEY = os.getenv('SECRET_KEY')
+if not SECRET_KEY:
+    if DEBUG:
+        # Allow fallback only in development when DEBUG=True
+        SECRET_KEY = 'django-insecure-development-key-only-for-debug-mode'
+    else:
+        raise ValueError("SECRET_KEY environment variable must be set in production")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
+# SECURITY FIX: Default to False to prevent information disclosure in production
+DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
 
 # Parse ALLOWED_HOSTS from environment variable
 ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', '192.168.3.2,localhost,127.0.0.1').split(',')
 
-# Add Ngrok host for development
-ALLOWED_HOSTS.append('.ngrok-free.app')
+# SECURITY FIX: Only add ngrok domain in development mode
+if DEBUG:
+    # For development only - use specific ngrok subdomain if available
+    ngrok_domain = os.getenv('NGROK_DOMAIN')
+    if ngrok_domain:
+        ALLOWED_HOSTS.append(ngrok_domain)  # Specific subdomain
+    else:
+        # Wildcard fallback for development convenience
+        ALLOWED_HOSTS.append('.ngrok-free.app')
+        print("⚠️  SECURITY WARNING: Using wildcard ngrok domain (.ngrok-free.app)")
+        print("   This is a potential security risk - use specific NGROK_DOMAIN in production-like environments")
+        print("   Set NGROK_DOMAIN=your-specific-subdomain.ngrok-free.app for better security")
+# In production, ngrok domains are never allowed
 
 
 
@@ -190,6 +209,7 @@ SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
     'ROTATE_REFRESH_TOKENS': True,
+    'TOKEN_OBTAIN_SERIALIZER': 'authentication.jwt_serializers.CustomTokenObtainPairSerializer',
 }
 
 # CORS settings - parse from environment variable

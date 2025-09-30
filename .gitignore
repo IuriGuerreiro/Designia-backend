@@ -6,3 +6,5 @@ db.sqlite3
 
 /venvWin
 /.venv
+
+debug.log

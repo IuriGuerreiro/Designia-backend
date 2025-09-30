@@ -5,19 +5,17 @@ A comprehensive Django REST API backend for the Designia marketplace platform, f
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Python 3.9+
-- Redis Server
-- MySQL/PostgreSQL Database
-- Stripe Account (for payments)
+- Python 3.8+
 - ngrok (for webhook testing)
+- Stripe Account (for payments)
 
 ### Installation
 
 1. **Clone and Setup**
 ```bash
 cd Designia-backend
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
@@ -55,18 +53,29 @@ brew services start redis
 
 ### Running the Application
 
-1. **Start Django Server**
+1. **Start Daphne Server**
 ```bash
-python manage.py runserver 0.0.0.0:8000
+# Easy way (recommended)
+./run_backend.sh          # Linux/macOS
+run_backend.bat           # Windows
+
+# Manual way
+daphne -b 192.168.3.2 -p 8001 designiaBackend.asgi:application
 ```
 
 2. **Setup ngrok for Stripe Webhooks**
 ```bash
 # Install ngrok from https://ngrok.com/
-ngrok http 8000
+ngrok http 8001
 # Copy the https://*.ngrok-free.app URL
-# Add to Stripe Dashboard > Webhooks with endpoint: /payment/webhooks/stripe/
+# Add to Stripe Dashboard > Webhooks with endpoint: /api/payments/stripe_webhook/
 ```
+
+## 🌐 Access Points
+
+- **API**: http://192.168.3.2:8001/api/
+- **Admin**: http://192.168.3.2:8001/admin/
+- **WebSocket**: ws://192.168.3.2:8001/ws/chat/
 
 ## 🔄 Celery Task System
 

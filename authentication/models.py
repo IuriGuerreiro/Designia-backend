@@ -12,6 +12,12 @@ from django.dispatch import receiver
 
 
 class CustomUser(AbstractUser):
+    ROLE_CHOICES = [
+        ('user', 'User'),
+        ('seller', 'Seller'),
+        ('admin', 'Admin'),
+    ]
+
     LANGUAGE_CHOICES = [
         ('en', 'English'),
         ('pt', 'Portuguese'),
@@ -54,7 +60,7 @@ class CustomUser(AbstractUser):
         ('ca', 'Catalan'),
         ('gl', 'Galician'),
     ]
-    
+
     email = models.EmailField(unique=True)
     first_name = models.CharField(max_length=30, blank=True)
     last_name = models.CharField(max_length=30, blank=True)
@@ -62,23 +68,38 @@ class CustomUser(AbstractUser):
     is_active = models.BooleanField(default=False)  # Changed to False - users must verify email first
     is_email_verified = models.BooleanField(default=False)
     avatar = models.ImageField(upload_to='avatars/', blank=True, null=True)
-    
+
+    # Role system - simple field
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='user')
+
     # 2FA fields
     two_factor_enabled = models.BooleanField(default=False)
-    
+
     # Language preference
     language = models.CharField(max_length=5, choices=LANGUAGE_CHOICES, default='en')
-    
+
     # Stripe Connect fields
     stripe_account_id = models.CharField(max_length=255, blank=True, null=True, unique=True)
-    
+
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = ['username']
 
     def is_oauth_only_user(self):
         """Check if user is OAuth-only (no password set)"""
         return not self.has_usable_password()
-    
+
+    def is_seller(self):
+        """Check if user is a verified seller"""
+        return self.role == 'seller'
+
+    def is_admin(self):
+        """Check if user is an admin"""
+        return self.role == 'admin' or self.is_superuser
+
+    def can_sell_products(self):
+        """Check if user can create and sell products"""
+        return self.is_seller() or self.is_admin()
+
     def __str__(self):
         return self.email
 
@@ -314,3 +335,7 @@ class TwoFactorCode(models.Model):
     
     def __str__(self):
         return f"2FA code for {self.user.email} - {self.purpose}"
+
+
+# Import seller application models
+from .seller_models import SellerApplication, SellerApplicationImage

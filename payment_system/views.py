@@ -26,11 +26,14 @@ from .email_utils import send_order_receipt_email, send_order_status_update_emai
 
 # Import transaction utilities
 from utils.transaction_utils import (
-    financial_transaction, serializable_transaction, 
+    financial_transaction, serializable_transaction,
     atomic_with_isolation, rollback_safe_operation, log_transaction_performance,
     retry_on_deadlock, DeadlockError, TransactionError, get_current_isolation_level,
     ISOLATION_LEVELS, payment_webhook_transaction
 )
+
+# Import security utilities
+from .security import PaymentAuditLogger
 
 # Set the Stripe API key from Django settings
 stripe.api_key = settings.STRIPE_SECRET_KEY
@@ -53,33 +56,70 @@ def stripe_webhook(request):
     endpoint_secret = settings.STRIPE_WEBHOOK_SECRET
     sig_header = request.headers.get('stripe-signature')
 
-    if not endpoint_secret:
-        print('⚠️  No endpoint secret configured. Skipping webhook verification.')
-        # If no endpoint secret is configured, we won't verify the signature
-        # and will just deserialize the event from JSON
-    
-    event = None
-    
-    try:
-        event = stripe.Event.construct_from(
-            json.loads(payload), stripe.api_key
-        )
-    except ValueError as e:
-        print(f" Error constructing event: {e}")
-        return HttpResponse(status=400)
+    # Get client IP for security monitoring
+    client_ip = request.META.get('HTTP_X_FORWARDED_FOR', '').split(',')[0] or request.META.get('REMOTE_ADDR', 'unknown')
 
-    # Only verify the event if you've defined an endpoint secret
-    # Otherwise, use the basic event deserialized with JSON
+    # SECURITY FIX: Always require webhook signature verification
+    if not endpoint_secret:
+        PaymentAuditLogger.log_security_event(
+            'webhook_missing_secret',
+            client_ip,
+            details='STRIPE_WEBHOOK_SECRET not configured - critical security vulnerability'
+        )
+        logger.error("Critical Security Error: STRIPE_WEBHOOK_SECRET not configured. Rejecting webhook.")
+        return HttpResponse(
+            status=500,
+            content='Webhook endpoint secret must be configured for security. Contact system administrator.'
+        )
+
+    if not sig_header:
+        PaymentAuditLogger.log_security_event(
+            'webhook_missing_signature',
+            client_ip,
+            details='Webhook request without stripe-signature header'
+        )
+        logger.warning(f"Webhook rejected: Missing stripe-signature header from IP {client_ip}")
+        return HttpResponse(
+            status=400,
+            content='Missing stripe-signature header. Webhook verification required.'
+        )
+
+    # SECURITY: Verify webhook signature BEFORE processing any data
     try:
         event = stripe.Webhook.construct_event(
             payload, sig_header, endpoint_secret
         )
+        # Log successful webhook verification
+        PaymentAuditLogger.log_security_event(
+            'webhook_verified',
+            client_ip,
+            details=f"Successful webhook verification for event: {event.get('type', 'unknown')}"
+        )
+        logger.info(f"Webhook signature verified successfully for event: {event.get('type', 'unknown')} from IP {client_ip}")
     except stripe.error.SignatureVerificationError as e:
-        print('⚠️  Webhook signature verification failed.' + str(e))
+        PaymentAuditLogger.log_security_event(
+            'webhook_signature_failed',
+            client_ip,
+            details=f"Signature verification failed: {str(e)}"
+        )
+        logger.warning(f"Webhook signature verification failed from IP {client_ip}: {str(e)}")
         return HttpResponse(status=400, content='Webhook signature verification failed.')
+    except ValueError as e:
+        PaymentAuditLogger.log_security_event(
+            'webhook_invalid_payload',
+            client_ip,
+            details=f"Invalid JSON payload: {str(e)}"
+        )
+        logger.error(f"Webhook payload parsing failed from IP {client_ip}: {str(e)}")
+        return HttpResponse(status=400, content='Invalid webhook payload format.')
     except Exception as e:
-        print(' Error parsing webhook payload: ' + str(e))
-        return HttpResponse(status=400, content='Webhook payload parsing failed.')
+        PaymentAuditLogger.log_security_event(
+            'webhook_processing_error',
+            client_ip,
+            details=f"Unexpected error: {str(e)}"
+        )
+        logger.error(f"Unexpected webhook verification error from IP {client_ip}: {str(e)}")
+        return HttpResponse(status=500, content='Webhook processing error.')
     
     print(f"🔔 Received Stripe event: {event.type}")
     # Handle checkout.session.completed event (for embedded checkout)
@@ -927,8 +967,8 @@ def create_payout_from_webhook(stripe_payout_id, payout_object, event_type):
                 payout_type='standard',  # Default type for webhook-created payouts
                 amount_cents=payout_amount,
                 currency=payout_currency,
-                stripe_created_at=timezone.datetime.fromtimestamp(payout_created, tz=timezone.utc) if payout_created else timezone.now(),
-                arrival_date=timezone.datetime.fromtimestamp(payout_arrival_date, tz=timezone.utc) if payout_arrival_date else None,
+                stripe_created_at=timezone.datetime.fromtimestamp(payout_created, tz=timezone.get_current_timezone()) if payout_created else timezone.now(),
+                arrival_date=timezone.datetime.fromtimestamp(payout_arrival_date, tz=timezone.get_current_timezone()) if payout_arrival_date else None,
                 description=payout_description or f"Webhook-created payout for seller {seller.username}",
                 metadata={
                     'created_via_webhook': True,
@@ -1005,7 +1045,7 @@ def update_payout_from_webhook(event, payout_object):
                     # Step 3: Update arrival date if provided
                     if payout_arrival_date:
                         payout.arrival_date = timezone.datetime.fromtimestamp(
-                            payout_arrival_date, tz=timezone.utc
+                            payout_arrival_date, tz=timezone.get_current_timezone()
                         )
                     
                     # Step 4: Handle failure information and transaction resets
