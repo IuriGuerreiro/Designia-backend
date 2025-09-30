@@ -3,6 +3,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
+from .jwt_serializers import CustomRefreshToken
 from django.contrib.auth import authenticate
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
@@ -220,7 +221,7 @@ def login(request):
                             }, status=status.HTTP_429_TOO_MANY_REQUESTS)
                 else:
                     # No 2FA required, proceed with normal login
-                    refresh = RefreshToken.for_user(user)
+                    refresh = CustomRefreshToken.for_user(user)
                     return Response({
                         'user': UserSerializer(user).data,
                         'refresh': str(refresh),
@@ -259,7 +260,7 @@ def login_verify_2fa(request):
             return Response({'error': message}, status=status.HTTP_400_BAD_REQUEST)
         
         # 2FA verified, complete login
-        refresh = RefreshToken.for_user(user)
+        refresh = CustomRefreshToken.for_user(user)
         return Response({
             'user': UserSerializer(user).data,
             'refresh': str(refresh),
@@ -399,7 +400,7 @@ def google_login(request):
             user = CustomUser.objects.get(email=google_data['email'])
             print(f"Existing user found for Google login: {google_data['email']}")
             
-            refresh = RefreshToken.for_user(user)
+            refresh = CustomRefreshToken.for_user(user)
             
             response_data = {
                 'success': True,
@@ -435,7 +436,7 @@ def google_login(request):
                 )
                 print(f"New user created for Google account: {google_data['email']}")
                 
-                refresh = RefreshToken.for_user(user)
+                refresh = CustomRefreshToken.for_user(user)
                 
                 response_data = {
                     'success': True,
@@ -498,7 +499,7 @@ def google_register(request):
             
             is_new_user = True
         
-        refresh = RefreshToken.for_user(user)
+        refresh = CustomRefreshToken.for_user(user)
 
         response_data = {
             'success': True,
@@ -572,7 +573,7 @@ def google_oauth(request):
         
         print("🔍 Generating JWT tokens...")
         # Generate JWT tokens
-        refresh = RefreshToken.for_user(user)
+        refresh = CustomRefreshToken.for_user(user)
         print("  JWT tokens generated successfully")
         
         print("  Google OAuth successful - returning response")

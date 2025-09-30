@@ -69,7 +69,7 @@ User = get_user_model()
 def seller_payout(request):
     """
     Simple Stripe payout creation - just create the payout with Stripe API.
-    
+
     Expected request data:
     {
         "amount": 24784,  # Amount in cents
@@ -81,114 +81,138 @@ def seller_payout(request):
     print(f"👤 User: {request.user.username} (ID: {request.user.id})")
     print(f"🔐 Is authenticated: {request.user.is_authenticated}")
     print(f"📊 Request data: {request.data}")
-    
+
     # Log current isolation level for debugging
     current_isolation = get_current_isolation_level()
     print(f"🔐 Current transaction isolation level: {current_isolation}")
     logger.info(f"Seller payout started for user {request.user.id} with isolation level: {current_isolation}")
-    
+
     try:
-        # Get current user info
-        user = request.user
+        # Get current user info from database (don't trust token)
+        user = User.objects.get(id=request.user.id)
+
+        # ROLE CHECK: Verify seller or admin role from database
+        if user.role not in ['seller', 'admin']:
+            logger.warning(f"Non-seller user {user.username} (ID: {user.id}, Role: {user.role}) attempted payout")
+            return Response({
+                'error': 'SELLER_ACCESS_REQUIRED',
+                'detail': 'Permission denied. Only verified sellers can create payouts.'
+            }, status=status.HTTP_403_FORBIDDEN)
         
-        print(f"🔧 User ID: {user.id}")
-        
-        # Verify user has Stripe account
+        print(f"🔧 User ID: {user.id}, Role: {user.role}")
+
+        # Verify user has Stripe account (admin bypass)
         stripe_account_id = user.stripe_account_id
 
-        if not stripe_account_id:
+        if not stripe_account_id and user.role != 'admin':
             print("⚠️ User does not have a Stripe account.")
             return Response({
                 'error': 'NO_STRIPE_ACCOUNT',
                 'detail': 'User does not have a connected Stripe account.'
             }, status=status.HTTP_400_BAD_REQUEST)
-        
-        
-        StripeAccountBalance = stripe.Balance.retrieve(
-            stripe_account=stripe_account_id,
-            expand=['available']
-        )
-        available_balance = StripeAccountBalance['available']
 
-
-        print(f"🔧 Available balance: {available_balance}")
-
-
-        if not available_balance or len(available_balance) == 0:
-            print("⚠️ No available balance found for this account.")
-            return Response({
-                'error': 'NO_AVAILABLE_BALANCE',
-                'detail': 'No available balance found for this Stripe account.'
-            }, status=status.HTTP_400_BAD_REQUEST)
+        # Admin bypass notification
+        if user.role == 'admin':
+            print(f"👑 ADMIN BYPASS: User {user.username} (admin) bypassing Stripe account verification")
+            logger.info(f"ADMIN BYPASS: {user.username} (ID: {user.id}) using admin privileges for payout")
         
-        # Get the first available balance (usually EUR or primary currency)
-        first_balance = available_balance[0]
-        payout_amount = first_balance['amount']
-        payout_currency = first_balance['currency']
         
-        print(f"💰 Using balance: {payout_amount} {payout_currency.upper()}")
-        print(f"💰 Amount in cents: {payout_amount}")
-        print(f"💰 Amount formatted: €{payout_amount/100:.2f}")
-        
-        if payout_amount <= 1:
-            print("⚠️ Available balance is zero or negative.")
-            return Response({
-                'error': 'INSUFFICIENT_BALANCE',
-                'detail': f'Available balance is {payout_amount} cents. Cannot create payout.'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Get user's external account to determine payout method and timing
-        try:
-            external_accounts = stripe.Account.list_external_accounts(
-                stripe_account_id,
-                object='bank_account',
-                limit=10
+        # Only check Stripe balance if not admin
+        if user.role != 'admin':
+            StripeAccountBalance = stripe.Balance.retrieve(
+                stripe_account=stripe_account_id,
+                expand=['available']
             )
-            
-            print(f"🏦 Found {len(external_accounts.data)} external accounts")
-            
-            # Determine optimal payout method and timing based on account type
-            payout_method = "standard"  # Default to standard
-            payout_timing = "standard"  # Default timing
-            
-            if external_accounts.data:
-                # Check the default external account
-                default_account = external_accounts.data[0]
-                account_type = default_account.get('object', 'bank_account')
-                
-                print(f"🔍 Default account type: {account_type}")
-                print(f"🔍 Account details: {default_account.get('last4', 'N/A')}")
-                
-                # Check if it's a debit card (instant eligible)
-                if account_type == 'card':
-                    card_brand = default_account.get('brand', '').lower()
-                    card_funding = default_account.get('funding', '').lower()
-                    
-                    print(f"💳 Card brand: {card_brand}, funding: {card_funding}")
-                    
-                    # Debit cards are eligible for instant payouts
-                    if card_funding == 'debit':
-                        payout_method = "instant"
-                        payout_timing = "instant"
-                        print("⚡ Using instant payout for debit card")
+            available_balance = StripeAccountBalance['available']
+
+            print(f"🔧 Available balance: {available_balance}")
+
+            if not available_balance or len(available_balance) == 0:
+                print("⚠️ No available balance found for this account.")
+                return Response({
+                    'error': 'NO_AVAILABLE_BALANCE',
+                    'detail': 'No available balance found for this Stripe account.'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Get the first available balance (usually EUR or primary currency)
+            first_balance = available_balance[0]
+            payout_amount = first_balance['amount']
+            payout_currency = first_balance['currency']
+
+            print(f"💰 Using balance: {payout_amount} {payout_currency.upper()}")
+            print(f"💰 Amount in cents: {payout_amount}")
+            print(f"💰 Amount formatted: €{payout_amount/100:.2f}")
+
+            if payout_amount <= 1:
+                print("⚠️ Available balance is zero or negative.")
+                return Response({
+                    'error': 'INSUFFICIENT_BALANCE',
+                    'detail': f'Available balance is {payout_amount} cents. Cannot create payout.'
+                }, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            # Admin bypass - use test values or request data
+            payout_amount = request.data.get('amount', 10000)  # Default 100 EUR
+            payout_currency = request.data.get('currency', 'eur')
+            print(f"👑 ADMIN BYPASS: Using manual payout values - {payout_amount} {payout_currency}")
+            logger.info(f"ADMIN BYPASS: Manual payout amount {payout_amount} {payout_currency} for admin {user.username}")
+        
+        # Get user's external account to determine payout method and timing (admin bypass)
+        payout_method = "standard"  # Default to standard
+        payout_timing = "standard"  # Default timing
+
+        if user.role == 'admin':
+            # Admin bypass for external account checks
+            print(f"👑 ADMIN BYPASS: Skipping external account verification")
+            payout_method = request.data.get('method', 'standard')
+            payout_timing = request.data.get('timing', 'standard')
+        else:
+            try:
+                external_accounts = stripe.Account.list_external_accounts(
+                    stripe_account_id,
+                    object='bank_account',
+                    limit=10
+                )
+
+                print(f"🏦 Found {len(external_accounts.data)} external accounts")
+
+                if external_accounts.data:
+                    # Check the default external account
+                    default_account = external_accounts.data[0]
+                    account_type = default_account.get('object', 'bank_account')
+
+                    print(f"🔍 Default account type: {account_type}")
+                    print(f"🔍 Account details: {default_account.get('last4', 'N/A')}")
+
+                    # Check if it's a debit card (instant eligible)
+                    if account_type == 'card':
+                        card_brand = default_account.get('brand', '').lower()
+                        card_funding = default_account.get('funding', '').lower()
+
+                        print(f"💳 Card brand: {card_brand}, funding: {card_funding}")
+
+                        # Debit cards are eligible for instant payouts
+                        if card_funding == 'debit':
+                            payout_method = "instant"
+                            payout_timing = "instant"
+                            print("⚡ Using instant payout for debit card")
+                        else:
+                            # Credit cards use standard timing
+                            payout_method = "standard"
+                            payout_timing = "standard"
+                            print("📅 Using standard payout for credit card")
                     else:
-                        # Credit cards use standard timing
+                        # Bank accounts use standard timing
                         payout_method = "standard"
                         payout_timing = "standard"
-                        print("📅 Using standard payout for credit card")
+                        print("🏦 Using standard payout for bank account")
                 else:
-                    # Bank accounts use standard timing
-                    payout_method = "standard"
-                    payout_timing = "standard"
-                    print("🏦 Using standard payout for bank account")
-            else:
-                print("⚠️ No external accounts found, using standard method")
-        
-        except stripe.error.StripeError as e:
-            print(f"⚠️ Error fetching external accounts: {str(e)}")
-            # Continue with standard method if account lookup fails
-            payout_method = "standard"
-            payout_timing = "standard"
+                    print("⚠️ No external accounts found, using standard method")
+
+            except stripe.error.StripeError as e:
+                print(f"⚠️ Error fetching external accounts: {str(e)}")
+                # Continue with standard method if account lookup fails
+                payout_method = "standard"
+                payout_timing = "standard"
         
         print(f"💰 Payout method: {payout_method}, timing: {payout_timing}")
         
@@ -241,7 +265,7 @@ def seller_payout(request):
                         payout_type=payout_timing,
                         amount_cents=payout_amount,
                         currency=payout_currency,
-                        stripe_created_at=timezone.datetime.fromtimestamp(stripe_payout.created, tz=timezone.utc),
+                        stripe_created_at=timezone.datetime.fromtimestamp(stripe_payout.created, tz=timezone.get_current_timezone()),
                         description=f"{payout_timing.title()} payout for seller {user.username}",
                         metadata={
                             'stripe_method': payout_method,
@@ -583,12 +607,12 @@ def get_seller_payment_holds(request):
     Using simplified PaymentTransaction model with integrated hold system
     """
     logger.info(f"[API] GET /stripe/holds/ called")
-    
+
     # Debug authentication
     logger.info(f"[DEBUG] Request headers: {dict(request.headers)}")
     logger.info(f"[DEBUG] Request user: {request.user}")
     logger.info(f"[DEBUG] User authenticated: {request.user.is_authenticated}")
-    
+
     if not request.user.is_authenticated:
         logger.warning(f"[ERROR] User not authenticated for stripe holds endpoint")
         return Response({
@@ -596,9 +620,18 @@ def get_seller_payment_holds(request):
             'detail': 'You must be logged in to view payment holds',
             'authenticated': False
         }, status=status.HTTP_401_UNAUTHORIZED)
-    
+
     try:
-        user = request.user
+        # Get user from database (don't trust token)
+        user = User.objects.get(id=request.user.id)
+
+        # ROLE CHECK: Verify seller or admin role from database
+        if user.role not in ['seller', 'admin']:
+            logger.warning(f"Non-seller user {user.username} (ID: {user.id}, Role: {user.role}) attempted to access payment holds")
+            return Response({
+                'error': 'SELLER_ACCESS_REQUIRED',
+                'detail': 'Permission denied. Only verified sellers can view payment holds.'
+            }, status=status.HTTP_403_FORBIDDEN)
         logger.info(f"[SUCCESS] Authenticated user: {user.username} (ID: {user.id})")
         
         # Get all payment transactions where the user is the seller and payment is held
@@ -744,7 +777,16 @@ def user_payouts_list(request):
     Returns a paginated list of payouts with summary information.
     """
     try:
-        user = request.user
+        # Get user from database (don't trust token)
+        user = User.objects.get(id=request.user.id)
+
+        # ROLE CHECK: Verify seller or admin role from database
+        if user.role not in ['seller', 'admin']:
+            logger.warning(f"Non-seller user {user.username} (ID: {user.id}, Role: {user.role}) attempted to access payouts list")
+            return Response({
+                'error': 'SELLER_ACCESS_REQUIRED',
+                'detail': 'Permission denied. Only verified sellers can view payout history.'
+            }, status=status.HTTP_403_FORBIDDEN)
         logger.info(f"Fetching payouts for user: {user.id}")
         
         # Get all payouts for this user as seller
@@ -800,7 +842,16 @@ def payout_detail(request, payout_id):
     Only accessible by the seller who owns the payout.
     """
     try:
-        user = request.user
+        # Get user from database (don't trust token)
+        user = User.objects.get(id=request.user.id)
+
+        # ROLE CHECK: Verify seller or admin role from database
+        if user.role not in ['seller', 'admin']:
+            logger.warning(f"Non-seller user {user.username} (ID: {user.id}, Role: {user.role}) attempted to access payout detail")
+            return Response({
+                'error': 'SELLER_ACCESS_REQUIRED',
+                'detail': 'Permission denied. Only verified sellers can view payout details.'
+            }, status=status.HTTP_403_FORBIDDEN)
         logger.info(f"Fetching payout detail {payout_id} for user: {user.id}")
         
         # Get payout and ensure it belongs to the requesting user
@@ -839,7 +890,16 @@ def payout_orders(request, payout_id):
     Only includes order items where the current user is the product owner.
     """
     try:
-        user = request.user
+        # Get user from database (don't trust token)
+        user = User.objects.get(id=request.user.id)
+
+        # ROLE CHECK: Verify seller or admin role from database
+        if user.role not in ['seller', 'admin']:
+            logger.warning(f"Non-seller user {user.username} (ID: {user.id}, Role: {user.role}) attempted to access payout orders")
+            return Response({
+                'error': 'SELLER_ACCESS_REQUIRED',
+                'detail': 'Permission denied. Only verified sellers can view payout orders.'
+            }, status=status.HTTP_403_FORBIDDEN)
         logger.info(f"Fetching orders for payout {payout_id} for user: {user.id} (filtering products by owner)")
         
         # Verify payout ownership

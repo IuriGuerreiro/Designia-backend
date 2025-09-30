@@ -1,4 +1,4 @@
-from django.urls import path
+from django.urls import path, include
 from . import views
 
 urlpatterns = [
@@ -42,4 +42,7 @@ urlpatterns = [
     # Profile picture endpoints
     path('profile/picture/upload/', views.upload_profile_picture, name='upload_profile_picture'),
     path('profile/picture/delete/', views.delete_profile_picture, name='delete_profile_picture'),
+
+    # Seller application endpoints
+    path('', include('authentication.seller_urls')),
 ]

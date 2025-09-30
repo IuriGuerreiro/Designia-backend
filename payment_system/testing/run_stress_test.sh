@@ -44,7 +44,7 @@ case $test_type in
         python -c "
 import os, sys, django
 sys.path.append('$(pwd)')
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'designia.settings')
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'designiaBackend.settings')
 django.setup()
 
 from payment_system.testing.stress_test_multithreading import run_payment_stress_test
@@ -75,7 +75,7 @@ run_payment_stress_test(concurrency_multiplier=50)
         python -c "
 import os, sys, django
 sys.path.append('$(pwd)')
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'designia.settings')
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'designiaBackend.settings')
 django.setup()
 
 from payment_system.testing.stress_test_multithreading import run_payment_stress_test
