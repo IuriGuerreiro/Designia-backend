@@ -7,6 +7,7 @@ from .jwt_serializers import CustomRefreshToken
 from django.contrib.auth import authenticate
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
+import logging
 from .models import CustomUser, EmailVerificationToken, TwoFactorCode, EmailRequestAttempt
 from .serializers import (
     UserRegistrationSerializer, UserSerializer, GoogleAuthSerializer, 
@@ -100,6 +101,7 @@ class ProfileUpdateView(generics.RetrieveUpdateAPIView):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def register(request):
+    logger = logging.getLogger(__name__)
     try:
         serializer = UserRegistrationSerializer(data=request.data)
         if serializer.is_valid():
@@ -117,11 +119,21 @@ def register(request):
                         'email_sent': True
                     }, status=status.HTTP_201_CREATED)
                 else:
-                    return Response({
-                        'error': message,
-                        'email': user.email,
-                        'email_sent': False
-                    }, status=status.HTTP_429_TOO_MANY_REQUESTS)
+                    # Check if it's a rate limit error or email service error
+                    if "wait" in message.lower() and "seconds" in message.lower():
+                        # Rate limit error
+                        return Response({
+                            'error': message,
+                            'email': user.email,
+                            'email_sent': False
+                        }, status=status.HTTP_429_TOO_MANY_REQUESTS)
+                    else:
+                        # Email service error - still return success since user was created
+                        return Response({
+                            'message': 'Registration successful but failed to send verification email. Please contact support.',
+                            'email': user.email,
+                            'email_sent': False
+                        }, status=status.HTTP_201_CREATED)
             else:
                 # Legacy support - backwards compatibility
                 if email_result:
@@ -137,6 +149,9 @@ def register(request):
                         'email_sent': False
                     }, status=status.HTTP_201_CREATED)
         else:
+            # Log validation errors for debugging
+            logger.error(f"Registration validation failed for request from {request.META.get('REMOTE_ADDR')}: {serializer.errors}")
+
             # Format errors for better frontend handling
             errors = {}
             for field, field_errors in serializer.errors.items():
@@ -1074,49 +1089,4 @@ def delete_profile_picture(request):
             'error': 'Service may be unavailable. Please try again later.'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-
-class SellerProfileView(generics.RetrieveAPIView):
-    """API endpoint to retrieve user profile information"""
-    permission_classes = [AllowAny]  # Public endpoint
-    
-    def get_queryset(self):
-        """Return all users"""
-        return CustomUser.objects.all()
-    
-    def get_object(self):
-        """Get seller by ID"""
-        seller_id = self.kwargs.get('seller_id')
-        try:
-            seller = CustomUser.objects.get(id=seller_id)
-            return seller
-        except CustomUser.DoesNotExist:
-            from rest_framework.exceptions import NotFound
-            raise NotFound(f"Seller with ID {seller_id} not found")
-    
-    def retrieve(self, request, *args, **kwargs):
-        """Custom retrieve method to format seller data"""
-        seller = self.get_object()
-        
-        # Format seller data for frontend
-        seller_data = {
-            'id': seller.id,
-            'username': seller.username,
-            'first_name': seller.first_name,
-            'last_name': seller.last_name,
-            'avatar': seller.profile.profile_picture_url,
-            'bio': seller.profile.bio,
-            'location': seller.profile.location,
-            'website': seller.profile.website,
-            'job_title': seller.profile.job_title,
-            'company': seller.profile.company,
-            'instagram_url': seller.profile.instagram_url,
-            'twitter_url': seller.profile.twitter_url,
-            'linkedin_url': seller.profile.linkedin_url,
-            'facebook_url': seller.profile.facebook_url,
-            'is_verified_seller': seller.profile.is_verified_seller,
-            'seller_type': seller.profile.seller_type,
-            'created_at': seller.date_joined.isoformat() if seller.date_joined else None
-        }
-        
-        return Response(seller_data)
 

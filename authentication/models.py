@@ -205,12 +205,7 @@ class Profile(models.Model):
         
         old_percentage = self.profile_completion_percentage
         self.profile_completion_percentage = int((len(completed_fields) / len(fields_to_check)) * 100)
-        
-        logger.info(f"Profile completion calculation for user {self.user.username}:")
-        logger.info(f"  Completed fields ({len(completed_fields)}/{len(fields_to_check)}): {completed_fields}")
-        logger.info(f"  Empty fields: {empty_fields}")
-        logger.info(f"  Completion: {old_percentage}% → {self.profile_completion_percentage}%")
-        
+
         return self.profile_completion_percentage
 
     def get_profile_picture_temp_url(self, expires_in: int = 3600) -> Optional[str]:
@@ -233,18 +228,8 @@ class Profile(models.Model):
             return None
 
     def save(self, *args, **kwargs):
-        import logging
-        logger = logging.getLogger(__name__)
-        
-        logger.info(f"Saving profile for user {self.user.username} (Profile ID: {self.id})")
-        
-        old_completion = self.profile_completion_percentage
         self.calculate_profile_completion()
-        
-        logger.info(f"Profile completion updated: {old_completion}% -> {self.profile_completion_percentage}%")
-        
         super().save(*args, **kwargs)
-        logger.info("Profile saved successfully to database")
 
     def __str__(self):
         return f'{self.user.username}\'s Profile'
@@ -255,8 +240,11 @@ def create_user_profile(sender, instance, created, **kwargs):
         Profile.objects.create(user=instance)
 
 @receiver(post_save, sender=CustomUser)
-def save_user_profile(sender, instance, **kwargs):
-    instance.profile.save()
+def save_user_profile(sender, instance, created, **kwargs):
+    # Only save profile on user updates, not on creation
+    # (creation is handled by create_user_profile signal)
+    if not created:
+        instance.profile.save()
 
 
 class EmailVerificationToken(models.Model):

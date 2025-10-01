@@ -166,61 +166,69 @@ class ProductImage(models.Model):
 
     def get_presigned_url(self, expires_in=3600):
         """Generate a pre-signed URL for S3 image access"""
-        import logging
-        logger = logging.getLogger(__name__)
-        
-        logger.info(f"=== GET PRESIGNED URL DEBUG ===")
-        logger.info(f"Image ID: {self.id}")
-        logger.info(f"Product: {self.product.name}")
-        logger.info(f"S3 Key: {self.s3_key}")
-        logger.info(f"S3 Bucket: {self.s3_bucket}")
-        logger.info(f"Has image field: {bool(self.image)}")
-        print(f"🔍 Getting presigned URL for image {self.id} (Product: {self.product.name})")
-        print(f"   S3 Key: {self.s3_key}")
-        print(f"   S3 Bucket: {self.s3_bucket}")
-        
-        if not self.s3_key or not self.s3_bucket:
-            logger.warning(f"Missing S3 data for image {self.id} - s3_key: {self.s3_key}, s3_bucket: {self.s3_bucket}")
-            print(f" No S3 data for image {self.id} - returning None")
-            return None
-        
-        try:
-            from utils.s3_storage import get_s3_storage
-            s3_storage = get_s3_storage()
-            presigned_url = s3_storage.generate_presigned_url(self.s3_bucket, self.s3_key, expires_in)
-            logger.info(f"Generated presigned URL for image {self.id}: {presigned_url}")
-            print(f"  Generated presigned URL for image {self.id}: {presigned_url}")
-            return presigned_url
-        except Exception as e:
-            logger.error(f"Failed to generate presigned URL for image {self.id}: {e}")
-            print(f" Failed to generate presigned URL for image {self.id}: {e}")
-            return None
+        # TEMPORARILY DISABLED - Images not loading correctly
+        return None
+
+        # import logging
+        # logger = logging.getLogger(__name__)
+
+        # logger.info(f"=== GET PRESIGNED URL DEBUG ===")
+        # logger.info(f"Image ID: {self.id}")
+        # logger.info(f"Product: {self.product.name}")
+        # logger.info(f"S3 Key: {self.s3_key}")
+        # logger.info(f"S3 Bucket: {self.s3_bucket}")
+        # logger.info(f"Has image field: {bool(self.image)}")
+        # print(f"🔍 Getting presigned URL for image {self.id} (Product: {self.product.name})")
+        # print(f"   S3 Key: {self.s3_key}")
+        # print(f"   S3 Bucket: {self.s3_bucket}")
+
+        # if not self.s3_key or not self.s3_bucket:
+        #     logger.warning(f"Missing S3 data for image {self.id} - s3_key: {self.s3_key}, s3_bucket: {self.s3_bucket}")
+        #     print(f" No S3 data for image {self.id} - returning None")
+        #     return None
+
+        # try:
+        #     from utils.s3_storage import get_s3_storage
+        #     s3_storage = get_s3_storage()
+        #     presigned_url = s3_storage.generate_presigned_url(self.s3_bucket, self.s3_key, expires_in)
+        #     logger.info(f"Generated presigned URL for image {self.id}: {presigned_url}")
+        #     print(f"  Generated presigned URL for image {self.id}: {presigned_url}")
+        #     return presigned_url
+        # except Exception as e:
+        #     logger.error(f"Failed to generate presigned URL for image {self.id}: {e}")
+        #     print(f" Failed to generate presigned URL for image {self.id}: {e}")
+        #     return None
     
     @property
     def image_url(self):
         """Get the image URL - prioritize S3 presigned URL, fallback to regular image field"""
-        import logging
-        logger = logging.getLogger(__name__)
-        
-        logger.info(f"=== IMAGE URL PROPERTY DEBUG ===")
-        logger.info(f"Image ID: {self.id}")
-        logger.info(f"Product: {self.product.name}")
-        print(f"🔍 Getting image_url for image {self.id} (Product: {self.product.name})")
-        
-        if self.s3_key and self.s3_bucket:
-            logger.info(f"Using S3 presigned URL path")
-            print(f"   Using S3 presigned URL path")
-            presigned_url = self.get_presigned_url()
-            print(f"   Result: {presigned_url}")
-            return presigned_url
-        elif self.image:
-            logger.info(f"Using traditional image field: {self.image.url}")
-            print(f"   Using traditional image field: {self.image.url}")
+        # TEMPORARILY DISABLED S3 - Images not loading correctly, using image field only
+        if self.image:
             return self.image.url
-        else:
-            logger.warning(f"No image data available for image {self.id}")
-            print(f" No image data available for image {self.id}")
-            return None
+        return None
+
+        # import logging
+        # logger = logging.getLogger(__name__)
+
+        # logger.info(f"=== IMAGE URL PROPERTY DEBUG ===")
+        # logger.info(f"Image ID: {self.id}")
+        # logger.info(f"Product: {self.product.name}")
+        # print(f"🔍 Getting image_url for image {self.id} (Product: {self.product.name})")
+
+        # if self.s3_key and self.s3_bucket:
+        #     logger.info(f"Using S3 presigned URL path")
+        #     print(f"   Using S3 presigned URL path")
+        #     presigned_url = self.get_presigned_url()
+        #     print(f"   Result: {presigned_url}")
+        #     return presigned_url
+        # elif self.image:
+        #     logger.info(f"Using traditional image field: {self.image.url}")
+        #     print(f"   Using traditional image field: {self.image.url}")
+        #     return self.image.url
+        # else:
+        #     logger.warning(f"No image data available for image {self.id}")
+        #     print(f" No image data available for image {self.id}")
+        #     return None
     
     def __str__(self):
         return f"Image for {self.product.name}"

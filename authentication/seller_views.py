@@ -158,6 +158,16 @@ def apply_to_become_seller(request):
             )
         logger.info("✓ User is not already a seller")
 
+        # Check if user has 2FA enabled
+        logger.info("Step 2.5: Checking if user has 2FA enabled...")
+        if not request.user.two_factor_enabled:
+            logger.warning("User does not have 2FA enabled")
+            return Response(
+                {'error': 'Two-factor authentication (2FA) must be enabled before applying to become a seller. Please enable 2FA in your settings.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        logger.info("✓ User has 2FA enabled")
+
         logger.info("Step 3: Starting transaction...")
         with transaction.atomic():
             logger.info("Step 4: Extracting form data...")

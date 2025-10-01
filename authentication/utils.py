@@ -189,6 +189,20 @@ The Designia Team
         except Exception as e:
             # Log the error for debugging but don't expose details to user
             print(f"Email sending error: {str(e)}")
+
+            # Print verification URL for development/testing
+            print("\n" + "="*80)
+            print("⚠️  EMAIL FAILED - VERIFICATION LINK FOR TESTING")
+            print("="*80)
+            print(f"📧 User: {user.email}")
+            print(f"👤 Name: {user.first_name or user.username}")
+            print(f"🔗 Verification URL: {verification_url}")
+            print(f"🎫 Token: {token.token}")
+            print(f"⏰ Expires: {token.expires_at}")
+            print("="*80)
+            print("📱 Copy the URL above and paste it in your browser to verify")
+            print("="*80 + "\n")
+
             return False, "Email service temporarily unavailable"
 
 
