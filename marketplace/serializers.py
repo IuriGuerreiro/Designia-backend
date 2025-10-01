@@ -31,12 +31,28 @@ class FlexibleJSONField(serializers.Field):
     def to_representation(self, value):
         return value if value is not None else []
 
+class MinimalSellerSerializer(serializers.ModelSerializer):
+    """Minimal seller serializer for product list views - only id and username"""
+    class Meta:
+        model = User
+        fields = ['id', 'username']
+        read_only_fields = ['id']
+
+
 class UserSerializer(serializers.ModelSerializer):
     """Basic user serializer for seller information"""
     class Meta:
         model = User
         fields = ['id', 'username', 'first_name', 'last_name', 'avatar']
         read_only_fields = ['id']
+
+
+class MinimalCategorySerializer(serializers.ModelSerializer):
+    """Minimal category serializer for product list views - no subcategories or counts"""
+    class Meta:
+        model = Category
+        fields = ['id', 'name', 'slug']
+        read_only_fields = ['id', 'slug']
 
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -46,7 +62,7 @@ class CategorySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Category
-        fields = ['id', 'name', 'slug', 'description', 'parent', 'subcategories', 
+        fields = ['id', 'name', 'slug', 'description', 'parent', 'subcategories',
                  'product_count', 'is_active', 'created_at']
         read_only_fields = ['id', 'slug', 'created_at', 'subcategories', 'product_count']
 
@@ -96,8 +112,8 @@ class ProductReviewSerializer(serializers.ModelSerializer):
 
 class ProductListSerializer(serializers.ModelSerializer):
     """Minimal product serializer for lists with query optimization"""
-    seller = UserSerializer(read_only=True)
-    category = CategorySerializer(read_only=True)
+    seller = MinimalSellerSerializer(read_only=True)
+    category = MinimalCategorySerializer(read_only=True)
     primary_image = serializers.SerializerMethodField()
     is_favorited = serializers.SerializerMethodField()
     # Use pre-calculated values from annotations

@@ -121,22 +121,52 @@ class IsProductOwner(permissions.BasePermission):
     """
     Custom permission to check if user owns the product
     """
-    
+
     def has_permission(self, request, view):
         # Allow all authenticated users for safe methods
         if request.method in permissions.SAFE_METHODS:
             return request.user.is_authenticated
-        
+
         # For write operations, need to check object-level permission
         return request.user.is_authenticated
-    
+
     def has_object_permission(self, request, view, obj):
         # For product-related objects, check if user owns the product
         if hasattr(obj, 'product'):
             return obj.product.seller == request.user
-        
+
         # For direct product access
         if hasattr(obj, 'seller'):
             return obj.seller == request.user
-        
+
         return False
+
+
+class IsSellerUser(permissions.BasePermission):
+    """
+    Permission to check if user has seller role
+    Allows sellers and admins to access seller-only endpoints
+    """
+
+    def has_permission(self, request, view):
+        # User must be authenticated
+        if not request.user.is_authenticated:
+            return False
+
+        # Check if user is seller or admin
+        return request.user.can_sell_products()
+
+
+class IsAdminUser(permissions.BasePermission):
+    """
+    Permission to check if user has admin role
+    Only allows admins to access admin-only endpoints
+    """
+
+    def has_permission(self, request, view):
+        # User must be authenticated
+        if not request.user.is_authenticated:
+            return False
+
+        # Check if user is admin
+        return request.user.is_admin()

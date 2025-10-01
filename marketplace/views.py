@@ -43,7 +43,7 @@ from .serializers import (
     OrderSerializer, OrderItemSerializer, OrderShippingSerializer, ProductMetricsSerializer
 )
 from .filters import ProductFilter
-from .permissions import IsSellerOrReadOnly, IsOwnerOrReadOnly
+from .permissions import IsSellerOrReadOnly, IsOwnerOrReadOnly, IsSellerUser, IsAdminUser
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -179,12 +179,11 @@ class ProductViewSet(viewsets.ModelViewSet):
     """
     ViewSet for products with full CRUD operations
     """
+    # Base queryset - minimal for list views
     queryset = Product.objects.filter(is_active=True).select_related(
         'seller', 'category'
     ).prefetch_related(
-        'images',
-        'reviews__reviewer',
-        'favorited_by'
+        'images'
     ).annotate(
         # Pre-calculate aggregated values to avoid repeated queries
         calculated_review_count=models.Count('reviews', filter=models.Q(reviews__is_active=True)),
@@ -207,14 +206,26 @@ class ProductViewSet(viewsets.ModelViewSet):
         return ProductListSerializer
 
     def get_permissions(self):
-        if self.action in ['update', 'partial_update', 'destroy']:
+        if self.action in ['create']:
+            # Only sellers and admins can create products
+            return [IsAuthenticated(), IsSellerUser()]
+        elif self.action in ['update', 'partial_update', 'destroy']:
             return [IsAuthenticated(), IsSellerOrReadOnly()]
+        elif self.action in ['my_products']:
+            # Only sellers can view their products
+            return [IsAuthenticated(), IsSellerUser()]
         return super().get_permissions()
     
     def get_queryset(self):
-        """Override to add user-specific optimizations"""
+        """Override to add action-specific and user-specific optimizations"""
         queryset = super().get_queryset()
-        
+
+        # For detail views, prefetch reviews with reviewer info
+        if self.action == 'retrieve':
+            queryset = queryset.prefetch_related(
+                'reviews__reviewer'
+            )
+
         # If user is authenticated, prefetch their favorites for this queryset
         if hasattr(self.request, 'user') and self.request.user.is_authenticated:
             queryset = queryset.prefetch_related(
@@ -224,7 +235,7 @@ class ProductViewSet(viewsets.ModelViewSet):
                     to_attr='user_favorites'
                 )
             )
-        
+
         return queryset
     
     def create(self, request, *args, **kwargs):
@@ -1542,7 +1553,7 @@ class OrderViewSet(viewsets.ModelViewSet):
             'tracking_information': tracking_data
         })
 
-    @action(detail=False, methods=['get'])
+    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated, IsSellerUser])
     def seller_orders(self, request):
         """Get seller orders (orders that the current user needs to fulfill as a seller)"""
         logger.info(f"Getting seller orders for user: {request.user.id} ({request.user.username})")
@@ -1876,7 +1887,7 @@ class ProductMetricsViewSet(viewsets.ReadOnlyModelViewSet):
     ViewSet for product metrics - read-only for sellers
     """
     serializer_class = ProductMetricsSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsSellerUser]
 
     def get_queryset(self):
         return ProductMetrics.objects.filter(product__seller=self.request.user)
@@ -2168,3 +2179,92 @@ class UserProfileViewSet(viewsets.ViewSet):
     def update_profile_picture(self, request):
         """Update user's profile picture (alias for upload_profile_picture)"""
         return self.upload_profile_picture(request)
+
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
+from django.contrib.auth import get_user_model
+
+User = get_user_model()
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def seller_profile(request, seller_id):
+    """
+    Get seller profile with their products and reviews.
+    Public endpoint - accessible to everyone.
+    """
+    try:
+        # Get the seller user
+        seller = get_object_or_404(User, id=seller_id)
+        
+        # Check if user is actually a seller
+        if seller.role not in ['seller', 'admin']:
+            return Response({
+                'error': 'User is not a seller'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        # Get seller's products
+        products = Product.objects.filter(
+            seller=seller,
+            is_active=True
+        ).select_related('category').prefetch_related('images', 'reviews')
+        
+        # Get seller's reviews (from products they sold)
+        reviews = ProductReview.objects.filter(
+            product__seller=seller,
+            is_active=True
+        ).select_related('reviewer', 'product').order_by('-created_at')
+        
+        # Calculate seller stats
+        total_products = products.count()
+        total_reviews = reviews.count()
+        
+        # Calculate average rating
+        if total_reviews > 0:
+            average_rating = reviews.aggregate(models.Avg('rating'))['rating__avg']
+        else:
+            average_rating = 0
+        
+        # Calculate total sales (completed orders)
+        total_sales = OrderItem.objects.filter(
+            product__seller=seller,
+            order__status='delivered'
+        ).aggregate(total=Sum('quantity'))['total'] or 0
+        
+        # Serialize products
+        product_serializer = ProductListSerializer(products, many=True, context={'request': request})
+        
+        # Serialize reviews
+        review_serializer = ProductReviewSerializer(reviews[:20], many=True)  # Limit to 20 recent reviews
+        
+        # Build seller profile response
+        return Response({
+            'seller': {
+                'id': seller.id,
+                'username': seller.username,
+                'first_name': seller.first_name,
+                'last_name': seller.last_name,
+                'email': seller.email,
+                'role': seller.role,
+                'date_joined': seller.date_joined,
+            },
+            'stats': {
+                'total_products': total_products,
+                'total_reviews': total_reviews,
+                'average_rating': round(average_rating, 2) if average_rating else 0,
+                'total_sales': total_sales,
+            },
+            'products': product_serializer.data,
+            'reviews': review_serializer.data,
+        }, status=status.HTTP_200_OK)
+        
+    except User.DoesNotExist:
+        return Response({
+            'error': 'Seller not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        logger.error(f"Error fetching seller profile: {str(e)}")
+        return Response({
+            'error': 'Failed to fetch seller profile'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

@@ -3,7 +3,7 @@ from rest_framework.routers import DefaultRouter
 
 from .views import (
     CategoryViewSet, ProductViewSet, ProductImageViewSet, ProductReviewViewSet,
-    CartViewSet, OrderViewSet, ProductMetricsViewSet, UserProfileViewSet
+    CartViewSet, OrderViewSet, ProductMetricsViewSet, UserProfileViewSet, seller_profile
 )
 
 # Create the main router
@@ -32,7 +32,10 @@ urlpatterns = [
     path('products/<slug:product_slug>/reviews/', 
          ProductReviewViewSet.as_view({'get': 'list', 'post': 'create'}), 
          name='product-reviews-list'),
-    path('products/<slug:product_slug>/reviews/<int:pk>/', 
-         ProductReviewViewSet.as_view({'get': 'retrieve', 'put': 'update', 'delete': 'destroy'}), 
+    path('products/<slug:product_slug>/reviews/<int:pk>/',
+         ProductReviewViewSet.as_view({'get': 'retrieve', 'put': 'update', 'delete': 'destroy'}),
          name='product-reviews-detail'),
+
+    # Seller profile route
+    path('sellers/<int:seller_id>/', seller_profile, name='seller-profile'),
 ]
