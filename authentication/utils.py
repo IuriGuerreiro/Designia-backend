@@ -1,11 +1,11 @@
 import os
-from django.core.mail import send_mail
 from django.template.loader import render_to_string
 from django.utils.html import strip_tags
 from django.conf import settings
 from django.utils import timezone
 from datetime import timedelta
 from .models import EmailVerificationToken, TwoFactorCode, EmailRequestAttempt
+from utils.email_utils import send_email
 
 
 def get_client_ip(request):
@@ -115,11 +115,7 @@ def record_email_attempt(user, email, request_type, request=None):
 
 
 def send_verification_email(user, request):
-    """Send email verification email to user"""
-    from django.conf import settings
-    from django.core.mail import send_mail
-    from django.template.loader import render_to_string
-
+    """Send email verification email to user with HTML + text templates."""
     # Check rate limit
     can_send, time_remaining = check_email_rate_limit(user, user.email, 'email_verification', request)
     if not can_send:
@@ -135,75 +131,25 @@ def send_verification_email(user, request):
     frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:5173')
     verification_url = f"{frontend_url}/verify-email/{token.token}"
 
-    # SECURITY FIX: Handle email sending based on environment
-    if settings.EMAIL_BACKEND == 'django.core.mail.backends.console.EmailBackend':
-        # Development mode - print to console with security notice
-        print("\n" + "="*80)
-        print("🔐 EMAIL VERIFICATION CODE (DEVELOPMENT MODE)")
-        print("="*80)
-        print("⚠️  SECURITY: In production, this will be sent via email")
-        print(f"📧 User: {user.email}")
-        print(f"👤 Name: {user.first_name or user.username}")
-        print(f"🔗 Verification URL: {verification_url}")
-        print(f"🎫 Token: {token.token}")
-        print(f"⏰ Expires: {token.expires_at}")
-        print("="*80)
-        print("📱 To verify: Copy the URL above and paste it in your browser")
-        print("="*80 + "\n")
-        return True, "Verification email printed to console (development mode)"
-    else:
-        # Production mode - send actual email
-        try:
-            subject = "Verify your email address - Designia"
+    # Prepare context for templates
+    context = {
+        'user': user,
+        'verification_url': verification_url,
+        'expires_at': token.expires_at.strftime('%Y-%m-%d %H:%M:%S UTC'),
+        'current_year': timezone.now().year,
+    }
 
-            # Email content
-            email_content = f"""
-Hello {user.first_name or user.username},
+    subject = "Verify your email address - Designia"
+    html_message = render_to_string('authentication/emails/verification_email.html', context)
+    text_message = render_to_string('authentication/emails/verification_email.txt', context)
 
-Please verify your email address by clicking the link below:
-
-{verification_url}
-
-This link will expire at {token.expires_at.strftime('%Y-%m-%d %H:%M:%S UTC')}.
-
-If you didn't create an account with Designia, please ignore this email.
-
-Best regards,
-The Designia Team
-"""
-
-            # Send email
-            success = send_mail(
-                subject=subject,
-                message=email_content,
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[user.email],
-                fail_silently=False
-            )
-
-            if success:
-                return True, "Verification email sent successfully"
-            else:
-                return False, "Failed to send verification email"
-
-        except Exception as e:
-            # Log the error for debugging but don't expose details to user
-            print(f"Email sending error: {str(e)}")
-
-            # Print verification URL for development/testing
-            print("\n" + "="*80)
-            print("⚠️  EMAIL FAILED - VERIFICATION LINK FOR TESTING")
-            print("="*80)
-            print(f"📧 User: {user.email}")
-            print(f"👤 Name: {user.first_name or user.username}")
-            print(f"🔗 Verification URL: {verification_url}")
-            print(f"🎫 Token: {token.token}")
-            print(f"⏰ Expires: {token.expires_at}")
-            print("="*80)
-            print("📱 Copy the URL above and paste it in your browser to verify")
-            print("="*80 + "\n")
-
-            return False, "Email service temporarily unavailable"
+    ok, info = send_email(
+        subject=subject,
+        message=text_message,
+        recipient_list=[user.email],
+        html_message=html_message,
+    )
+    return (True, "Verification email sent successfully") if ok else (False, info)
 
 
 def verify_email_token(token_str):
@@ -231,7 +177,7 @@ def verify_email_token(token_str):
 
 
 def send_2fa_code(user, purpose='enable_2fa', request=None):
-    """Send 2FA code to user email (prints to console for development)"""
+    """Send 2FA code to user email using HTML + text templates via shared util."""
     # For 2FA codes, use purpose-specific rate limiting
     request_type = 'password_reset' if purpose == 'reset_password' else 'two_factor_code'
     
@@ -249,21 +195,28 @@ def send_2fa_code(user, purpose='enable_2fa', request=None):
     # Create new 2FA code
     two_fa_code = TwoFactorCode.objects.create(user=user, purpose=purpose)
     
-    # Print 2FA code to console
-    print("\n" + "="*80)
-    print("🔐 TWO-FACTOR AUTHENTICATION CODE")
-    print("="*80)
-    print(f"📧 User: {user.email}")
-    print(f"👤 Name: {user.first_name or user.username}")
-    print(f"🔢 2FA Code: {two_fa_code.code}")
-    print(f"🎯 Purpose: {purpose}")
-    print(f"⏰ Expires: {two_fa_code.expires_at}")
-    print("="*80)
-    print("📱 Enter this 6-digit code in your app to continue")
-    print("="*80 + "\n")
-    
-    # For development, we always return True since we're printing to console
-    return True, two_fa_code.code
+    # Template context
+    purpose_readable = purpose.replace('_', ' ')
+    context = {
+        'user': user,
+        'code': two_fa_code.code,
+        'purpose': purpose,
+        'purpose_readable': purpose_readable,
+        'expires_at': two_fa_code.expires_at.strftime('%Y-%m-%d %H:%M:%S UTC'),
+        'current_year': timezone.now().year,
+    }
+
+    subject = f"Your Designia verification code: {two_fa_code.code}"
+    html_message = render_to_string('authentication/emails/two_factor_code.html', context)
+    text_message = render_to_string('authentication/emails/two_factor_code.txt', context)
+
+    ok, info = send_email(
+        subject=subject,
+        message=text_message,
+        recipient_list=[user.email],
+        html_message=html_message,
+    )
+    return (True, two_fa_code.code) if ok else (False, info)
 
 
 def verify_2fa_code(user, code, purpose='enable_2fa'):

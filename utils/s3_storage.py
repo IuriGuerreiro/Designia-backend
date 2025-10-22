@@ -19,6 +19,7 @@ from urllib.parse import urljoin
 from io import BytesIO
 
 import boto3
+from botocore.config import Config as BotoConfig
 from botocore.exceptions import ClientError, NoCredentialsError, BotoCoreError
 from django.conf import settings
 from django.core.files.uploadedfile import InMemoryUploadedFile, TemporaryUploadedFile
@@ -71,19 +72,32 @@ class S3Storage:
     def _initialize_client(self) -> None:
         """Initialize boto3 S3 client with error handling"""
         try:
+            endpoint_url = getattr(settings, 'AWS_S3_ENDPOINT_URL', None)
+            signature_version = getattr(settings, 'AWS_S3_SIGNATURE_VERSION', 's3v4')
+            addressing_style = getattr(settings, 'AWS_S3_ADDRESSING_STYLE', 'path')
+
+            config = BotoConfig(
+                signature_version=signature_version,
+                s3={'addressing_style': addressing_style}
+            )
+
             self.s3_client = boto3.client(
                 's3',
                 aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
                 aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-                region_name=getattr(settings, 'AWS_S3_REGION_NAME', 'us-east-1')
+                region_name=getattr(settings, 'AWS_S3_REGION_NAME', 'us-east-1'),
+                endpoint_url=endpoint_url,
+                config=config,
+                verify=getattr(settings, 'AWS_S3_VERIFY', True)
             )
-            
+
             self.bucket_name = settings.AWS_STORAGE_BUCKET_NAME
             self.region = getattr(settings, 'AWS_S3_REGION_NAME', 'us-east-1')
-            
+            self.endpoint_url = endpoint_url
+
             # Test connection
             self._test_connection()
-            
+
         except NoCredentialsError:
             raise S3StorageError("AWS credentials not found or invalid")
         except Exception as e:
@@ -591,6 +605,9 @@ class S3Storage:
         """
         if public:
             # Generate public URL
+            if getattr(self, 'endpoint_url', None):
+                base = self.endpoint_url.rstrip('/')
+                return f"{base}/{self.bucket_name}/{key}"
             return f"https://{self.bucket_name}.s3.{self.region}.amazonaws.com/{key}"
         else:
             # Generate presigned URL

@@ -1,0 +1,16 @@
+Hello {{ user.first_name|default:user.username }},
+
+Use the verification code below to complete: {{ purpose_readable }}
+
+Code: {{ code }}
+
+This code expires at {{ expires_at }}.
+
+If you didn’t request this, you can ignore this email.
+
+Best regards,
+The Designia Team
+
+---
+© {{ current_year }} Designia. Support: support@designia.com
+
