@@ -1,6 +1,5 @@
 import os
 import logging
-from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
 from django.utils.html import strip_tags
 from django.conf import settings
@@ -9,6 +8,7 @@ from datetime import timedelta
 from marketplace.models import Order
 from authentication.models import EmailRequestAttempt
 from authentication.utils import get_client_ip
+from utils.email_utils import send_email
 
 logger = logging.getLogger(__name__)
 
@@ -86,56 +86,20 @@ def send_order_receipt_email(order, request=None):
         
         # Email details
         subject = f"Order Receipt #{str(order.id)[:8]} - Designia"
-        from_email = settings.DEFAULT_FROM_EMAIL
         to_email = [user.email]
-        
-        # Check if we're in development mode (console backend)
-        if settings.EMAIL_BACKEND == 'django.core.mail.backends.console.EmailBackend':
-            # Print to console for development
-            print("\n" + "="*80)
-            print("📧 ORDER RECEIPT EMAIL")
-            print("="*80)
-            print(f"📧 To: {user.email}")
-            print(f"👤 Customer: {user.first_name or user.username}")
-            print(f"🛒 Order: #{str(order.id)[:8]}")
-            print(f"💰 Total: ${order.total_amount}")
-            print(f"📦 Items: {order.items.count()}")
-            print(f"📅 Date: {order.created_at}")
-            print(f"📋 Subject: {subject}")
-            print("-" * 80)
-            print("📄 EMAIL CONTENT (TEXT VERSION):")
-            print("-" * 80)
-            print(text_content)
-            print("="*80)
-            print("  Order receipt printed to console (development mode)")
-            print("🔗 HTML version would be sent in production")
-            print("="*80 + "\n")
-            
-            return True, "Order receipt email sent successfully (development mode)"
-        
-        else:
-            # Send actual email in production
-            try:
-                # Create email message with both HTML and text versions
-                email_message = EmailMultiAlternatives(
-                    subject=subject,
-                    body=text_content,  # Plain text version
-                    from_email=from_email,
-                    to=to_email,
-                )
-                
-                # Attach HTML version
-                email_message.attach_alternative(html_content, "text/html")
-                
-                # Send the email
-                email_message.send()
-                
-                logger.info(f"Order receipt email sent successfully to {user.email} for order {order.id}")
-                return True, "Order receipt email sent successfully"
-                
-            except Exception as email_error:
-                logger.error(f"Failed to send order receipt email to {user.email}: {str(email_error)}")
-                return False, f"Failed to send receipt email: {str(email_error)}"
+
+        # Use shared email utility (handles console backend and multipart HTML)
+        ok, info = send_email(
+            subject=subject,
+            message=text_content,
+            recipient_list=to_email,
+            html_message=html_content,
+        )
+        if ok:
+            logger.info(f"Order receipt email sent to {user.email} for order {order.id}")
+            return True, "Order receipt email sent successfully"
+        logger.error(f"Failed to send order receipt email to {user.email}: {info}")
+        return False, f"Failed to send receipt email: {info}"
     
     except Exception as e:
         logger.error(f"Error in send_order_receipt_email: {str(e)}")
@@ -200,31 +164,8 @@ def send_order_status_update_email(order, previous_status, new_status, request=N
         # Subject line
         subject = f"{status_info['emoji']} {status_info['title']} - Order #{str(order.id)[:8]}"
         
-        # Check if we're in development mode
-        if settings.EMAIL_BACKEND == 'django.core.mail.backends.console.EmailBackend':
-            print("\n" + "="*80)
-            print("📧 ORDER STATUS UPDATE EMAIL")
-            print("="*80)
-            print(f"📧 To: {user.email}")
-            print(f"👤 Customer: {user.first_name or user.username}")
-            print(f"🛒 Order: #{str(order.id)[:8]}")
-            print(f"📋 Status Change: {previous_status} → {new_status}")
-            print(f"📅 Updated: {timezone.now()}")
-            print(f"📋 Subject: {subject}")
-            print("-" * 80)
-            print(f"{status_info['emoji']} {status_info['title']}")
-            print(f"{status_info['message']}")
-            print(f"\nTrack your order: {frontend_url}/my-orders/{order.id}")
-            print("="*80)
-            print("  Status update email printed to console (development mode)")
-            print("="*80 + "\n")
-            
-            return True, "Status update email sent successfully (development mode)"
-        
-        else:
-            # Send actual email in production
-            # You could create specific templates for status updates, but for now using simple text
-            text_content = f"""
+        # Compose text content; using shared util to handle send + console fallback
+        text_content = f"""
 Hello {user.first_name or user.username},
 
 {status_info['emoji']} {status_info['title']}
@@ -244,24 +185,16 @@ The Designia Team
 ---
 This is an automated message. For support, contact us at support@designia.com
             """
-            
-            try:
-                from django.core.mail import send_mail
-                
-                send_mail(
-                    subject=subject,
-                    message=text_content,
-                    from_email=settings.DEFAULT_FROM_EMAIL,
-                    recipient_list=[user.email],
-                    fail_silently=False,
-                )
-                
-                logger.info(f"Status update email sent to {user.email} for order {order.id} ({previous_status} → {new_status})")
-                return True, "Status update email sent successfully"
-                
-            except Exception as email_error:
-                logger.error(f"Failed to send status update email: {str(email_error)}")
-                return False, f"Failed to send status update email: {str(email_error)}"
+        ok, info = send_email(
+            subject=subject,
+            message=text_content,
+            recipient_list=[user.email],
+        )
+        if ok:
+            logger.info(f"Status update email sent to {user.email} for order {order.id} ({previous_status} → {new_status})")
+            return True, "Status update email sent successfully"
+        logger.error(f"Failed to send status update email: {info}")
+        return False, f"Failed to send status update email: {info}"
     
     except Exception as e:
         logger.error(f"Error in send_order_status_update_email: {str(e)}")
@@ -291,38 +224,10 @@ def send_order_cancellation_receipt_email(order, cancellation_reason, refund_amo
         # Subject line
         subject = f" Order Cancelled - #{str(order.id)[:8]} | Refund Processing"
         
-        # Check if we're in development mode
-        if settings.EMAIL_BACKEND == 'django.core.mail.backends.console.EmailBackend':
-            print("\n" + "="*80)
-            print("📧 ORDER CANCELLATION EMAIL")
-            print("="*80)
-            print(f"📧 To: {user.email}")
-            print(f"👤 Customer: {user.first_name or user.username}")
-            print(f"🛒 Order: #{str(order.id)[:8]}")
-            print(f"💰 Original Total: ${order.total_amount}")
-            if refund_amount:
-                print(f"💸 Refund Amount: ${refund_amount}")
-            print(f"📋 Cancellation Reason: {cancellation_reason}")
-            print(f"📅 Cancelled: {order.cancelled_at or timezone.now()}")
-            print(f"📋 Subject: {subject}")
-            print("-" * 80)
-            print(" ORDER CANCELLATION CONFIRMATION")
-            print(f"Your order has been successfully cancelled.")
-            if refund_amount:
-                print(f"A refund of ${refund_amount} has been processed and will appear in your account within 5-10 business days.")
-            print(f"\nReason: {cancellation_reason}")
-            print(f"\nView order details: {frontend_url}/my-orders/{order.id}")
-            print("="*80)
-            print("  Cancellation email printed to console (development mode)")
-            print("="*80 + "\n")
-            
-            return True, "Cancellation email sent successfully (development mode)"
+        # Send email via shared util
+        refund_text = f"\n\nREFUND INFORMATION:\nA refund of ${refund_amount} has been processed and will appear in your account within 5-10 business days." if refund_amount else ""
         
-        else:
-            # Send actual email in production
-            refund_text = f"\n\nREFUND INFORMATION:\nA refund of ${refund_amount} has been processed and will appear in your account within 5-10 business days." if refund_amount else ""
-            
-            text_content = f"""
+        text_content = f"""
 Hello {user.first_name or user.username},
 
 Your order has been successfully cancelled.
@@ -344,24 +249,16 @@ The Designia Team
 ---
 This is an automated message. For support, contact us at support@designia.com
             """
-            
-            try:
-                from django.core.mail import send_mail
-                
-                send_mail(
-                    subject=subject,
-                    message=text_content,
-                    from_email=settings.DEFAULT_FROM_EMAIL,
-                    recipient_list=[user.email],
-                    fail_silently=False,
-                )
-                
-                logger.info(f"Cancellation email sent to {user.email} for order {order.id}")
-                return True, "Cancellation email sent successfully"
-                
-            except Exception as email_error:
-                logger.error(f"Failed to send cancellation email: {str(email_error)}")
-                return False, f"Failed to send cancellation email: {str(email_error)}"
+        ok, info = send_email(
+            subject=subject,
+            message=text_content,
+            recipient_list=[user.email],
+        )
+        if ok:
+            logger.info(f"Cancellation email sent to {user.email} for order {order.id}")
+            return True, "Cancellation email sent successfully"
+        logger.error(f"Failed to send cancellation email: {info}")
+        return False, f"Failed to send cancellation email: {info}"
     
     except Exception as e:
         logger.error(f"Error in send_order_cancellation_receipt_email: {str(e)}")
@@ -392,38 +289,7 @@ def send_failed_refund_notification_email(order, failure_reason, refund_amount=N
         # Subject line
         subject = f" Refund Processing Failed - Order #{str(order.id)[:8]} - Action Required"
         
-        # Check if we're in development mode
-        if settings.EMAIL_BACKEND == 'django.core.mail.backends.console.EmailBackend':
-            print("\n" + "="*80)
-            print("📧 FAILED REFUND NOTIFICATION EMAIL")
-            print("="*80)
-            print(f"📧 To: {user.email}")
-            print(f"👤 Customer: {user.first_name or user.username}")
-            print(f"🛒 Order: #{str(order.id)[:8]}")
-            print(f" Failure Reason: {failure_reason}")
-            print(f"💰 Refund Amount: ${refund_amount}" if refund_amount else "💰 Refund Amount: Not specified")
-            print(f"📅 Failed: {timezone.now()}")
-            print(f"📋 Subject: {subject}")
-            print("-" * 80)
-            print(" REFUND PROCESSING FAILED")
-            print(f"Unfortunately, we were unable to process your refund automatically.")
-            print(f"Reason: {failure_reason}")
-            print()
-            print("📞 NEXT STEPS:")
-            print("• Contact our support team immediately")
-            print(f"• Email: {support_email}")
-            print(f"• Reference Order Number: #{str(order.id)[:8]}")
-            print("• We will arrange an alternative refund method (bank transfer, etc.)")
-            print(f"\nView order details: {frontend_url}/my-orders/{order.id}")
-            print("="*80)
-            print("  Failed refund notification email printed to console (development mode)")
-            print("="*80 + "\n")
-            
-            return True, "Failed refund notification email sent successfully (development mode)"
-        
-        else:
-            # Send actual email in production
-            text_content = f"""
+        text_content = f"""
 Hello {user.first_name or user.username},
 
  REFUND PROCESSING FAILED
@@ -459,24 +325,16 @@ The Designia Team
 This is an automated message regarding a failed refund processing.
 For immediate assistance, contact us at {support_email}
             """
-            
-            try:
-                from django.core.mail import send_mail
-                
-                send_mail(
-                    subject=subject,
-                    message=text_content,
-                    from_email=settings.DEFAULT_FROM_EMAIL,
-                    recipient_list=[user.email],
-                    fail_silently=False,
-                )
-                
-                logger.info(f"Failed refund notification email sent to {user.email} for order {order.id}")
-                return True, "Failed refund notification email sent successfully"
-                
-            except Exception as email_error:
-                logger.error(f"Failed to send failed refund notification email: {str(email_error)}")
-                return False, f"Failed to send failed refund notification email: {str(email_error)}"
+        ok, info = send_email(
+            subject=subject,
+            message=text_content,
+            recipient_list=[user.email],
+        )
+        if ok:
+            logger.info(f"Failed refund notification email sent to {user.email} for order {order.id}")
+            return True, "Failed refund notification email sent successfully"
+        logger.error(f"Failed to send failed refund notification email: {info}")
+        return False, f"Failed to send failed refund notification email: {info}"
     
     except Exception as e:
         logger.error(f"Error in send_failed_refund_notification_email: {str(e)}")

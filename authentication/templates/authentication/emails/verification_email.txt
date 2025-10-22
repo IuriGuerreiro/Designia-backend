@@ -1,0 +1,17 @@
+Hello {{ user.first_name|default:user.username }},
+
+Please confirm your email address to activate your account.
+
+Verify your email:
+{{ verification_url }}
+
+This link will expire at {{ expires_at }}.
+
+If you didn’t create a Designia account, you can safely ignore this email.
+
+Best regards,
+The Designia Team
+
+---
+© {{ current_year }} Designia. Support: support@designia.com
+
