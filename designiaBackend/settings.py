@@ -213,10 +213,8 @@ SIMPLE_JWT = {
 }
 
 # CORS settings - parse from environment variable
-CORS_ALLOWED_ORIGINS = os.getenv(
-    'CORS_ALLOWED_ORIGINS', 
-    'http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174,http://localhost:8080,http://127.0.0.1:8080,http://localhost:8081,http://127.0.0.1:8081,http://192.168.3.2:8080,http://192.168.3.2:8081,http://192.168.3.2:8082'
-).split(',')
+_cors_origins_default = 'http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174,http://localhost:8080,http://127.0.0.1:8080,http://localhost:8081,http://127.0.0.1:8081'
+CORS_ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', _cors_origins_default).split(',')
 
 CORS_ALLOW_CREDENTIALS = True
 
@@ -235,7 +233,7 @@ SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
 
 # Disable CSRF for API endpoints since we're using JWT authentication
 CSRF_TRUSTED_ORIGINS = os.getenv(
-    'CORS_ALLOWED_ORIGINS',
+    'CSRF_TRUSTED_ORIGINS',
     'http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174'
 ).split(',')
 
@@ -397,7 +395,13 @@ STRIPE_WEBHOOK_CONNECT_SECRET = os.getenv('STRIPE_WEBHOOK_CONNECT_SECRET', '')
 STRIPE_APPLICATION_FEE_PERCENT = float(os.getenv('STRIPE_APPLICATION_FEE_PERCENT', '5.0'))
 
 # Frontend URL for redirects
-FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')
+FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:5173')
+
+# Ensure FRONTEND_URL is present in CORS/CSRF lists
+if FRONTEND_URL and FRONTEND_URL not in CORS_ALLOWED_ORIGINS:
+    CORS_ALLOWED_ORIGINS.append(FRONTEND_URL)
+if FRONTEND_URL and FRONTEND_URL not in CSRF_TRUSTED_ORIGINS:
+    CSRF_TRUSTED_ORIGINS.append(FRONTEND_URL)
 
 # Payment security settings
 PAYMENT_WHITELISTED_IPS = os.getenv('PAYMENT_WHITELISTED_IPS', '127.0.0.1,localhost').split(',')

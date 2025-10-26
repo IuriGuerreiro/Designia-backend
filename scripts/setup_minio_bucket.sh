@@ -23,15 +23,18 @@ mc anonymous set download "${ALIAS}/${BUCKET}"
 
 echo "Applying CORS rules"
 TMP_CORS_JSON=$(mktemp)
-cat >"${TMP_CORS_JSON}" <<'JSON'
+# Build AllowedOrigins from FRONTEND_URL if present, plus common localhost ports
+FRONTEND_URL_ENV="${FRONTEND_URL:-}"
+if [ -n "$FRONTEND_URL_ENV" ]; then
+  ORIGINS_JSON="\"$FRONTEND_URL_ENV\", \"http://localhost:5173\", \"http://127.0.0.1:5173\", \"http://localhost:5174\", \"http://127.0.0.1:5174\""
+else
+  ORIGINS_JSON="\"http://localhost:5173\", \"http://127.0.0.1:5173\", \"http://localhost:5174\", \"http://127.0.0.1:5174\""
+fi
+
+cat >"${TMP_CORS_JSON}" <<JSON
 [
   {
-    "AllowedOrigins": [
-      "http://localhost:5173",
-      "http://127.0.0.1:5173",
-      "http://localhost:5174",
-      "http://127.0.0.1:5174"
-    ],
+    "AllowedOrigins": [${ORIGINS_JSON}],
     "AllowedMethods": ["GET", "POST", "PUT"],
     "AllowedHeaders": ["*"],
     "ExposeHeaders": ["ETag", "x-amz-request-id", "x-amz-id-2"],

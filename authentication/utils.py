@@ -127,9 +127,9 @@ def send_verification_email(user, request):
     # Create verification token
     token = EmailVerificationToken.objects.create(user=user)
 
-    # Build verification URL
-    frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:5173')
-    verification_url = f"{frontend_url}/verify-email/{token.token}"
+    # Build verification URL from settings.FRONTEND_URL
+    from django.conf import settings
+    verification_url = f"{settings.FRONTEND_URL}/verify-email/{token.token}"
 
     # Prepare context for templates
     context = {

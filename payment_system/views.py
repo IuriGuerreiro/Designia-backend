@@ -1759,7 +1759,7 @@ def create_checkout_session(request):
                     "order_id": str(order.id),
                 },
             },
-            return_url=f"http://localhost:5173/order-success/{order.id}",
+            return_url=f"{settings.FRONTEND_URL}/order-success/{order.id}",
             metadata={  # 👈 this metadata is on the Checkout Session itself
                 "user_id": str(request.user.id),
                 "order_id": str(order.id),
@@ -1881,7 +1881,7 @@ def create_checkout_failed_checkout(request, order_id):
                     "order_id": str(order.id),
                 },
             },
-            return_url=f"http://localhost:5173/order-success/{order.id}",
+            return_url=f"{settings.FRONTEND_URL}/order-success/{order.id}",
             metadata={  # 👈 this metadata is on the Checkout Session itself
                 "user_id": str(request.user.id),
                 "order_id": str(order.id),
