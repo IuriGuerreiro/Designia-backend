@@ -69,7 +69,7 @@ def send_order_receipt_email(order, request=None):
         record_email_attempt_for_receipts(user, user.email, 'order_receipt', request)
         
         # Get frontend URL for links in email
-        frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:5173')
+        frontend_url = settings.FRONTEND_URL
         
         # Prepare email context
         context = {
@@ -129,7 +129,7 @@ def send_order_status_update_email(order, previous_status, new_status, request=N
         record_email_attempt_for_receipts(user, user.email, 'order_status_update', request)
         
         # Get frontend URL
-        frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:5173')
+        frontend_url = settings.FRONTEND_URL
         
         # Prepare status-specific content
         status_messages = {
@@ -219,7 +219,7 @@ def send_order_cancellation_receipt_email(order, cancellation_reason, refund_amo
         record_email_attempt_for_receipts(user, user.email, 'order_cancellation', request)
         
         # Get frontend URL
-        frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:5173')
+        frontend_url = settings.FRONTEND_URL
         
         # Subject line
         subject = f" Order Cancelled - #{str(order.id)[:8]} | Refund Processing"
@@ -283,7 +283,7 @@ def send_failed_refund_notification_email(order, failure_reason, refund_amount=N
         record_email_attempt_for_receipts(user, user.email, 'failed_refund_notification', request)
         
         # Get frontend URL
-        frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:5173')
+        frontend_url = settings.FRONTEND_URL
         support_email = os.getenv('SUPPORT_EMAIL', 'support@designia.com')
         
         # Subject line

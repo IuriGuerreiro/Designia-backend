@@ -647,7 +647,9 @@ class ProductViewSet(viewsets.ModelViewSet):
     def favorites(self, request):
         """Get user's favorite products"""
         favorites = ProductFavorite.objects.filter(user=request.user).select_related('product')
-        serializer = ProductFavoriteSerializer(favorites, many=True)
+        # Include request in serializer context so nested ProductListSerializer
+        # can compute user-specific fields like is_favorited
+        serializer = ProductFavoriteSerializer(favorites, many=True, context={'request': request})
         return Response(serializer.data)
 
     @action(detail=True, methods=['get'])
@@ -959,7 +961,7 @@ class ProductReviewViewSet(viewsets.ModelViewSet):
         serializer.save(product=product, reviewer=self.request.user)
 
 
-def send_cart_update_notification(user_id, action, product_id=None, message=None):
+def send_cart_update_notification(user_id, action, product_id=None, message=None, quantity_change=None):
     """Fire-and-forget async cart update notification via WebSocket"""
     def async_notification():
         try:
@@ -981,7 +983,8 @@ def send_cart_update_notification(user_id, action, product_id=None, message=None
                     action=action,
                     product_id=product_id,
                     cart_count=cart_count,
-                    message=message
+                    message=message,
+                    quantity_change=quantity_change
                 )
             )
             loop.close()
@@ -1013,65 +1016,58 @@ class CartViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'])
     def add_item(self, request):
-        """Add item to cart with comprehensive stock validation"""
+        """Add item to cart with comprehensive stock validation and row-level locking"""
         cart = Cart.get_or_create_cart(user=request.user)
-        
-                
+
         serializer = CartItemSerializer(data=request.data)
         if serializer.is_valid():
             product_id = serializer.validated_data['product_id']
             quantity = serializer.validated_data['quantity']
-            
-            product = get_object_or_404(Product, id=product_id, is_active=True)
-            
-            # Enhanced stock validation
-            if not product.is_active:
+
+            try:
+                with transaction.atomic():
+                    # Lock product row to avoid race conditions (overselling)
+                    product = Product.objects.select_for_update().get(id=product_id, is_active=True)
+
+                    if not product.is_active:
+                        return Response(
+                            {'error': 'PRODUCT_UNAVAILABLE', 'detail': 'This product is no longer available'},
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+
+                    if product.stock_quantity <= 0:
+                        return Response(
+                            {'error': 'OUT_OF_STOCK', 'detail': 'This product is currently out of stock'},
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+
+                    # Get or create this user's cart item and lock it
+                    cart_item, item_created = CartItem.objects.select_for_update().get_or_create(
+                        cart=cart, product=product,
+                        defaults={'quantity': 0}
+                    )
+
+                    # Compute new quantity and validate against total stock only (no cross-cart reservation)
+                    new_quantity = cart_item.quantity + quantity
+                    if new_quantity > product.stock_quantity:
+                        return Response(
+                            {
+                                'error': 'INSUFFICIENT_STOCK',
+                                'detail': f'Only {product.stock_quantity} items available in stock',
+                                'available_stock': product.stock_quantity,
+                                'requested_quantity': new_quantity,
+                                'current_in_cart': cart_item.quantity
+                            },
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+
+                    cart_item.quantity = new_quantity
+                    cart_item.save()
+            except Product.DoesNotExist:
                 return Response(
-                    {'error': 'PRODUCT_UNAVAILABLE', 'detail': 'This product is no longer available'},
-                    status=status.HTTP_400_BAD_REQUEST
+                    {'error': 'PRODUCT_NOT_FOUND', 'detail': 'Product not found or not available'},
+                    status=status.HTTP_404_NOT_FOUND
                 )
-            
-            if product.stock_quantity <= 0:
-                return Response(
-                    {'error': 'OUT_OF_STOCK', 'detail': 'This product is currently out of stock'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            
-            # Check for concurrent cart reservations
-            current_cart_quantity = CartItem.objects.filter(
-                product=product
-            ).aggregate(total_in_carts=models.Sum('quantity'))['total_in_carts'] or 0
-            
-            available_stock = product.stock_quantity - current_cart_quantity
-            
-            # Get or create cart item
-            cart_item, item_created = CartItem.objects.get_or_create(
-                cart=cart, product=product,
-                defaults={'quantity': 0}  # Start with 0 to handle increment properly
-            )
-            
-            # Calculate new quantity
-            new_quantity = cart_item.quantity + quantity
-            
-            # Validate against available stock (excluding current cart item)
-            other_carts_quantity = current_cart_quantity - cart_item.quantity
-            truly_available = product.stock_quantity - other_carts_quantity
-            
-            if new_quantity > truly_available:
-                return Response(
-                    {
-                        'error': 'INSUFFICIENT_STOCK',
-                        'detail': f'Only {truly_available} items available in stock',
-                        'available_stock': truly_available,
-                        'requested_quantity': new_quantity,
-                        'current_in_cart': cart_item.quantity
-                    },
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            
-            # Update cart item quantity
-            cart_item.quantity = new_quantity
-            cart_item.save()
             
             # Store response data first
             response_data = {
@@ -1113,7 +1109,7 @@ class CartViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['patch'])
     def update_item(self, request):
-        """Update cart item quantity with comprehensive stock validation"""
+        """Update cart item quantity with comprehensive stock validation and row-level locking"""
         cart = Cart.get_or_create_cart(user=request.user)
         
                 
@@ -1138,65 +1134,51 @@ class CartViewSet(viewsets.ModelViewSet):
         
         if quantity <= 0:
             product_id = cart_item.product.id
+            removed_qty = cart_item.quantity
             cart_item.delete()
             
-            # Send WebSocket cart update notification for removal
+            # Send WebSocket cart update notification for removal, include removed quantity
             send_cart_update_notification(
                 user_id=request.user.id,
                 action='remove_item',
                 product_id=product_id,
-                message='Item removed from cart'
+                message='Item removed from cart',
+                quantity_change=-int(removed_qty)
             )
             
             return Response({'detail': 'Item removed from cart'})
         
-        # Enhanced stock validation
-        product = cart_item.product
-        if not product.is_active:
-            return Response(
-                {'error': 'PRODUCT_UNAVAILABLE', 'detail': 'This product is no longer available'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        if quantity > product.stock_quantity:
-            return Response(
-                {
-                    'error': 'INSUFFICIENT_STOCK',
-                    'detail': f'Only {product.stock_quantity} items available in stock',
-                    'available_stock': product.stock_quantity,
-                    'requested_quantity': quantity
-                },
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        # Check for concurrent cart updates (other users might have taken items)
-        current_cart_quantity = CartItem.objects.filter(
-            product=product
-        ).exclude(id=cart_item.id).aggregate(
-            total_in_carts=models.Sum('quantity')
-        )['total_in_carts'] or 0
-        
-        available_for_this_cart = product.stock_quantity - current_cart_quantity
-        if quantity > available_for_this_cart:
-            return Response(
-                {
-                    'error': 'STOCK_RESERVED',
-                    'detail': f'Only {available_for_this_cart} items available (some reserved in other carts)',
-                    'available_stock': available_for_this_cart,
-                    'requested_quantity': quantity
-                },
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        cart_item.quantity = quantity
-        cart_item.save()
+        # Enhanced stock validation inside a transaction to avoid race conditions
+        with transaction.atomic():
+            product = Product.objects.select_for_update().get(id=cart_item.product.id)
+            if not product.is_active:
+                return Response(
+                    {'error': 'PRODUCT_UNAVAILABLE', 'detail': 'This product is no longer available'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            if quantity > product.stock_quantity:
+                return Response(
+                    {
+                        'error': 'INSUFFICIENT_STOCK',
+                        'detail': f'Only {product.stock_quantity} items available in stock',
+                        'available_stock': product.stock_quantity,
+                        'requested_quantity': quantity
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            previous_quantity = cart_item.quantity
+            cart_item.quantity = quantity
+            cart_item.save()
         
         # Send WebSocket cart update notification for quantity update
         send_cart_update_notification(
             user_id=request.user.id,
             action='update_item',
             product_id=product.id,
-            message=f'Updated cart item quantity to {quantity}'
+            message=f'Updated cart item quantity to {quantity}',
+            quantity_change=int(quantity) - int(previous_quantity)
         )
         
         return Response({
@@ -1246,7 +1228,8 @@ class CartViewSet(viewsets.ModelViewSet):
             user_id=request.user.id,
             action='remove_item',
             product_id=product.id,
-            message=f'Removed {quantity} items from cart'
+            message=f'Removed {quantity} items from cart',
+            quantity_change=-int(quantity)
         )
         
         return response

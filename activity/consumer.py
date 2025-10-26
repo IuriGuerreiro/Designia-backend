@@ -118,7 +118,8 @@ class ActivityConsumer(AsyncWebsocketConsumer):
             'action': event['action'],
             'product_id': event.get('product_id'),
             'cart_count': event['cart_count'],
-            'message': event.get('message', 'Cart updated')
+            'message': event.get('message', 'Cart updated'),
+            'quantity_change': event.get('quantity_change')
         }))
 
     async def activity_notification(self, event):
@@ -235,7 +236,7 @@ class ActivityConsumer(AsyncWebsocketConsumer):
             return False
 
     @staticmethod
-    async def notify_cart_update(user_id, action, product_id=None, cart_count=None, message=None):
+    async def notify_cart_update(user_id, action, product_id=None, cart_count=None, message=None, quantity_change=None):
         """Static method to notify user about cart updates from outside the consumer"""
         from channels.layers import get_channel_layer
         
@@ -245,14 +246,21 @@ class ActivityConsumer(AsyncWebsocketConsumer):
             
             logger.info(f"Notifying user {user_id} about cart update: {action}")
             
+            # Ensure payload is JSON-serializable for channel layer
+            safe_product_id = str(product_id) if product_id is not None else None
+            safe_cart_count = int(cart_count) if cart_count is not None else None
+            safe_message = str(message) if message is not None else None
+            safe_quantity_change = int(quantity_change) if quantity_change is not None else None
+
             await channel_layer.group_send(
                 user_group_name,
                 {
                     'type': 'cart_updated',
                     'action': action,
-                    'product_id': product_id,
-                    'cart_count': cart_count,
-                    'message': message
+                    'product_id': safe_product_id,
+                    'cart_count': safe_cart_count,
+                    'message': safe_message,
+                    'quantity_change': safe_quantity_change
                 }
             )
             
