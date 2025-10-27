@@ -19,6 +19,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 
+from authentication.permissions import AdminRequired
+
 from .models import Payout, PayoutItem, PaymentTransaction, PaymentTracker
 from .serializers import PayoutSerializer, PayoutSummarySerializer
 from marketplace.models import Order
@@ -36,7 +38,7 @@ User = get_user_model()
 # ===============================================================================
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, AdminRequired])
 @financial_transaction
 def admin_list_all_payouts(request):
     """
@@ -52,17 +54,8 @@ def admin_list_all_payouts(request):
     - search: Search by seller username or email
     """
     try:
-        # Get user from database (don't trust token)
+        # Re-fetch the admin from the database for logging/auditing.
         user = User.objects.get(id=request.user.id)
-
-        # ADMIN CHECK: Verify admin role from database
-        if user.role != 'admin':
-            logger.warning(f"Non-admin user {user.username} (ID: {user.id}, Role: {user.role}) attempted to access admin payouts list")
-            return Response({
-                'error': 'ADMIN_ACCESS_REQUIRED',
-                'detail': 'Permission denied. Only administrators can view all payouts.'
-            }, status=status.HTTP_403_FORBIDDEN)
-
         logger.info(f"Admin {user.username} accessing all payouts list")
 
         # Start with all payouts
@@ -165,7 +158,7 @@ def admin_list_all_payouts(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, AdminRequired])
 @financial_transaction
 def admin_list_all_transactions(request):
     """
@@ -182,17 +175,8 @@ def admin_list_all_transactions(request):
     - search: Search by seller/buyer username or order ID
     """
     try:
-        # Get user from database (don't trust token)
+        # Re-fetch the admin from the database for logging/auditing.
         user = User.objects.get(id=request.user.id)
-
-        # ADMIN CHECK: Verify admin role from database
-        if user.role != 'admin':
-            logger.warning(f"Non-admin user {user.username} (ID: {user.id}, Role: {user.role}) attempted to access admin transactions list")
-            return Response({
-                'error': 'ADMIN_ACCESS_REQUIRED',
-                'detail': 'Permission denied. Only administrators can view all transactions.'
-            }, status=status.HTTP_403_FORBIDDEN)
-
         logger.info(f"Admin {user.username} accessing all transactions list")
 
         # Start with all transactions

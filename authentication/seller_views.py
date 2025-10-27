@@ -5,6 +5,8 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from django.shortcuts import get_object_or_404
 from django.db import transaction
 
+from authentication.permissions import AdminRequired
+
 from .seller_models import SellerApplication, SellerApplicationImage
 from .seller_serializers import (
     SellerApplicationSerializer,
@@ -51,26 +53,9 @@ class SellerApplicationDetailView(generics.RetrieveAPIView):
 class SellerApplicationListView(generics.ListAPIView):
     """List all seller applications (admin only)"""
     serializer_class = SellerApplicationSerializer
-    permission_classes = [permissions.IsAuthenticated]
-
-    def list(self, request, *args, **kwargs):
-        # Check if user has admin privileges
-        if not (request.user.role == 'admin' or request.user.is_superuser):
-            return Response(
-                {'error': 'Permission denied. Admin access required.'},
-                status=status.HTTP_403_FORBIDDEN
-            )
-
-        return super().list(request, *args, **kwargs)
+    permission_classes = [permissions.IsAuthenticated, AdminRequired]
 
     def get_queryset(self):
-        user = self.request.user
-
-        # Only admin/superuser can see all applications
-        if not (user.role == 'admin' or user.is_superuser):
-            return SellerApplication.objects.none()
-
-        # Filter by status if provided
         status_filter = self.request.query_params.get('status')
         queryset = SellerApplication.objects.all()
 
@@ -83,15 +68,9 @@ class SellerApplicationListView(generics.ListAPIView):
 class SellerApplicationAdminUpdateView(generics.UpdateAPIView):
     """Admin actions on seller applications"""
     serializer_class = SellerApplicationAdminSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, AdminRequired]
 
     def get_queryset(self):
-        user = self.request.user
-
-        # Only admin/superuser can update applications
-        if not (user.role == 'admin' or user.is_superuser):
-            return SellerApplication.objects.none()
-
         return SellerApplication.objects.all()
 
 
@@ -248,15 +227,9 @@ def user_role_info(request):
 
 
 @api_view(['POST'])
-@permission_classes([permissions.IsAuthenticated])
+@permission_classes([permissions.IsAuthenticated, AdminRequired])
 def admin_approve_seller(request, application_id):
     """Admin endpoint to approve seller application"""
-    if not (request.user.role == 'admin' or request.user.is_superuser):
-        return Response(
-            {'error': 'Permission denied. Admin access required.'},
-            status=status.HTTP_403_FORBIDDEN
-        )
-
     try:
         application = SellerApplication.objects.get(id=application_id)
         application.approve_application(request.user)
@@ -273,15 +246,9 @@ def admin_approve_seller(request, application_id):
 
 
 @api_view(['POST'])
-@permission_classes([permissions.IsAuthenticated])
+@permission_classes([permissions.IsAuthenticated, AdminRequired])
 def admin_reject_seller(request, application_id):
     """Admin endpoint to reject seller application"""
-    if not (request.user.role == 'admin' or request.user.is_superuser):
-        return Response(
-            {'error': 'Permission denied. Admin access required.'},
-            status=status.HTTP_403_FORBIDDEN
-        )
-
     try:
         application = SellerApplication.objects.get(id=application_id)
         reason = request.data.get('reason', 'Application rejected by admin')

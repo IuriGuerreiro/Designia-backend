@@ -6,7 +6,7 @@ import hmac
 import time
 import logging
 from django.conf import settings
-from django.http import HttpResponseForbidden
+from django.http import HttpResponseForbidden, JsonResponse
 from django.core.cache import cache
 from django.utils.deprecation import MiddlewareMixin
 from decimal import Decimal
@@ -20,12 +20,25 @@ class PaymentSecurityMiddleware(MiddlewareMixin):
     def __init__(self, get_response):
         self.get_response = get_response
         super().__init__(get_response)
-    
+        self._stripe_missing_logged = False
+
     def process_request(self, request):
         # Apply security checks only to payment endpoints
         if not request.path.startswith('/api/payments/'):
             return None
-        
+
+        if not self._ensure_stripe_api_key():
+            if not self._stripe_missing_logged:
+                logger.error("Stripe secret key is not configured; payment endpoints returning 503")
+                self._stripe_missing_logged = True
+            return JsonResponse(
+                {
+                    "error": "Stripe integration is temporarily unavailable",
+                    "detail": "Missing STRIPE_SECRET_KEY configuration",
+                },
+                status=503,
+            )
+
         # Rate limiting
         if self._is_rate_limited(request):
             logger.warning(f"Rate limit exceeded for IP {self._get_client_ip(request)}")
@@ -84,12 +97,16 @@ class PaymentSecurityMiddleware(MiddlewareMixin):
         """Check if IP is whitelisted for sensitive operations"""
         ip = self._get_client_ip(request)
         whitelisted_ips = getattr(settings, 'PAYMENT_WHITELISTED_IPS', [])
-        
+
         # Allow localhost in development
         if settings.DEBUG and ip in ['127.0.0.1', '::1']:
             return True
-        
+
         return ip in whitelisted_ips
+
+    def _ensure_stripe_api_key(self) -> bool:
+        key = getattr(settings, 'STRIPE_SECRET_KEY', '')
+        return bool(key)
 
 
 class PaymentValidator:

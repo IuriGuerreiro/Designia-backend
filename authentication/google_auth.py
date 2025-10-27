@@ -1,17 +1,43 @@
 import os
-from django.conf import settings
+import logging
+import re
 from django.contrib.auth import get_user_model
 from rest_framework_simplejwt.tokens import RefreshToken
 
 # Import Google auth modules only when needed to avoid import errors
+logger = logging.getLogger(__name__)
+
+_EMAIL_PATTERN = re.compile(r"([A-Za-z0-9._%+-]+)@([A-Za-z0-9.-]+\.[A-Za-z]{2,})")
+
+
+def _mask_email(email: str | None) -> str | None:
+    if not email:
+        return None
+
+    def _replacer(match: re.Match) -> str:
+        local_part, domain = match.groups()
+        if len(local_part) <= 2:
+            masked_local = local_part[0] + "***"
+        else:
+            masked_local = f"{local_part[0]}***{local_part[-1]}"
+        return f"{masked_local}@{domain}"
+
+    return _EMAIL_PATTERN.sub(_replacer, email)
+
+
 try:
     from google.auth.transport import requests
     from google.oauth2 import id_token
     GOOGLE_AUTH_AVAILABLE = True
 except ImportError as e:
     GOOGLE_AUTH_AVAILABLE = False
-    print(f" Google auth libraries import failed: {e}")
-    print("Warning: Google auth libraries not available. Install with: pip install google-auth google-auth-oauthlib")
+    logger.warning(
+        "Google auth libraries import failed",
+        extra={"error": str(e)},
+    )
+    logger.warning(
+        "Install google-auth and google-auth-oauthlib to enable Google OAuth support",
+    )
 
 User = get_user_model()
 
@@ -21,45 +47,55 @@ class GoogleAuth:
         """
         Verify Google ID token and return user information
         """
-        print(f"🔍 GOOGLE_AUTH_AVAILABLE status: {GOOGLE_AUTH_AVAILABLE}")
+        logger.debug("Google auth availability status", extra={"available": GOOGLE_AUTH_AVAILABLE})
         if not GOOGLE_AUTH_AVAILABLE:
             return None, "Google authentication libraries not installed"
-        
+
         try:
             # Get Google OAuth client ID from environment
             client_id = os.getenv('GOOGLE_OAUTH_CLIENT_ID')
-            print(f"🔍 Google OAuth Client ID from env: {'***' + client_id[-20:] if client_id else 'NOT SET'}")
-            
+            client_id_tail = client_id[-6:] if client_id else None
+            logger.debug(
+                "Google OAuth client ID configured",
+                extra={"configured": bool(client_id), "client_tail": client_id_tail},
+            )
+
             if not client_id:
-                print(" Google OAuth client ID not configured in environment")
+                logger.error("Google OAuth client ID not configured in environment")
                 return None, "Google OAuth client ID not configured"
-            
-            print(f"🔍 Verifying token with client_id...")
+
+            logger.debug("Verifying Google token")
             # Verify the token
             idinfo = id_token.verify_oauth2_token(
-                token, 
-                requests.Request(), 
+                token,
+                requests.Request(),
                 client_id
             )
-            print(f"  Token verified successfully")
-            print(f"🔍 Token info - ISS: {idinfo.get('iss')}")
-            print(f"🔍 Token info - AUD: {idinfo.get('aud')}")
-            print(f"🔍 Token info - EMAIL: {idinfo.get('email')}")
-            print(f"🔍 Token info - NAME: {idinfo.get('name')}")
-            
+            logger.info(
+                "Google token verified successfully",
+                extra={
+                    "issuer": idinfo.get('iss'),
+                    "audience": idinfo.get('aud'),
+                    "email": _mask_email(idinfo.get('email')),
+                },
+            )
+
             # Check if the token is issued by Google
             if idinfo['iss'] not in ['accounts.google.com', 'https://accounts.google.com']:
-                print(f" Invalid token issuer: {idinfo['iss']}")
+                logger.warning(
+                    "Invalid Google token issuer",
+                    extra={"issuer": idinfo.get('iss')},
+                )
                 return None, "Invalid token issuer"
-            
-            print("  Token verification complete - returning user info")
+
+            logger.debug("Token verification complete - returning user info")
             return idinfo, None
-            
+
         except ValueError as e:
-            print(f" Token validation error: {str(e)}")
+            logger.warning("Google token validation error", extra={"error": str(e)})
             return None, f"Invalid token: {str(e)}"
         except Exception as e:
-            print(f" Token verification exception: {str(e)}")
+            logger.exception("Google token verification failed", extra={"error": str(e)})
             return None, f"Token verification failed: {str(e)}"
     
     @staticmethod
@@ -67,24 +103,31 @@ class GoogleAuth:
         """
         Get or create user from Google user information
         """
-        print(f"🔍 Getting/creating user from Google info...")
         email = google_user_info.get('email')
-        print(f"🔍 User email from Google: {email}")
-        
+        logger.info(
+            "Processing Google user info",
+            extra={"email": _mask_email(email)},
+        )
+
         if not email:
-            print(" No email provided by Google")
+            logger.warning("Google user info missing email")
             return None, "Email not provided by Google"
-        
+
         # Check if user already exists
-        print(f"🔍 Checking if user exists with email: {email}")
         try:
             user = User.objects.get(email=email)
-            print(f"  Existing user found: {user.email}")
+            logger.info(
+                "Existing Google user found",
+                extra={"email": _mask_email(email)},
+            )
             # If user exists but signed up with regular registration,
             # we can link their Google account
             return user, None
         except User.DoesNotExist:
-            print(f"🔍 User doesn't exist, creating new user...")
+            logger.info(
+                "Creating new Google user",
+                extra={"email": _mask_email(email)},
+            )
             # Create new user from Google info
             try:
                 user = User.objects.create_user(
@@ -95,10 +138,13 @@ class GoogleAuth:
                     is_email_verified=True,  # Google accounts are pre-verified
                     is_active=True,  # Google users are immediately active
                 )
-                print(f"  New user created: {user.email}")
+                logger.info(
+                    "New Google user created",
+                    extra={"email": _mask_email(email)},
+                )
                 return user, None
             except Exception as e:
-                print(f" User creation failed: {str(e)}")
+                logger.exception("Google user creation failed", extra={"email": _mask_email(email)})
                 return None, f"Failed to create user: {str(e)}"
     
     @staticmethod

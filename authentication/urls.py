@@ -2,20 +2,20 @@ from django.urls import path, include
 from . import views
 
 urlpatterns = [
-    path('register/', views.register, name='register'),
-    path('login/', views.login, name='login'),
-    path('login/verify-2fa/', views.login_verify_2fa, name='login_verify_2fa'),
-    path('token/refresh/', views.token_refresh, name='token_refresh'),
+    path('register/', views.RegisterView.as_view(), name='register'),
+    path('login/', views.LoginView.as_view(), name='login'),
+    path('login/verify-2fa/', views.LoginVerify2FAView.as_view(), name='login_verify_2fa'),
+    path('token/refresh/', views.TokenRefreshAPIView.as_view(), name='token_refresh'),
     path('profile/', views.ProfileUpdateView.as_view(), name='profile'),
     path('verify-email/', views.verify_email, name='verify_email'),
     path('resend-verification/', views.resend_verification_email, name='resend_verification'),
     path('check-rate-limit/', views.check_email_rate_limit, name='check_email_rate_limit'),
-    path('resend-2fa-code/', views.resend_2fa_code, name='resend_2fa_code'),
+    path('resend-2fa-code/', views.Resend2FACodeView.as_view(), name='resend_2fa_code'),
     
     # Google OAuth endpoints (YummiAI style)
-    path('google/login/', views.google_login, name='google_login'),
-    path('google/register/', views.google_register, name='google_register'),
-    path('google-oauth/', views.google_oauth, name='google_oauth'),  # Legacy endpoint
+    path('google/login/', views.GoogleLoginView.as_view(), name='google_login'),
+    path('google/register/', views.GoogleRegisterView.as_view(), name='google_register'),
+    path('google-oauth/', views.GoogleOAuthLegacyView.as_view(), name='google_oauth'),  # Legacy endpoint
     
     # 2FA endpoints
     path('2fa/toggle/', views.toggle_2fa, name='toggle_2fa'),
@@ -27,18 +27,18 @@ urlpatterns = [
     path('password/set/', views.set_password_with_2fa, name='set_password_with_2fa'),
     
     # Password reset endpoints (all users)
-    path('password/reset/request/', views.request_password_reset, name='request_password_reset'),
-    path('password/reset/', views.reset_password_with_2fa, name='reset_password_with_2fa'),
+    path('password/reset/request/', views.RequestPasswordResetView.as_view(), name='request_password_reset'),
+    path('password/reset/', views.ResetPasswordWith2FAView.as_view(), name='reset_password_with_2fa'),
 
     # Language preference
-    path('change-language/', views.change_language, name='change_language'),
+    path('change-language/', views.ChangeLanguageView.as_view(), name='change_language'),
 
     # Public user profile
     path('users/<int:pk>/', views.PublicProfileDetailView.as_view(), name='public_profile_detail'),
 
     # Profile picture endpoints
-    path('profile/picture/upload/', views.upload_profile_picture, name='upload_profile_picture'),
-    path('profile/picture/delete/', views.delete_profile_picture, name='delete_profile_picture'),
+    path('profile/picture/upload/', views.UploadProfilePictureView.as_view(), name='upload_profile_picture'),
+    path('profile/picture/delete/', views.DeleteProfilePictureView.as_view(), name='delete_profile_picture'),
 
     # Seller application endpoints
     path('', include('authentication.seller_urls')),

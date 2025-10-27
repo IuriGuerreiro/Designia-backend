@@ -1,5 +1,7 @@
 from rest_framework import permissions
 
+from authentication.permissions import AdminRequired, SellerRequired, user_has_role
+
 
 class IsSellerOrReadOnly(permissions.BasePermission):
     """
@@ -12,8 +14,10 @@ class IsSellerOrReadOnly(permissions.BasePermission):
         if request.method in permissions.SAFE_METHODS:
             return True
         
-        # Write permissions are only allowed to the seller of the product.
-        return obj.seller == request.user
+        # Write permissions are allowed to the seller of the product or admins.
+        if obj.seller == request.user:
+            return True
+        return user_has_role(request.user, "admin")
 
 
 class IsOwnerOrReadOnly(permissions.BasePermission):
@@ -142,31 +146,9 @@ class IsProductOwner(permissions.BasePermission):
         return False
 
 
-class IsSellerUser(permissions.BasePermission):
-    """
-    Permission to check if user has seller role
-    Allows sellers and admins to access seller-only endpoints
-    """
-
-    def has_permission(self, request, view):
-        # User must be authenticated
-        if not request.user.is_authenticated:
-            return False
-
-        # Check if user is seller or admin
-        return request.user.can_sell_products()
+class IsSellerUser(SellerRequired):
+    """Backward-compatible alias for seller role enforcement."""
 
 
-class IsAdminUser(permissions.BasePermission):
-    """
-    Permission to check if user has admin role
-    Only allows admins to access admin-only endpoints
-    """
-
-    def has_permission(self, request, view):
-        # User must be authenticated
-        if not request.user.is_authenticated:
-            return False
-
-        # Check if user is admin
-        return request.user.is_admin()
+class IsAdminUser(AdminRequired):
+    """Backward-compatible alias for admin role enforcement."""

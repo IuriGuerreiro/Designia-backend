@@ -72,6 +72,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'channels',  # WebSocket support
     'rest_framework',
+    'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
     'django_filters',
     'storages',  # AWS S3 storage backend
@@ -88,10 +89,13 @@ MIDDLEWARE = [
     'django.contrib.sessions.middleware.SessionMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
-    # 'django.middleware.csrf.CsrfViewMiddleware',  # Disabled for API endpoints
+    'designiaBackend.middleware.JWTCSRFBypassMiddleware',
+    # Re-enable CSRF protection for session-based views; JWT-only APIs remain unaffected
+    'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'payment_system.security.PaymentSecurityMiddleware',
 ]
 
 # Security headers for Google OAuth
@@ -195,7 +199,6 @@ AUTH_USER_MODEL = 'authentication.CustomUser'
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework_simplejwt.authentication.JWTAuthentication',
-        'rest_framework.authentication.SessionAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
@@ -209,12 +212,24 @@ SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
     'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
     'TOKEN_OBTAIN_SERIALIZER': 'authentication.jwt_serializers.CustomTokenObtainPairSerializer',
 }
 
 # CORS settings - parse from environment variable
 _cors_origins_default = 'http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174,http://localhost:8080,http://127.0.0.1:8080,http://localhost:8081,http://127.0.0.1:8081'
 CORS_ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', _cors_origins_default).split(',')
+
+# Align CSRF trusted origins with the configured CORS list unless explicitly overridden.
+_csrf_trusted_origins = os.getenv('CSRF_TRUSTED_ORIGINS')
+if _csrf_trusted_origins:
+    CSRF_TRUSTED_ORIGINS = [origin.strip() for origin in _csrf_trusted_origins.split(',') if origin.strip()]
+else:
+    CSRF_TRUSTED_ORIGINS = [
+        origin
+        for origin in CORS_ALLOWED_ORIGINS
+        if origin.startswith(('http://', 'https://'))
+    ]
 
 CORS_ALLOW_CREDENTIALS = True
 
@@ -230,12 +245,6 @@ CORS_ALLOWED_ORIGIN_REGEXES = [
 # Security headers for Google OAuth
 SECURE_CROSS_ORIGIN_OPENER_POLICY = None
 SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
-
-# Disable CSRF for API endpoints since we're using JWT authentication
-CSRF_TRUSTED_ORIGINS = os.getenv(
-    'CSRF_TRUSTED_ORIGINS',
-    'http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174'
-).split(',')
 
 # AWS S3 / MinIO Storage Configuration
 USE_S3 = os.getenv('USE_S3', 'False').lower() == 'true'

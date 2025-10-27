@@ -13,6 +13,8 @@ import uuid
 import os
 import asyncio
 
+logger = logging.getLogger(__name__)
+
 try:
     from PIL import Image
     PIL_AVAILABLE = True
@@ -44,9 +46,6 @@ from .serializers import (
 )
 from .filters import ProductFilter
 from .permissions import IsSellerOrReadOnly, IsOwnerOrReadOnly, IsSellerUser, IsAdminUser
-
-# Set up logger
-logger = logging.getLogger(__name__)
 
 def validate_and_process_image(image_file, max_size_mb=10):
     """

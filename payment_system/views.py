@@ -1,4 +1,5 @@
 import os
+import re
 import stripe
 import json
 import logging
@@ -35,15 +36,47 @@ from utils.transaction_utils import (
 # Import security utilities
 from .security import PaymentAuditLogger
 
-# Set the Stripe API key from Django settings
-stripe.api_key = settings.STRIPE_SECRET_KEY
-
-# Add a check to ensure the key is loaded
-if not stripe.api_key:
-    raise ValueError("Stripe API key not found. Please set STRIPE_SECRET_KEY in your Django settings.")
+# Set the Stripe API key from Django settings without crashing if missing.
+stripe.api_key = getattr(settings, 'STRIPE_SECRET_KEY', '')
 
 # Initialize logger
 logger = logging.getLogger(__name__)
+
+_EMAIL_PATTERN = re.compile(r"([A-Za-z0-9._%+-]+)@([A-Za-z0-9.-]+\.[A-Za-z]{2,})")
+
+
+def _sanitize_legacy_message(message: str) -> str:
+    """Mask sensitive substrings and cap message length for legacy webhook prints."""
+
+    def _mask_email(match: re.Match) -> str:
+        local_part, domain = match.groups()
+        if len(local_part) <= 2:
+            masked_local = local_part[0] + "***"
+        else:
+            masked_local = f"{local_part[0]}***{local_part[-1]}"
+        return f"{masked_local}@{domain}"
+
+    sanitized = _EMAIL_PATTERN.sub(_mask_email, message)
+    if len(sanitized) > 600:
+        sanitized = f"{sanitized[:597]}..."
+    return sanitized
+
+
+def _legacy_stripe_print(*args, **kwargs):
+    message = " ".join(str(arg) for arg in args)
+    sanitized = _sanitize_legacy_message(message)
+    logger.debug("Stripe legacy log", extra={"sanitized_message": sanitized})
+
+
+# Replace verbose print statements inside the webhook with sanitized logging
+print = _legacy_stripe_print  # type: ignore
+
+
+def _log_event(level: int, message: str, **extra):
+    if extra:
+        logger.log(level, message, extra={"payment_event": extra})
+    else:
+        logger.log(level, message)
 
 User = get_user_model()
 
@@ -121,105 +154,153 @@ def stripe_webhook(request):
         logger.error(f"Unexpected webhook verification error from IP {client_ip}: {str(e)}")
         return HttpResponse(status=500, content='Webhook processing error.')
     
-    print(f"🔔 Received Stripe event: {event.type}")
+    _log_event(logging.INFO, "Stripe webhook received", event_type=event.type, client_ip=client_ip)
     # Handle checkout.session.completed event (for embedded checkout)
     if event.type == 'checkout.session.completed':
         checkout_session = event.data.object
-        print(f"🔔 Checkout session completed: {getattr(checkout_session, 'id', 'unknown')}")
+        _log_event(
+            logging.INFO,
+            "Checkout session completed",
+            session_id=getattr(checkout_session, 'id', 'unknown'),
+            metadata_keys=sorted(getattr(checkout_session, 'metadata', {}).keys()),
+        )
 
 
         # Try to get metadata from checkout session
         metadata = getattr(checkout_session, 'metadata', {})
-        print(f"🔔 Checkout session metadata: {metadata}")
+        _log_event(
+            logging.DEBUG,
+            "Checkout session metadata snapshot",
+            session_id=getattr(checkout_session, 'id', 'unknown'),
+            metadata_keys=sorted(metadata.keys()),
+        )
 
-        print(f"full checkout complete data object: {json.dumps(dict(checkout_session), indent=2, default=str)}")
-        
         if metadata and metadata.get('user_id'):
-            print(f"🔔 Found user_id in checkout session metadata: {metadata.get('user_id')}")
-            
+            _log_event(
+                logging.INFO,
+                "Checkout session contains user identifier",
+                session_id=getattr(checkout_session, 'id', 'unknown'),
+                user_id=metadata.get('user_id'),
+            )
+
             # Pass the entire checkout session to handle_sucessfull_checkout
             handle_sucessfull_checkout(checkout_session)
             return HttpResponse(status=200, content='checkout.session.completed event successfully processed')
         else:
-            print("⚠️ No user_id found in checkout session metadata")
-            print(f"⚠️ Available metadata keys: {list(metadata.keys()) if metadata else 'None'}")
-            
+            _log_event(
+                logging.WARNING,
+                "Checkout session missing user identifier",
+                session_id=getattr(checkout_session, 'id', 'unknown'),
+                metadata_keys=sorted(metadata.keys()),
+            )
+
             # Try to retrieve the full session from Stripe as fallback
             try:
                 session_id = getattr(checkout_session, 'id')
                 if session_id:
-                    print(f"🔍 Attempting to retrieve full session: {session_id}")
+                    _log_event(logging.INFO, "Retrieving full checkout session", session_id=session_id)
                     full_session = stripe.checkout.Session.retrieve(session_id)
                     full_metadata = getattr(full_session, 'metadata', {})
-                    print(f"🔍 Full session metadata: {full_metadata}")
-                    
+                    _log_event(
+                        logging.DEBUG,
+                        "Retrieved checkout session metadata",
+                        session_id=session_id,
+                        metadata_keys=sorted(full_metadata.keys()),
+                    )
+
                     if full_metadata and full_metadata.get('user_id'):
-                        print(f"  Found user_id in retrieved session: {full_metadata.get('user_id')}")
+                        _log_event(
+                            logging.INFO,
+                            "Checkout session fallback located user identifier",
+                            session_id=session_id,
+                            user_id=full_metadata.get('user_id'),
+                        )
                         handle_sucessfull_checkout(full_session)
                         return HttpResponse(status=200, content='Webhook processed with retrieved session')
             except Exception as e:
-                print(f" Error retrieving full session: {e}")
-            
+                _log_event(logging.ERROR, "Failed to retrieve checkout session", session_id=session_id, error=str(e))
+
             return HttpResponse(
-                status=400, 
+                status=400,
                 content='No user_id found in checkout session metadata'
             )
-    
+
     # Handle refund.updated event (for order cancellations)
     elif event.type == 'refund.updated':
         refund_object = event.data.object
-        print(f"🔔 Refund updated event received")
-        print(f"full object", json.dumps(dict(refund_object), indent=2, default=str))
-        
+        _log_event(
+            logging.INFO,
+            "Stripe refund updated event received",
+            refund_id=getattr(refund_object, 'id', 'unknown'),
+        )
+
         # Extract refund details with comprehensive error handling
         try:
             refund_id = getattr(refund_object, 'id', '')
             refund_status = getattr(refund_object, 'status', '')
             refund_amount = getattr(refund_object, 'amount', 0) / 100  # Convert from cents
             refund_metadata = getattr(refund_object, 'metadata', {})
-            
-            print(f"🔔 Processing refund: {refund_id}, status: {refund_status}, amount: ${refund_amount}")
-            print(f"🔔 Refund metadata: {refund_metadata}")
-            
+
+            _log_event(
+                logging.INFO,
+                "Processing refund webhook",
+                refund_id=refund_id,
+                status=refund_status,
+                amount=refund_amount,
+                metadata_keys=sorted(refund_metadata.keys()),
+            )
+
             # Handle refund status
             # Use getattr to safely access failure_balance_transaction (may not exist on all refund objects)
             failure_balance_transaction = getattr(refund_object, 'failure_balance_transaction', None)
             failure_code = getattr(refund_object, 'failure_code', None)
             failure_reason = getattr(refund_object, 'failure_reason', None)
-            
-            print(f"🔔 Refund failure details - balance_transaction: {failure_balance_transaction}, code: {failure_code}, reason: {failure_reason}")
-            
+
+            _log_event(
+                logging.DEBUG,
+                "Refund failure details",
+                refund_id=refund_id,
+                failure_balance_transaction=failure_balance_transaction,
+                failure_code=failure_code,
+                failure_reason=failure_reason,
+            )
+
         except Exception as e:
-            print(f"⚠️ Error extracting refund details: {str(e)}")
             logger.error(f"Stripe refund object attribute extraction failed: {str(e)}")
             return HttpResponse(f"Error processing refund object: {str(e)}", status=400)
-        
+
         if refund_status == 'succeeded' and failure_balance_transaction is None:
-            print(f"🔔 Refund succeeded")
+            _log_event(logging.INFO, "Refund succeeded", refund_id=refund_id)
             # Try to get order ID from refund metadata first
             order_id = refund_metadata.get('order_id')
-            
+
             if order_id:
-                print(f"🔔 Found order_id in refund metadata: {order_id}")
+                _log_event(logging.INFO, "Refund metadata contains order identifier", order_id=order_id)
                 try:
                     # Get order directly from metadata
                     from marketplace.models import Order
                     order = Order.objects.get(id=order_id)
-                    
+
                     with atomic_with_isolation('READ COMMITTED'):
                         # Update order status to refunded
                         order.status = 'refunded'
                         order.payment_status = 'refunded'
                         order.save(update_fields=['status', 'payment_status'])
-                        
-                        # Restore stock for cancelled items
-                        for item in order.items.all():
-                            product = item.product
-                            product.stock_quantity += item.quantity
-                            product.save(update_fields=['stock_quantity'])
-                            print(f"  Restored {item.quantity} units to product {product.name}")
-                        
-                        print(f"  Order {order.id} marked as cancelled due to refund")
+
+                          # Restore stock for cancelled items
+                          for item in order.items.all():
+                              product = item.product
+                              product.stock_quantity += item.quantity
+                              product.save(update_fields=['stock_quantity'])
+                              _log_event(
+                                  logging.DEBUG,
+                                  "Restored stock after refund",
+                                  product_id=product.id,
+                                  order_id=order_id,
+                                  quantity=item.quantity,
+                              )
+
+                          _log_event(logging.INFO, "Order marked as cancelled due to refund", order_id=order.id)
                         
                         # Update PaymentTransaction status from 'waiting_refund' to 'refunded'
                         payment_transactions = PaymentTransaction.objects.filter(
@@ -229,8 +310,12 @@ def stripe_webhook(request):
                         for transaction in payment_transactions:
                             transaction.status = 'refunded'
                             transaction.notes = f"{transaction.notes}\nRefund succeeded via webhook: {refund_id}" if transaction.notes else f"Refund succeeded via webhook: {refund_id}"
-                            transaction.save(update_fields=['status', 'notes', 'updated_at'])
-                            print(f"  Updated PaymentTransaction {transaction.id} status to 'refunded'")
+                              transaction.save(update_fields=['status', 'notes', 'updated_at'])
+                              _log_event(
+                                  logging.INFO,
+                                  "PaymentTransaction marked as refunded",
+                                  transaction_id=transaction.id,
+                              )
                         
                         # Create or update success refund tracker
                         try:
@@ -244,7 +329,12 @@ def stripe_webhook(request):
                                 existing_tracker.status = 'success_refund'
                                 existing_tracker.notes = f"{existing_tracker.notes}\nRefund succeeded: {refund_metadata.get('reason', 'Order cancelled')}"
                                 existing_tracker.save(update_fields=['status', 'notes', 'updated_at'])
-                                print(f"  Updated existing tracker to success_refund for refund {refund_id}")
+                                _log_event(
+                                    logging.DEBUG,
+                                    "Refund tracker updated",
+                                    tracker_id=existing_tracker.id,
+                                    refund_id=refund_id,
+                                )
                             else:
                                 # Create new tracker
                                 PaymentTracker.objects.create(
@@ -257,9 +347,18 @@ def stripe_webhook(request):
                                     currency='USD',
                                     notes=f'Refund succeeded: {refund_metadata.get("reason", "Order cancelled")}'
                                 )
-                                print(f"  Created new success_refund tracker for refund {refund_id}")
+                                _log_event(
+                                    logging.INFO,
+                                    "Refund tracker created",
+                                    refund_id=refund_id,
+                                )
                         except Exception as tracker_error:
-                            print(f" Failed to create/update refund tracker: {str(tracker_error)}")
+                            _log_event(
+                                logging.ERROR,
+                                "Failed to update refund tracker",
+                                refund_id=refund_id,
+                                error=str(tracker_error),
+                            )
                         
                         # Send cancellation confirmation email to customer
                         try:
@@ -273,19 +372,29 @@ def stripe_webhook(request):
                                 refund_amount
                             )
                             if email_sent:
-                                print(f"📧 Cancellation email sent to {order.buyer.email}")
+                                _log_event(logging.INFO, "Cancellation email sent", order_id=order.id)
                             else:
-                                print(f"⚠️ Failed to send cancellation email: {email_message}")
+                                _log_event(
+                                    logging.WARNING,
+                                    "Failed to send cancellation email",
+                                    order_id=order.id,
+                                    error_message=email_message,
+                                )
                         except Exception as email_error:
-                            print(f" Error sending cancellation email: {str(email_error)}")
+                            _log_event(
+                                logging.WARNING,
+                                "Cancellation email exception",
+                                order_id=order.id,
+                                exception=str(email_error),
+                            )
                             # Don't fail the refund processing if email fails
                         
                 except Order.DoesNotExist:
-                    print(f" Order {order_id} not found")
+                    _log_event(logging.ERROR, "Order not found for refund", order_id=order_id)
                 except Exception as e:
-                    print(f" Error processing refund for order {order_id}: {e}")
+                    _log_event(logging.ERROR, "Error processing refund", order_id=order_id, error=str(e))
         else:
-            print(f"ℹ️ Refund status is '{refund_status}' - will be handled by appropriate webhook event")
+            _log_event(logging.INFO, "Refund status will be handled by another webhook", refund_id=refund_id, status=refund_status)
         
         return HttpResponse(status=200, content='refund.updated event successfully processed')
     
