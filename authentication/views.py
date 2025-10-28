@@ -25,6 +25,30 @@ class PublicProfileDetailView(generics.RetrieveAPIView):
     permission_classes = [AllowAny]
     lookup_field = 'pk'
 
+    def get_object(self):
+        """
+        Return user only if the target account is a seller or an admin.
+        Publicly accessible, but hides non-seller/non-admin users.
+        """
+        user = super().get_object()
+
+        # Allow if target user is a seller/admin by role or has verified seller profile
+        is_target_seller = False
+        try:
+            is_target_seller = (
+                getattr(user, 'role', None) in ['seller', 'admin']
+                or (hasattr(user, 'profile') and getattr(user.profile, 'is_verified_seller', False))
+            )
+        except Exception:
+            is_target_seller = False
+
+        if not is_target_seller:
+            # Hide existence if not a seller/admin
+            from rest_framework.exceptions import NotFound
+            raise NotFound(detail='User not found')
+
+        return user
+
 
 class ProfileUpdateView(generics.RetrieveUpdateAPIView):
     queryset = CustomUser.objects.all()
@@ -51,8 +75,17 @@ class ProfileUpdateView(generics.RetrieveUpdateAPIView):
         instance = self.get_object()
         logger.info(f"Instance to update: User {instance.id} ({instance.username})")
         
-        # Check if user is trying to update restricted fields without being a verified seller
-        if not instance.profile.is_verified_seller:
+        # Check if user is trying to update restricted fields without proper privileges
+        # Allow verified sellers OR admins to update these fields
+        has_admin_privileges = False
+        try:
+            # CustomUser provides is_admin(); also support Django staff/superuser flags as fallback
+            has_admin_privileges = bool(getattr(instance, 'is_admin', None) and instance.is_admin()) or instance.is_staff or instance.is_superuser
+        except Exception:
+            # In case of any attribute issues, default to False
+            has_admin_privileges = False
+
+        if not (instance.profile.is_verified_seller or has_admin_privileges):
             restricted_fields = [
                 'phone_number', 'country_code', 'website', 'location',
                 'job_title', 'company', 'account_type',
@@ -1088,5 +1121,3 @@ def delete_profile_picture(request):
         return Response({
             'error': 'Service may be unavailable. Please try again later.'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-

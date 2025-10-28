@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 from django.shortcuts import get_object_or_404
 from django.db import transaction
+from django.utils import timezone
 
 from .seller_models import SellerApplication, SellerApplicationImage
 from .seller_serializers import (
@@ -76,6 +77,7 @@ class SellerApplicationListView(generics.ListAPIView):
 
         if status_filter:
             queryset = queryset.filter(status=status_filter)
+            print(f"Filtered queryset by status: {status_filter}")
 
         return queryset.order_by('-submitted_at')
 
@@ -98,17 +100,29 @@ class SellerApplicationAdminUpdateView(generics.UpdateAPIView):
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated])
 def seller_application_status(request):
-    """Get current user's seller application status"""
-    try:
-        application = SellerApplication.objects.get(user=request.user)
-        serializer = SellerApplicationSerializer(application)
-        return Response(serializer.data)
-    except SellerApplication.DoesNotExist:
+    """Get current user's most recent seller application status"""
+    application = (
+        SellerApplication.objects.filter(user=request.user)
+        .order_by('-submitted_at')
+        .first()
+    )
+
+    if application:
         return Response({
-            'has_application': False,
+            'has_application': True,
             'is_seller': request.user.role == 'seller',
-            'status': None
+            'status': application.status,
+            'application_id': application.id,
+            'submitted_at': application.submitted_at,
+            'admin_notes': application.admin_notes,
+            'rejection_reason': application.rejection_reason,
         })
+
+    return Response({
+        'has_application': False,
+        'is_seller': request.user.role == 'seller',
+        'status': None
+    })
 
 
 @api_view(['POST'])
@@ -138,15 +152,22 @@ def apply_to_become_seller(request):
         return Response({'error': f'Import error: {str(import_error)}'}, status=500)
 
     try:
-        # Check if user already has an application
-        logger.info("Step 1: Checking for existing application...")
-        if hasattr(request.user, 'seller_application'):
-            logger.warning("User already has seller application")
+        # Check existing applications and in-progress constraints
+        logger.info("Step 1: Checking for existing application(s)...")
+        existing = (
+            SellerApplication.objects.filter(user=request.user)
+            .order_by('-submitted_at')
+            .first()
+        )
+
+        if existing and existing.status in ['pending', 'under_review', 'revision_requested']:
+            logger.warning("User already has an in-progress application")
             return Response(
-                {'error': 'You already have a seller application submitted.'},
+                {'error': 'You already have a seller application in progress.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        logger.info("✓ No existing application found")
+
+        logger.info("✓ No in-progress application found; proceeding")
 
         # Check if user is already a seller
         logger.info("Step 2: Checking if user is already a seller...")
@@ -185,40 +206,79 @@ def apply_to_become_seller(request):
             logger.info(f"Application data: {application_data}")
             logger.info("Step 5: Creating serializer...")
 
-            serializer = SellerApplicationSerializer(data=application_data)
-            logger.info("Step 6: Validating serializer...")
+            # If there is a previous rejected application, update and resubmit it
+            if existing and existing.status == 'rejected':
+                logger.info("Step 6: Resubmitting previously rejected application...")
+                # Update fields
+                existing.business_name = application_data.get('business_name')
+                existing.seller_type = application_data.get('seller_type')
+                existing.motivation = application_data.get('motivation')
+                existing.portfolio_url = application_data.get('portfolio_url')
+                existing.social_media_url = application_data.get('social_media_url', '')
+                existing.status = 'pending'
+                existing.admin_notes = ''
+                existing.rejection_reason = ''
+                existing.reviewed_at = None
+                existing.approved_by = None
+                existing.rejected_by = None
+                existing.submitted_at = timezone.now()
+                existing.save()
 
-            if serializer.is_valid():
-                logger.info("✓ Serializer is valid")
-                logger.info("Step 7: Saving application...")
-                application = serializer.save()
-                logger.info(f"✓ Application saved with ID: {application.id}")
-
-                # Handle workshop images
-                logger.info("Step 8: Processing workshop images...")
+                # Replace images
+                existing.images.all().delete()
                 workshop_files = request.FILES.getlist('workshopPhotos')
-                logger.info(f"Found {len(workshop_files)} workshop files")
-
+                logger.info(f"Found {len(workshop_files)} workshop files for resubmission")
                 for index, image_file in enumerate(workshop_files):
-                    logger.info(f"Processing image {index + 1}: {image_file.name}")
                     SellerApplicationImage.objects.create(
-                        application=application,
+                        application=existing,
                         image=image_file,
                         image_type='workshop',
                         description=f'Workshop photo {index + 1}',
                         order=index
                     )
-                    logger.info(f"✓ Image {index + 1} saved")
 
-                logger.info("=== SELLER APPLICATION SUCCESS ===")
+                logger.info("=== SELLER APPLICATION RESUBMIT SUCCESS ===")
                 return Response({
                     'success': True,
-                    'message': 'Seller application submitted successfully!',
-                    'application_id': application.id
-                }, status=status.HTTP_201_CREATED)
-            else:
+                    'message': 'Seller application resubmitted successfully!',
+                    'application_id': existing.id
+                }, status=status.HTTP_200_OK)
+
+            # No previous application: create a new one
+            serializer = SellerApplicationSerializer(data=application_data)
+            logger.info("Step 6: Validating serializer...")
+
+            if not serializer.is_valid():
                 logger.error(f"Serializer validation failed: {serializer.errors}")
                 return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+            logger.info("✓ Serializer is valid")
+            logger.info("Step 7: Saving application...")
+            application = serializer.save()
+            logger.info(f"✓ Application saved with ID: {application.id}")
+
+            # Handle workshop images
+            logger.info("Step 8: Processing workshop images...")
+            workshop_files = request.FILES.getlist('workshopPhotos')
+            logger.info(f"Found {len(workshop_files)} workshop files")
+
+            for index, image_file in enumerate(workshop_files):
+                logger.info(f"Processing image {index + 1}: {image_file.name}")
+                SellerApplicationImage.objects.create(
+                    application=application,
+                    image=image_file,
+                    image_type='workshop',
+                    description=f'Workshop photo {index + 1}',
+                    order=index
+                )
+                logger.info(f"✓ Image {index + 1} saved")
+
+            logger.info("=== SELLER APPLICATION SUCCESS ===")
+            return Response({
+                'success': True,
+                'message': 'Seller application submitted successfully!',
+                'application_id': application.id
+            }, status=status.HTTP_201_CREATED)
 
     except Exception as e:
         logger.error(f"=== SELLER APPLICATION ERROR ===")

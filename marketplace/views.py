@@ -511,6 +511,68 @@ class ProductViewSet(viewsets.ModelViewSet):
         
         return response
 
+    @action(detail=False, methods=['get'], url_path='search', permission_classes=[IsAuthenticatedOrReadOnly])
+    def search(self, request, *args, **kwargs):
+        """
+        Paginated search/list endpoint using startIndex/pageSize semantics.
+
+        Query params:
+        - startIndex: zero-based index to start from (default: 0)
+        - pageSize: number of items to return (default: 20, max: 100)
+        - Supports same filters/search/order as the standard list endpoint
+        """
+        try:
+            # Parse pagination params
+            try:
+                start_index = int(request.query_params.get('startIndex', 0))
+            except (TypeError, ValueError):
+                start_index = 0
+            try:
+                page_size = int(request.query_params.get('pageSize', 20))
+            except (TypeError, ValueError):
+                page_size = 20
+
+            if start_index < 0:
+                start_index = 0
+            if page_size <= 0:
+                page_size = 20
+            page_size = min(page_size, 100)
+
+            # Apply same filtering/search/order as list()
+            queryset = self.filter_queryset(self.get_queryset())
+
+            total = queryset.count()
+            items = list(queryset[start_index:start_index + page_size])
+
+            serializer = self.get_serializer(items, many=True)
+            results = serializer.data
+
+            has_next = (start_index + page_size) < total
+            next_start = (start_index + page_size) if has_next else None
+            has_prev = start_index > 0
+            prev_start = max(0, start_index - page_size) if has_prev else None
+
+            response_payload = {
+                'count': total,
+                'startIndex': start_index,
+                'pageSize': page_size,
+                'nextStartIndex': next_start,
+                'previousStartIndex': prev_start,
+                'hasNext': has_next,
+                'hasPrevious': has_prev,
+                'results': results,
+            }
+
+            # Non-blocking tracking
+            from .async_tracking import AsyncTracker
+            start_background_tracking(lambda: AsyncTracker.queue_listing_view(items, request))
+
+            return Response(response_payload)
+
+        except Exception as e:
+            logger.error(f"Error in products search endpoint: {e}")
+            return Response({'detail': 'Failed to fetch products'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
         

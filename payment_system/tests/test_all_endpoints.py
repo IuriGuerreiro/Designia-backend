@@ -369,71 +369,29 @@ class PayoutEndpointTests(BaseAuthTestCase):
             self.seller, self.buyer, self.order, status='released'
         )
 
-    @patch('stripe.Balance.retrieve')
-    @patch('stripe.Payout.create')
-    def test_create_payout_success(self, mock_payout, mock_balance):
-        """Test successful payout creation"""
-        # Mock balance check
-        mock_balance.return_value = {
-            'available': [{'amount': 10000, 'currency': 'usd'}],
-            'pending': [{'amount': 0, 'currency': 'usd'}]
-        }
-        # Mock payout creation
-        mock_payout.return_value = Mock(
-            id='po_test123',
-            status='pending',
-            created=1234567890,
-            destination='acct_test_seller1',
-            amount=9000,
-            currency='usd'
-        )
-
+    def test_create_payout_disabled_for_seller(self):
+        """Seller receives disabled response when attempting manual payout creation"""
         self.authenticate_seller()
         url = reverse('payment_system:seller_payout')
-        data = {
-            'amount': 9000,  # $90.00 in cents
-            'currency': 'usd'
-        }
+        response = self.client.post(url, {'amount': 9000, 'currency': 'usd'}, format='json')
+        self.assertEqual(response.status_code, status.HTTP_410_GONE)
+        self.assertEqual(response.data.get('error'), 'PAYOUT_CREATION_DISABLED')
 
-        response = self.client.post(url, data, format='json')
-        if response.status_code != status.HTTP_201_CREATED:
-            print(f"Payout creation failed: {response.data}")
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-
-    @patch('stripe.Balance.retrieve')
-    @patch('stripe.Payout.create')
-    def test_create_payout_admin_access(self, mock_payout, mock_balance):
-        """Test admin can create payouts"""
-        # Mock balance check (admin bypasses this, but mock it anyway)
-        mock_balance.return_value = {
-            'available': [{'amount': 10000, 'currency': 'usd'}],
-            'pending': [{'amount': 0, 'currency': 'usd'}]
-        }
-        # Mock payout creation
-        mock_payout.return_value = Mock(
-            id='po_test_admin',
-            status='pending',
-            created=1234567890,
-            destination='acct_test_seller1',
-            amount=5000,
-            currency='usd'
-        )
-
+    def test_create_payout_disabled_for_admin(self):
+        """Admin users also receive disabled response"""
         self.authenticate_admin()
         url = reverse('payment_system:seller_payout')
-        data = {'amount': 5000, 'currency': 'usd'}
+        response = self.client.post(url, {'amount': 5000, 'currency': 'usd'}, format='json')
+        self.assertEqual(response.status_code, status.HTTP_410_GONE)
+        self.assertEqual(response.data.get('error'), 'PAYOUT_CREATION_DISABLED')
 
-        response = self.client.post(url, data, format='json')
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-
-    def test_create_payout_non_seller(self):
-        """Test non-seller cannot create payouts"""
+    def test_create_payout_disabled_for_non_seller(self):
+        """Non-sellers receive the same disabled response"""
         self.authenticate_regular()
         url = reverse('payment_system:seller_payout')
-        data = {'amount': 5000, 'currency': 'usd'}
-
-        response = self.client.post(url, data, format='json')
-        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        response = self.client.post(url, {'amount': 5000, 'currency': 'usd'}, format='json')
+        self.assertEqual(response.status_code, status.HTTP_410_GONE)
+        self.assertEqual(response.data.get('error'), 'PAYOUT_CREATION_DISABLED')
 
     def test_user_payouts_list_success(self):
         """Test seller can list their payouts"""

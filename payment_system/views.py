@@ -52,6 +52,18 @@ User = get_user_model()
 @require_POST
 @financial_transaction
 def stripe_webhook(request):
+    """Process Stripe webhooks for payments, refunds, transfers, and payouts.
+
+    Summary:
+    - Verifies webhook signatures and logs security events.
+    - Handles payment events (checkout completion, payment_intent succeeded/failed) to
+      update Orders, PaymentTrackers, and PaymentTransactions; sends confirmation emails.
+    - Handles refund events to transition orders, update transactions/trackers, and
+      restore product stock when appropriate.
+    - Handles transfer and payout events (including Connect) to track fund movement
+      and update related records.
+    - Uses transaction helpers (isolation, retries) for consistent, safe updates.
+    """
     payload = request.body
     endpoint_secret = settings.STRIPE_WEBHOOK_SECRET
     sig_header = request.headers.get('stripe-signature')
@@ -570,7 +582,7 @@ def stripe_webhook(request):
                 # Define deadlock-safe operation for transfer success processing
                 @retry_on_deadlock(max_retries=3, delay=0.01, backoff=2.0)  # 10ms deadlock retry
                 def process_transfer_success():
-                    """Process transfer.created success with deadlock protection"""
+                    """Fetch the PaymentTransaction safely for a transfer.created event (with retries)."""
                     return PaymentTransaction.objects.get(id=transaction_id)
                 
                 try:
@@ -768,13 +780,11 @@ def stripe_webhook(request):
 
 
 def update_payment_trackers_for_payout(payout, event_type):
-    """
-    Update PaymentTracker records based on payout webhook events.
-    Creates PaymentTracker records for transactions in this payout if they don't exist.
-    
-    Args:
-        payout (Payout): The payout instance that was updated
-        event_type (str): The webhook event type (payout.paid, payout.failed, etc.)
+    """Update PaymentTracker records for a payout webhook.
+
+    This function normalizes tracker status for transactions included in the payout,
+    creating or updating PaymentTracker rows for each related PaymentTransaction using
+    READ COMMITTED isolation to keep updates consistent under concurrency.
     """
     try:
         from .models import PaymentTracker, PayoutItem, PaymentTransaction
@@ -885,16 +895,11 @@ def update_payment_trackers_for_payout(payout, event_type):
 
 
 def create_payout_from_webhook(stripe_payout_id, payout_object, event_type):
-    """
-    Create a new payout record from Stripe webhook data when payout doesn't exist in database.
-    
-    Args:
-        stripe_payout_id (str): Stripe payout ID
-        payout_object: Stripe payout object from webhook
-        event_type (str): The webhook event type
-    
-    Returns:
-        Payout: Created payout instance or None if creation fails
+    """Create a Payout from Stripe webhook data when missing.
+
+    This function extracts seller and payout details from the Stripe payload, resolves the
+    seller, persists a Payout record with metadata for auditability, and triggers tracker
+    updates for included transactions.
     """
     try:
         # Extract payout data from Stripe object
@@ -998,9 +1003,11 @@ def create_payout_from_webhook(stripe_payout_id, payout_object, event_type):
 
 
 def update_payout_from_webhook(event, payout_object):
-    """
-    Update payout status from Stripe webhook events with SERIALIZABLE isolation level.
-    Enhanced with transaction utilities for maximum data consistency and deadlock protection.
+    """Update a Payout from Stripe webhook events.
+
+    This function locks and updates the Payout, sets status (paid/failed/etc.), updates
+    arrival dates, resets related transaction flags on failure, and uses transaction
+    helpers with deadlock retries to maintain consistency.
     """
     stripe_payout_id = getattr(payout_object, 'id', None)
     payout_status = getattr(payout_object, 'status', None)
@@ -1019,7 +1026,7 @@ def update_payout_from_webhook(event, payout_object):
     # Define a deadlock-safe operation for complete payout update in a single SERIALIZABLE transaction
     @retry_on_deadlock(max_retries=3, delay=0.01, backoff=2.0)  # 10ms initial delay
     def update_payout_safe():
-        """Update payout and related transactions in a single SERIALIZABLE transaction with deadlock retry protection"""
+        """Perform the complete payout update inside one transaction with deadlock retries."""
         with atomic_with_isolation('READ COMMITTED'):
             with rollback_safe_operation("Complete Payout Webhook Update"):
                 try:
@@ -1182,8 +1189,10 @@ def update_payout_from_webhook(event, payout_object):
 
 
 def stripe_webhook_connect(request):
-    """
-    Handle Stripe Connect webhooks for seller account updates
+    """Handle Stripe Connect webhooks for seller accounts and payouts.
+
+    This function verifies the Connect signature, routes payout-related events to the
+    payout updater with transaction safety, and logs errors without failing the webhook.
     """
     payload = request.body
     endpoint_secret = settings.STRIPE_WEBHOOK_CONNECT_SECRET
@@ -1239,10 +1248,10 @@ def stripe_webhook_connect(request):
             # Use transaction-wrapped function to handle payout updates
             # CRITICAL: Each webhook event processed with proper model ordering
             def process_webhook_event():
-                """Process single webhook event with READ COMMITTED isolation and proper model ordering."""
+                """Process one payout webhook using READ COMMITTED and proper model ordering."""
                 @retry_on_deadlock(max_retries=3, delay=0.01, backoff=2.0)  # 10ms initial delay
                 def isolated_webhook_update():
-                    """Use READ COMMITTED isolation with 10ms deadlock retry for optimal webhook processing."""
+                    """Run the payout update in a transaction with rollback safety and deadlock retry."""
                     with atomic_with_isolation('READ COMMITTED'):
                         with rollback_safe_operation("Payout Webhook Processing"):
                             return update_payout_from_webhook(event, payout_object)
@@ -1276,10 +1285,11 @@ def stripe_webhook_connect(request):
 
 # Create PaymentTransaction records for each seller in the order
 def create_payment_transactions(order, session):
-    """
-    Create PaymentTransaction records for each seller in the order
-    This tracks payments per seller with integrated 30-day holding periods
-    Uses READ COMMITTED isolation for transaction safety.
+    """Create per-seller PaymentTransaction rows for an order.
+
+    This function groups order items by seller, computes platform/Stripe fees and net
+    amounts, and writes PaymentTransaction records with 30-day hold metadata using
+    READ COMMITTED isolation.
     """
     from collections import defaultdict
     from decimal import Decimal
@@ -1366,9 +1376,11 @@ def create_payment_transactions(order, session):
 # Handle successful payment by updating existing order status this is for Stripe Webhook handling
 @financial_transaction
 def handle_sucessfull_checkout(session):
-    """
-    Handle sucessfull checkout by updating existing order status and creating PaymentTracker.
-    Uses serializer isolation for both address handling and PaymentTracker creation.
+    """Finalize a successful checkout for an existing order.
+
+    This function attaches shipping/billing details to the order, ensures a succeeded
+    PaymentTracker exists for the payment_intent, and creates/updates held
+    PaymentTransactions per seller.
     """
     print("🔔 Handling sucessfull checkout...")
     print(f"Session ID: {session.get('id', 'Unknown')}")
@@ -1582,9 +1594,7 @@ def handle_sucessfull_checkout(session):
         return False
 
 def get_product_image_url(product):
-    """
-    Get the best available image URL for a product, prioritizing presigned URLs
-    """
+    """Return the best product image URL, preferring presigned S3 URLs then stored fields."""
     if not product.images.exists():
         return ''
     
@@ -1627,8 +1637,11 @@ def get_product_image_url(product):
 @permission_classes([IsAuthenticated])
 @financial_transaction
 def create_checkout_session(request):
-    """
-    Create a Stripe Embedded Checkout Session
+    """Create an Embedded Checkout Session for the user's cart and seed the Order.
+
+    This function validates stock and pricing, builds Stripe line items (products +
+    shipping), creates an Order in pending_payment with reserved stock, starts an
+    embedded checkout session carrying order/user metadata, and returns clientSecret.
     """
     try:
         # Get the user's cart
@@ -1792,6 +1805,12 @@ def create_checkout_session(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def create_checkout_failed_checkout(request, order_id): 
+    """Create a retry Embedded Checkout Session for a pending order.
+
+    This function verifies ownership and 'pending_payment' status, rebuilds Stripe line
+    items from the order (with stock checks), creates an embedded checkout session with
+    order/user metadata, and returns the clientSecret for the frontend to resume.
+    """
     if request.method != 'GET':
         return Response({
             'error': 'METHOD_NOT_ALLOWED',
@@ -1916,8 +1935,13 @@ def create_checkout_failed_checkout(request, order_id):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def cancel_order(request, order_id):
-    """
-    Cancel an order and process Stripe refund if payment was made
+    """Cancel an order with refund handling and stock restoration.
+
+    This function cancels orders that are 'pending_payment' by restoring reserved stock,
+    marking cancellation metadata, and setting payment_status to 'failed'. If the order
+    was paid, it initiates a Stripe refund, moves the order to 'waiting_refund', and
+    persists metadata; final status transitions occur via the refund webhook. Terminal
+    states (shipped, delivered, cancelled, refunded) are rejected.
     """
     try:
         with atomic_with_isolation('READ COMMITTED'):
@@ -1947,6 +1971,47 @@ def cancel_order(request, order_id):
                     'error': 'CANNOT_CANCEL',
                     'detail': f'Order cannot be cancelled. Current status: {order.status}. Orders can only be cancelled before shipping.'
                 }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Fast-path: pending payment orders are cancelled immediately and stock is restored
+            if order.status == 'pending_payment':
+                # Persist cancellation metadata
+                order.cancellation_reason = request.data.get('cancellation_reason', '')
+                order.cancelled_by = request.user
+                order.cancelled_at = timezone.now()
+
+                # Restore previously reserved stock
+                try:
+                    for item in order.items.all():
+                        product = item.product
+                        if product:
+                            product.stock_quantity += item.quantity
+                            product.save(update_fields=['stock_quantity'])
+                except Exception as stock_err:
+                    logger.error(f"Error restoring stock for order {order.id}: {stock_err}")
+
+                # Cancel order and set payment status
+                order.status = 'cancelled'
+                order.payment_status = 'failed'
+                order.save(update_fields=['status', 'payment_status', 'cancellation_reason', 'cancelled_by', 'cancelled_at'])
+
+                return Response({
+                    'success': True,
+                    'message': 'Order cancelled successfully.',
+                    'refund_requested': False,
+                    'refund_amount': None,
+                    'stripe_refund_id': None,
+                    'order': {
+                        'id': str(order.id),
+                        'status': order.status,
+                        'payment_status': order.payment_status,
+                        'cancelled_at': order.cancelled_at.isoformat() if order.cancelled_at else None,
+                        'cancellation_reason': order.cancellation_reason,
+                        'cancelled_by': {
+                            'id': order.cancelled_by.id,
+                            'username': order.cancelled_by.username
+                        } if order.cancelled_by else None
+                    }
+                }, status=status.HTTP_200_OK)
 
             # Get cancellation reason from request
             cancellation_reason = request.data.get('cancellation_reason', '')
@@ -2088,15 +2153,11 @@ from .stripe_service import StripeConnectService
 @permission_classes([IsAuthenticated])
 @financial_transaction
 def stripe_account(request):
-    """
-    Unified Stripe account endpoint:
-    - GET: Retrieve existing account info or eligibility status
-    - POST: Create new account if user doesn't have one, or return existing account info
-    
-    Required security validations:
-    - User must be authenticated (handled by @permission_classes([IsAuthenticated]))
-    - For regular users: Must have password and 2FA enabled
-    - For OAuth users: No additional requirements (authenticated via OAuth provider)
+    """Unified endpoint for Stripe Connect account management.
+
+    This function returns existing account status on GET, or creates a new account on
+    POST after basic eligibility checks, surfacing requirements and next steps for the
+    seller’s onboarding.
     """
     try:
         user = request.user
@@ -2218,9 +2279,10 @@ def stripe_account(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def create_stripe_account_session(request):
-    """
-    Create a Stripe Account Session for seller onboarding.
-    User must already have a Stripe account created.
+    """Create a Stripe Account Session for seller onboarding or updates.
+
+    This function returns an Account Session client_secret for onboarding or updating a
+    seller’s connected account. Requires the user to have an existing Stripe account.
     """
     try:
         user = request.user
@@ -2250,9 +2312,7 @@ def create_stripe_account_session(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_stripe_account_status(request):
-    """
-    Get the Stripe account status for the authenticated user.
-    """
+    """Return the Stripe Connect account status for the authenticated user."""
     try:
         user = request.user
         
@@ -2295,14 +2355,11 @@ def get_stripe_account_status(request):
 @permission_classes([IsAuthenticated])
 @financial_transaction
 def transfer_payment_to_seller(request):
-    """
-    Transfer payment to seller's connected Stripe account.
-    
-    Expected request body:
-    {
-        "transaction_id": "uuid-of-payment-transaction",
-        "transfer_group": "ORDER123" (optional - will use order ID if not provided)
-    }
+    """Transfer held funds to a seller’s connected Stripe account.
+
+    This function validates permissions and readiness (held status, delivered order,
+    optional release date), computes the transfer amount in cents, and creates a Stripe
+    transfer, returning details along with exchange-rate context.
     """
     try:
         from .stripe_service import create_transfer_to_connected_account
@@ -2660,14 +2717,11 @@ def transfer_payment_to_seller(request):
 # Payment Intent Event Handlers
 @financial_transaction
 def handle_payment_intent_succeeded(payment_intent):
-    """
-    Handle payment_intent.succeeded webhook events.
-    Uses READ COMMITTED isolation level and follows proper model ordering:
-    1. Stripe API call (outside transaction)
-    2. Order model updates
-    3. PaymentTracker model updates  
-    4. PaymentTransaction model updates
-    Only processes payment intents that have order_id in metadata.
+    """Process payment_intent.succeeded to confirm payment and hold funds.
+
+    This function updates the Order to payment_confirmed/paid, ensures a succeeded
+    PaymentTracker exists, and creates or updates PaymentTransactions in 'held' status
+    per seller, then sends a payment confirmation email to the buyer.
     """
     payment_intent_id = getattr(payment_intent, 'id', None)
     
@@ -2902,11 +2956,11 @@ def handle_payment_intent_succeeded(payment_intent):
 
 @financial_transaction
 def handle_payment_intent_failed(payment_intent):
-    """
-    Handle payment_intent.payment_failed webhook events.
-    Only processes payment intents that have order_id in metadata.
-    Updates PaymentTracker and PaymentTransaction records with failure status and error details.
-    Resets order status to 'pending_payment' to allow payment retry.
+    """Process payment_intent.payment_failed and prepare for retry.
+
+    This function records failure on PaymentTrackers/PaymentTransactions, stores error
+    metadata, and resets the Order to 'pending_payment' with payment_status 'failed' so
+    the buyer can retry checkout.
     """
     payment_intent_id = getattr(payment_intent, 'id', None)
     

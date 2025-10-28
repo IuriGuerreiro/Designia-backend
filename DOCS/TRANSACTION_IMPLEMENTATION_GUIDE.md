@@ -57,9 +57,8 @@ def handle_successful_payment(session):
 def cancel_order(request, order_id):
     # Order cancellation with refund processing
 
-@financial_transaction
-def seller_payout(request):
-    # Payout processing with transaction safety
+# Manual seller payout creation endpoint has been retired and now returns a 410 Gone response.
+# The transfer operations endpoint continues to run under the transaction safety wrapper.
 
 @financial_transaction
 def transfer_payment_to_seller(request):

@@ -310,7 +310,26 @@ class PublicProfileSerializer(serializers.ModelSerializer):
 
 class PublicUserSerializer(serializers.ModelSerializer):
     profile = PublicProfileSerializer(read_only=True)
+    # Expose select profile fields at top-level for convenience in UI
+    bio = serializers.CharField(source='profile.bio', read_only=True)
+    location = serializers.CharField(source='profile.location', read_only=True)
+    website = serializers.CharField(source='profile.website', read_only=True)
+    job_title = serializers.CharField(source='profile.job_title', read_only=True)
+    company = serializers.CharField(source='profile.company', read_only=True)
+    instagram_url = serializers.CharField(source='profile.instagram_url', read_only=True)
+    twitter_url = serializers.CharField(source='profile.twitter_url', read_only=True)
+    linkedin_url = serializers.CharField(source='profile.linkedin_url', read_only=True)
+    facebook_url = serializers.CharField(source='profile.facebook_url', read_only=True)
+    is_verified_seller = serializers.BooleanField(source='profile.is_verified_seller', read_only=True)
+    seller_type = serializers.CharField(source='profile.seller_type', read_only=True)
 
     class Meta:
         model = CustomUser
-        fields = ('id', 'username', 'avatar', 'profile', 'date_joined')
+        fields = (
+            'id', 'username', 'first_name', 'last_name', 'avatar', 'date_joined',
+            'profile',
+            # Flattened profile fields commonly used in the seller page
+            'bio', 'location', 'website', 'job_title', 'company',
+            'instagram_url', 'twitter_url', 'linkedin_url', 'facebook_url',
+            'is_verified_seller', 'seller_type',
+        )
