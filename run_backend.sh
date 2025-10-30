@@ -160,8 +160,12 @@ start_daphne() {
     echo -e "${YELLOW}Press Ctrl+C to stop the server${NC}"
     echo ""
     
-    # Run Daphne
-    python run_daphne.py --host "$HOST" --port "$PORT"
+    # Run Daphne directly (fallback to module if PATH lacks daphne)
+    if command -v daphne >/dev/null 2>&1; then
+        daphne -b "$HOST" -p "$PORT" designiaBackend.asgi:application
+    else
+        python -m daphne -b "$HOST" -p "$PORT" designiaBackend.asgi:application
+    fi
 }
 
 # Main execution

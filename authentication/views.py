@@ -17,6 +17,7 @@ from .serializers import (
 )
 from .utils import send_verification_email, verify_email_token, send_2fa_code, verify_2fa_code, get_email_rate_limit_status
 from .google_auth import GoogleAuth
+from rest_framework.views import APIView
 
 
 class PublicProfileDetailView(generics.RetrieveAPIView):
@@ -63,11 +64,11 @@ class ProfileUpdateView(generics.RetrieveUpdateAPIView):
         logger = logging.getLogger(__name__)
         
         # Debug logging for the view
-        logger.info(f"=== PROFILE UPDATE VIEW DEBUG START ===")
-        logger.info(f"Request method: {request.method}")
-        logger.info(f"Request user: {request.user.id} ({request.user.username})")
-        logger.info(f"Raw request data: {request.data}")
-        logger.info(f"Request headers: {dict(request.headers)}")
+        logger.info(
+            "Profile update requested for user_id=%s",
+            request.user.id,
+            extra={"user_id": request.user.id, "updated_fields": list(request.data.keys())}
+        )
         
         partial = kwargs.pop('partial', True)  # Always allow partial updates
         logger.info(f"Partial update enabled: {partial}")
@@ -322,20 +323,6 @@ def login_verify_2fa(request):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-@api_view(['POST'])
-@permission_classes([AllowAny])
-def token_refresh(request):
-    refresh_token = request.data.get('refresh')
-    if refresh_token:
-        try:
-            refresh = RefreshToken(refresh_token)
-            return Response({
-                'access': str(refresh.access_token),
-            })
-        except Exception:
-            return Response({'error': 'Invalid refresh token'}, status=status.HTTP_401_UNAUTHORIZED)
-    return Response({'error': 'Refresh token required'}, status=status.HTTP_400_BAD_REQUEST)
-
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -439,7 +426,6 @@ def google_login(request):
     Unified Google login/register endpoint
     Automatically creates a new user if they don't exist, otherwise logs in existing user
     """
-    print(f"Google login request received: {request.data}")
     serializer = GoogleAuthSerializer(data=request.data)
     
     if serializer.is_valid():
@@ -573,30 +559,18 @@ def google_oauth(request):
     Legacy Google OAuth endpoint - redirects to new endpoints
     """
     try:
-        print("\n🔍 GOOGLE OAUTH LEGACY DEBUG:")
-        print(f"Request method: {request.method}")
-        print(f"Request data keys: {list(request.data.keys()) if request.data else 'No data'}")
-        
         # Accept Google user data directly (YummiAI approach)
         google_data = request.data
         email = google_data.get('email')
         
-        print(f"Email received: {email}")
-        print(f"Platform: {google_data.get('platform', 'unknown')}")
-        
         if not email:
-            print(" No email provided")
             return Response({'error': 'Google email is required'}, status=status.HTTP_400_BAD_REQUEST)
-        
-        print("🔍 Getting or creating user...")
         
         # Check if user already exists
         try:
             user = CustomUser.objects.get(email=email)
-            print(f"  Existing user found: {email}")
             is_new_user = False
         except CustomUser.DoesNotExist:
-            print(f"🔍 Creating new user: {email}")
             # Create new user from Google data
             try:
                 # Create username from email if not provided
@@ -613,18 +587,13 @@ def google_oauth(request):
                     is_email_verified=True,  # Google accounts are pre-verified
                     is_active=True,
                 )
-                print(f"  New user created: {email}")
                 is_new_user = True
             except Exception as e:
-                print(f" User creation failed: {str(e)}")
                 return Response({'error': f'Failed to create user: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
         
-        print("🔍 Generating JWT tokens...")
         # Generate JWT tokens
         refresh = CustomRefreshToken.for_user(user)
-        print("  JWT tokens generated successfully")
         
-        print("  Google OAuth successful - returning response")
         return Response({
             'user': UserSerializer(user).data,
             'access': str(refresh.access_token),
@@ -1121,3 +1090,201 @@ def delete_profile_picture(request):
         return Response({
             'error': 'Service may be unavailable. Please try again later.'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+from rest_framework.views import APIView
+
+class LoginView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        try:
+            email = request.data.get('email')
+            password = request.data.get('password')
+            
+            if email and password:
+                try:
+                    user_exists = CustomUser.objects.get(email=email)
+                except CustomUser.DoesNotExist:
+                    return Response({'error': 'No account found with this email address.'}, status=status.HTTP_401_UNAUTHORIZED)
+                
+                if user_exists.check_password(password):
+                    if not user_exists.is_email_verified:
+                        return Response({
+                            'error': 'Please verify your email address before logging in.',
+                            'email_verified': False,
+                            'warning_type': 'email_verification_required',
+                            'user_email': user_exists.email,
+                            'message': 'Account access is restricted until email verification is complete.',
+                            'action_required': 'verify_email'
+                        }, status=status.HTTP_403_FORBIDDEN)
+                    
+                    user = authenticate(username=email, password=password)
+                else:
+                    user = None
+                
+                if user:
+                    if user.two_factor_enabled:
+                        from .utils import check_unused_codes_exist
+                        has_unused_code = check_unused_codes_exist(user, 'two_factor_code', 'login')
+                        
+                        if has_unused_code:
+                            return Response({
+                                'requires_2fa': True,
+                                'message': 'Two-factor authentication required. Please enter the verification code sent to your email.',
+                                'email': user.email,
+                                'user_id': user.id,
+                                'code_already_sent': True
+                            }, status=status.HTTP_200_OK)
+                        else:
+                            success, result = send_2fa_code(user, 'login', request)
+                            if success:
+                                return Response({
+                                    'requires_2fa': True,
+                                    'message': 'Two-factor authentication required. A verification code has been sent to your email.',
+                                    'email': user.email,
+                                    'user_id': user.id,
+                                    'code_already_sent': False
+                                }, status=status.HTTP_200_OK)
+                            else:
+                                return Response({'error': result}, status=status.HTTP_429_TOO_MANY_REQUESTS)
+                    else:
+                        refresh = CustomRefreshToken.for_user(user)
+                        return Response({
+                            'user': UserSerializer(user).data,
+                            'refresh': str(refresh),
+                            'access': str(refresh.access_token),
+                        })
+                else:
+                    return Response({'error': 'Incorrect password. Please try again.'}, status=status.HTTP_401_UNAUTHORIZED)
+            return Response({'error': 'Email and password required'}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({
+                'error': 'Service may be unavailable. Please try again later.'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class LoginAPIView(APIView):
+    """
+    Refactored, class-based login view.
+    - Removes @csrf_exempt by using DRF's standard view handling.
+    - Ready for throttling to be applied.
+    """
+    permission_classes = [AllowAny]
+    # throttle_classes = [UserRateThrottle, AnonRateThrottle] # Throttling will be added next
+
+    def post(self, request, *args, **kwargs):
+        try:
+            email = request.data.get('email')
+            password = request.data.get('password')
+            
+            if not email or not password:
+                return Response({'error': 'Email and password are required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            try:
+                user_exists = CustomUser.objects.get(email=email)
+            except CustomUser.DoesNotExist:
+                return Response({'error': 'No account found with this email address.'}, status=status.HTTP_401_UNAUTHORIZED)
+            
+            # Authenticate user
+            user = authenticate(username=email, password=password)
+
+            if user:
+                if not user.is_email_verified:
+                    return Response({
+                        'error': 'Please verify your email address before logging in.',
+                        'email_verified': False,
+                        'warning_type': 'email_verification_required',
+                        'user_email': user.email,
+                        'message': 'Account access is restricted until email verification is complete.',
+                        'action_required': 'verify_email'
+                    }, status=status.HTTP_403_FORBIDDEN)
+
+                if user.two_factor_enabled:
+                    from .utils import check_unused_codes_exist
+                    has_unused_code = check_unused_codes_exist(user, 'two_factor_code', 'login')
+                    
+                    if has_unused_code:
+                        return Response({
+                            'requires_2fa': True,
+                            'message': 'Two-factor authentication required. Please enter the verification code sent to your email.',
+                            'email': user.email,
+                            'user_id': user.id,
+                            'code_already_sent': True
+                        }, status=status.HTTP_200_OK)
+                    
+                    success, result = send_2fa_code(user, 'login', request)
+                    if success:
+                        return Response({
+                            'requires_2fa': True,
+                            'message': 'A verification code has been sent to your email.',
+                            'email': user.email,
+                            'user_id': user.id,
+                            'code_already_sent': False
+                        }, status=status.HTTP_200_OK)
+                    else:
+                        return Response({'error': result}, status=status.HTTP_429_TOO_MANY_REQUESTS)
+                
+                # No 2FA, log in directly
+                refresh = CustomRefreshToken.for_user(user)
+                return Response({
+                    'user': UserSerializer(user).data,
+                    'refresh': str(refresh),
+                    'access': str(refresh.access_token),
+                })
+            else:
+                return Response({'error': 'Incorrect password. Please try again.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+        except Exception as e:
+            # General error handler
+            return Response({
+                'error': 'An unexpected error occurred. Please try again later.'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class RegisterAPIView(APIView):
+    """
+    Refactored, class-based user registration view.
+    - Removes @csrf_exempt by using DRF's standard view handling.
+    - Ready for throttling to be applied.
+    """
+    permission_classes = [AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        logger = logging.getLogger(__name__)
+        try:
+            serializer = UserRegistrationSerializer(data=request.data)
+            if serializer.is_valid():
+                user = serializer.save()
+                
+                email_sent, message = send_verification_email(user, request)
+                
+                if email_sent:
+                    return Response({
+                        'message': 'Registration successful! Please check your email to verify your account.',
+                        'email': user.email,
+                        'email_sent': True
+                    }, status=status.HTTP_201_CREATED)
+                else:
+                    if "wait" in message.lower() and "seconds" in message.lower():
+                        return Response({
+                            'error': message,
+                            'email': user.email,
+                            'email_sent': False
+                        }, status=status.HTTP_429_TOO_MANY_REQUESTS)
+                    else:
+                        return Response({
+                            'message': 'Registration successful but failed to send verification email. Please contact support.',
+                            'email': user.email,
+                            'email_sent': False
+                        }, status=status.HTTP_201_CREATED)
+            else:
+                logger.error(f"Registration validation failed: {serializer.errors}")
+                errors = {field: field_errors[0] for field, field_errors in serializer.errors.items()}
+                return Response({
+                    'error': 'Registration failed',
+                    'errors': errors
+                }, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            logger.error(f"Registration exception: {e}")
+            return Response({
+                'error': 'A service may be unavailable. Please try again later.'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+

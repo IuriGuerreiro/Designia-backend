@@ -81,7 +81,7 @@ def stripe_webhook(request):
         logger.error("Critical Security Error: STRIPE_WEBHOOK_SECRET not configured. Rejecting webhook.")
         return HttpResponse(
             status=500,
-            content='Webhook endpoint secret must be configured for security. Contact system administrator.'
+            content='Webhook endpoint secret must be configured for security. Contact system administrator.'.encode('utf-8')
         )
 
     if not sig_header:
@@ -93,7 +93,7 @@ def stripe_webhook(request):
         logger.warning(f"Webhook rejected: Missing stripe-signature header from IP {client_ip}")
         return HttpResponse(
             status=400,
-            content='Missing stripe-signature header. Webhook verification required.'
+            content='Missing stripe-signature header. Webhook verification required.'.encode('utf-8')
         )
 
     # SECURITY: Verify webhook signature BEFORE processing any data
@@ -115,7 +115,7 @@ def stripe_webhook(request):
             details=f"Signature verification failed: {str(e)}"
         )
         logger.warning(f"Webhook signature verification failed from IP {client_ip}: {str(e)}")
-        return HttpResponse(status=400, content='Webhook signature verification failed.')
+        return HttpResponse(status=400, content='Webhook signature verification failed.'.encode('utf-8'))
     except ValueError as e:
         PaymentAuditLogger.log_security_event(
             'webhook_invalid_payload',
@@ -123,7 +123,7 @@ def stripe_webhook(request):
             details=f"Invalid JSON payload: {str(e)}"
         )
         logger.error(f"Webhook payload parsing failed from IP {client_ip}: {str(e)}")
-        return HttpResponse(status=400, content='Invalid webhook payload format.')
+        return HttpResponse(status=400, content='Invalid webhook payload format.'.encode('utf-8'))
     except Exception as e:
         PaymentAuditLogger.log_security_event(
             'webhook_processing_error',
@@ -131,57 +131,53 @@ def stripe_webhook(request):
             details=f"Unexpected error: {str(e)}"
         )
         logger.error(f"Unexpected webhook verification error from IP {client_ip}: {str(e)}")
-        return HttpResponse(status=500, content='Webhook processing error.')
+        return HttpResponse(status=500, content='Webhook processing error.'.encode('utf-8'))
     
-    print(f"🔔 Received Stripe event: {event.type}")
+    logger.info(f"🔔 Received Stripe event: {event.type}")
     # Handle checkout.session.completed event (for embedded checkout)
     if event.type == 'checkout.session.completed':
         checkout_session = event.data.object
-        print(f"🔔 Checkout session completed: {getattr(checkout_session, 'id', 'unknown')}")
-
+        logger.info(f"🔔 Checkout session completed: {getattr(checkout_session, 'id', 'unknown')}")
 
         # Try to get metadata from checkout session
         metadata = getattr(checkout_session, 'metadata', {})
-        print(f"🔔 Checkout session metadata: {metadata}")
-
-        print(f"full checkout complete data object: {json.dumps(dict(checkout_session), indent=2, default=str)}")
+        logger.info(f"🔔 Checkout session metadata: {metadata}")
         
         if metadata and metadata.get('user_id'):
-            print(f"🔔 Found user_id in checkout session metadata: {metadata.get('user_id')}")
+            logger.info(f"🔔 Found user_id in checkout session metadata: {metadata.get('user_id')}")
             
             # Pass the entire checkout session to handle_sucessfull_checkout
             handle_sucessfull_checkout(checkout_session)
-            return HttpResponse(status=200, content='checkout.session.completed event successfully processed')
+            return HttpResponse(status=200, content='checkout.session.completed event successfully processed'.encode('utf-8'))
         else:
-            print("⚠️ No user_id found in checkout session metadata")
-            print(f"⚠️ Available metadata keys: {list(metadata.keys()) if metadata else 'None'}")
+            logger.warning("⚠️ No user_id found in checkout session metadata")
+            logger.warning(f"⚠️ Available metadata keys: {list(metadata.keys()) if metadata else 'None'}")
             
             # Try to retrieve the full session from Stripe as fallback
             try:
                 session_id = getattr(checkout_session, 'id')
                 if session_id:
-                    print(f"🔍 Attempting to retrieve full session: {session_id}")
+                    logger.info(f"🔍 Attempting to retrieve full session: {session_id}")
                     full_session = stripe.checkout.Session.retrieve(session_id)
                     full_metadata = getattr(full_session, 'metadata', {})
-                    print(f"🔍 Full session metadata: {full_metadata}")
+                    logger.info(f"🔍 Full session metadata: {full_metadata}")
                     
                     if full_metadata and full_metadata.get('user_id'):
-                        print(f"  Found user_id in retrieved session: {full_metadata.get('user_id')}")
+                        logger.info(f"  Found user_id in retrieved session: {full_metadata.get('user_id')}")
                         handle_sucessfull_checkout(full_session)
-                        return HttpResponse(status=200, content='Webhook processed with retrieved session')
+                        return HttpResponse(status=200, content='Webhook processed with retrieved session'.encode('utf-8'))
             except Exception as e:
-                print(f" Error retrieving full session: {e}")
+                logger.error(f" Error retrieving full session: {e}")
             
             return HttpResponse(
                 status=400, 
-                content='No user_id found in checkout session metadata'
+                content='No user_id found in checkout session metadata'.encode('utf-8')
             )
     
     # Handle refund.updated event (for order cancellations)
     elif event.type == 'refund.updated':
         refund_object = event.data.object
-        print(f"🔔 Refund updated event received")
-        print(f"full object", json.dumps(dict(refund_object), indent=2, default=str))
+        logger.info(f"🔔 Refund updated event received for refund_id: {getattr(refund_object, 'id', 'unknown')}")
         
         # Extract refund details with comprehensive error handling
         try:
@@ -190,29 +186,27 @@ def stripe_webhook(request):
             refund_amount = getattr(refund_object, 'amount', 0) / 100  # Convert from cents
             refund_metadata = getattr(refund_object, 'metadata', {})
             
-            print(f"🔔 Processing refund: {refund_id}, status: {refund_status}, amount: ${refund_amount}")
-            print(f"🔔 Refund metadata: {refund_metadata}")
+            logger.info(f"🔔 Processing refund: {refund_id}, status: {refund_status}, amount: ${refund_amount}")
+            logger.info(f"🔔 Refund metadata: {refund_metadata}")
             
             # Handle refund status
-            # Use getattr to safely access failure_balance_transaction (may not exist on all refund objects)
             failure_balance_transaction = getattr(refund_object, 'failure_balance_transaction', None)
             failure_code = getattr(refund_object, 'failure_code', None)
             failure_reason = getattr(refund_object, 'failure_reason', None)
             
-            print(f"🔔 Refund failure details - balance_transaction: {failure_balance_transaction}, code: {failure_code}, reason: {failure_reason}")
+            logger.info(f"🔔 Refund failure details - balance_transaction: {failure_balance_transaction}, code: {failure_code}, reason: {failure_reason}")
             
         except Exception as e:
-            print(f"⚠️ Error extracting refund details: {str(e)}")
-            logger.error(f"Stripe refund object attribute extraction failed: {str(e)}")
-            return HttpResponse(f"Error processing refund object: {str(e)}", status=400)
+            logger.error(f"⚠️ Error extracting refund details: {str(e)}")
+            return HttpResponse(f"Error processing refund object: {str(e)}".encode('utf-8'), status=400)
         
         if refund_status == 'succeeded' and failure_balance_transaction is None:
-            print(f"🔔 Refund succeeded")
+            logger.info(f"🔔 Refund succeeded")
             # Try to get order ID from refund metadata first
             order_id = refund_metadata.get('order_id')
             
             if order_id:
-                print(f"🔔 Found order_id in refund metadata: {order_id}")
+                logger.info(f"🔔 Found order_id in refund metadata: {order_id}")
                 try:
                     # Get order directly from metadata
                     from marketplace.models import Order
@@ -229,9 +223,9 @@ def stripe_webhook(request):
                             product = item.product
                             product.stock_quantity += item.quantity
                             product.save(update_fields=['stock_quantity'])
-                            print(f"  Restored {item.quantity} units to product {product.name}")
+                            logger.info(f"  Restored {item.quantity} units to product {product.name}")
                         
-                        print(f"  Order {order.id} marked as cancelled due to refund")
+                        logger.info(f"  Order {order.id} marked as cancelled due to refund")
                         
                         # Update PaymentTransaction status from 'waiting_refund' to 'refunded'
                         payment_transactions = PaymentTransaction.objects.filter(
@@ -242,7 +236,7 @@ def stripe_webhook(request):
                             transaction.status = 'refunded'
                             transaction.notes = f"{transaction.notes}\nRefund succeeded via webhook: {refund_id}" if transaction.notes else f"Refund succeeded via webhook: {refund_id}"
                             transaction.save(update_fields=['status', 'notes', 'updated_at'])
-                            print(f"  Updated PaymentTransaction {transaction.id} status to 'refunded'")
+                            logger.info(f"  Updated PaymentTransaction {transaction.id} status to 'refunded'")
                         
                         # Create or update success refund tracker
                         try:
@@ -256,7 +250,7 @@ def stripe_webhook(request):
                                 existing_tracker.status = 'success_refund'
                                 existing_tracker.notes = f"{existing_tracker.notes}\nRefund succeeded: {refund_metadata.get('reason', 'Order cancelled')}"
                                 existing_tracker.save(update_fields=['status', 'notes', 'updated_at'])
-                                print(f"  Updated existing tracker to success_refund for refund {refund_id}")
+                                logger.info(f"  Updated existing tracker to success_refund for refund {refund_id}")
                             else:
                                 # Create new tracker
                                 PaymentTracker.objects.create(
@@ -269,9 +263,9 @@ def stripe_webhook(request):
                                     currency='USD',
                                     notes=f'Refund succeeded: {refund_metadata.get("reason", "Order cancelled")}'
                                 )
-                                print(f"  Created new success_refund tracker for refund {refund_id}")
+                                logger.info(f"  Created new success_refund tracker for refund {refund_id}")
                         except Exception as tracker_error:
-                            print(f" Failed to create/update refund tracker: {str(tracker_error)}")
+                            logger.error(f" Failed to create/update refund tracker: {str(tracker_error)}")
                         
                         # Send cancellation confirmation email to customer
                         try:
@@ -285,27 +279,27 @@ def stripe_webhook(request):
                                 refund_amount
                             )
                             if email_sent:
-                                print(f"📧 Cancellation email sent to {order.buyer.email}")
+                                logger.info(f"📧 Cancellation email sent to {order.buyer.email}")
                             else:
-                                print(f"⚠️ Failed to send cancellation email: {email_message}")
+                                logger.warning(f"⚠️ Failed to send cancellation email: {email_message}")
                         except Exception as email_error:
-                            print(f" Error sending cancellation email: {str(email_error)}")
+                            logger.error(f" Error sending cancellation email: {str(email_error)}")
                             # Don't fail the refund processing if email fails
                         
                 except Order.DoesNotExist:
-                    print(f" Order {order_id} not found")
+                    logger.error(f" Order {order_id} not found")
                 except Exception as e:
-                    print(f" Error processing refund for order {order_id}: {e}")
+                    logger.error(f" Error processing refund for order {order_id}: {e}")
         else:
-            print(f"ℹ️ Refund status is '{refund_status}' - will be handled by appropriate webhook event")
+            logger.info(f"ℹ️ Refund status is '{refund_status}' - will be handled by appropriate webhook event")
         
-        return HttpResponse(status=200, content='refund.updated event successfully processed')
+        return HttpResponse(status=200, content='refund.updated event successfully processed'.encode('utf-8'))
     
     # Handle refund.failed event (for failed refund processing)
     elif event.type == 'refund.failed':
         refund_object = event.data.object
-        print(f"🔔 Refund failed event received")
-        print(f"full object", json.dumps(dict(refund_object), indent=2, default=str))
+        logger.info(f"🔔 Refund failed event received for refund_id: {getattr(refund_object, 'id', 'unknown')}")
+        logger.debug(f"Full refund object: {json.dumps(dict(refund_object), indent=2, default=str)}")
         
         # Extract refund details
         refund_id = getattr(refund_object, 'id', '')
@@ -313,13 +307,13 @@ def stripe_webhook(request):
         refund_amount = getattr(refund_object, 'amount', 0) / 100  # Convert from cents
         refund_metadata = getattr(refund_object, 'metadata', {})
         
-        print(f"🔔 Processing failed refund: {refund_id}, reason: {failure_reason}, amount: ${refund_amount}")
-        print(f"🔔 Refund metadata: {refund_metadata}")
+        logger.info(f"🔔 Processing failed refund: {refund_id}, reason: {failure_reason}, amount: ${refund_amount}")
+        logger.info(f"🔔 Refund metadata: {refund_metadata}")
         
         # Try to find order and handle failed refund
         order_id = refund_metadata.get('order_id')
         if order_id:
-            print(f"🔔 Found order_id in refund metadata: {order_id}")
+            logger.info(f"🔔 Found order_id in refund metadata: {order_id}")
             try:
                 from marketplace.models import Order
                 order = Order.objects.get(id=order_id)
@@ -329,7 +323,7 @@ def stripe_webhook(request):
                     order.status = 'cancelled'
                     order.payment_status = 'failed_refund'
                     order.save(update_fields=['status', 'payment_status'])
-                    print(f"  Order {order.id} status set to 'cancelled' and payment_status to 'failed_refund'")
+                    logger.info(f"  Order {order.id} status set to 'cancelled' and payment_status to 'failed_refund'")
                     
                     # Update PaymentTransaction status from 'waiting_refund' to 'failed_refund'
                     payment_transactions = PaymentTransaction.objects.filter(
@@ -340,7 +334,7 @@ def stripe_webhook(request):
                         transaction.status = 'failed_refund'
                         transaction.notes = f"{transaction.notes}\nRefund failed via webhook: {refund_id} - {failure_reason}" if transaction.notes else f"Refund failed via webhook: {refund_id} - {failure_reason}"
                         transaction.save(update_fields=['status', 'notes', 'updated_at'])
-                        print(f"  Updated PaymentTransaction {transaction.id} status to 'failed_refund'")
+                        logger.info(f"  Updated PaymentTransaction {transaction.id} status to 'failed_refund'")
                 
                 # Create or update failed refund tracker
                 try:
@@ -354,7 +348,7 @@ def stripe_webhook(request):
                         existing_tracker.status = 'failed_refund'
                         existing_tracker.notes = f"{existing_tracker.notes}\nRefund failed: {failure_reason}"
                         existing_tracker.save(update_fields=['status', 'notes', 'updated_at'])
-                        print(f"  Updated existing tracker to failed_refund for refund {refund_id}")
+                        logger.info(f"  Updated existing tracker to failed_refund for refund {refund_id}")
                     else:
                         # Create new tracker
                         PaymentTracker.objects.create(
@@ -367,9 +361,9 @@ def stripe_webhook(request):
                             currency='USD',
                             notes=f'Refund failed: {failure_reason}'
                         )
-                        print(f"  Created new failed_refund tracker for refund {refund_id}")
+                        logger.info(f"  Created new failed_refund tracker for refund {refund_id}")
                 except Exception as tracker_error:
-                    print(f" Failed to create/update failed refund tracker: {str(tracker_error)}")
+                    logger.error(f" Failed to create/update failed refund tracker: {str(tracker_error)}")
                 
                 # Send failed refund notification email to customer
                 try:
@@ -379,17 +373,17 @@ def stripe_webhook(request):
                         refund_amount
                     )
                     if email_sent:
-                        print(f"📧 Failed refund notification email sent to {order.buyer.email}")
+                         logger.info(f"📧 Failed refund notification email sent to {order.buyer.email}")
                     else:
-                        print(f"⚠️ Failed to send failed refund notification email: {email_message}")
+                         logger.warning(f"⚠️ Failed to send failed refund notification email: {email_message}")
                 except Exception as email_error:
-                    print(f" Error sending failed refund notification email: {str(email_error)}")
+                    logger.error(f" Error sending failed refund notification email: {str(email_error)}")
                     # Don't fail the webhook processing if email fails
                     
             except Order.DoesNotExist:
-                print(f" Order {order_id} not found for failed refund")
+                logger.error(f" Order {order_id} not found for failed refund")
             except Exception as e:
-                print(f" Error processing failed refund for order {order_id}: {e}")
+                logger.error(f" Error processing failed refund for order {order_id}: {e}")
         else:
             # Fallback: try to find order by existing refund tracker or payment tracker
             print("🔍 No order_id in metadata, searching by payment tracker")
@@ -515,7 +509,7 @@ def stripe_webhook(request):
             except Exception as e:
                 print(f" Error updating failed refund tracker: {e}")
         
-        return HttpResponse(status=200, content='refund.failed event successfully processed')
+        return HttpResponse(status=200, content='refund.failed event successfully processed'.encode('utf-8'))
     
     # Handle account.updated event (for Stripe Connect seller account updates)
     elif event.type == 'account.updated':
@@ -543,7 +537,7 @@ def stripe_webhook(request):
             print(f" Error processing account.updated webhook: {e}")
             # Don't fail the webhook for account update errors
         
-        return HttpResponse(status=200, content='account.updated event successfully processed')
+        return HttpResponse(status=200, content='account.updated event successfully processed'.encode('utf-8'))
     
     # Handle transfer.created events for payment verification
     elif event.type == 'transfer.created':
@@ -698,7 +692,7 @@ def stripe_webhook(request):
             traceback.print_exc()
             # Don't fail the webhook for transfer processing errors
         
-        return HttpResponse(status=200, content='transfer.created event successfully processed')
+        return HttpResponse(status=200, content='transfer.created event successfully processed'.encode('utf-8'))
 
     # Handle payout payment events from the checkout since the checkout never realy says paid or not
     elif event.type == 'payment_intent.succeeded':
@@ -720,17 +714,17 @@ def stripe_webhook(request):
                 print(f"  Updated trackers: {result.get('trackers_updated', 0)}")
                 print(f"  Updated transactions: {result.get('transactions_updated', 0)}")
                 print(f"  Updated orders: {result.get('orders_updated', 0)}")
-                return HttpResponse(status=200, content='Payment intent succeeded processed successfully.')
+                return HttpResponse(status=200, content='Payment intent succeeded processed successfully.'.encode('utf-8'))
             else:
                 print(f"⚠️ Payment intent succeeded processing had issues: {result.get('errors', [])}")
-                return HttpResponse(status=200, content='payment_intent.succeeded event processed with issues')
+                return HttpResponse(status=200, content='payment_intent.succeeded event processed with issues'.encode('utf-8'))
         except Exception as e:
             print(f" Error processing payment_intent.succeeded: {e}")
             logger.error(f"Error processing payment_intent.succeeded: {e}")
-            return HttpResponse(status=200, content='payment_intent.succeeded event processed with errors')
+            return HttpResponse(status=200, content='payment_intent.succeeded event processed with errors'.encode('utf-8'))
         
         print(f"🔔 ================================================================")
-        return HttpResponse(status=200, content='payment_intent.succeeded event successfully processed')
+        return HttpResponse(status=200, content='payment_intent.succeeded event successfully processed'.encode('utf-8'))
         
     # Handle payment intent failures
     elif event.type == 'payment_intent.payment_failed':
@@ -758,25 +752,25 @@ def stripe_webhook(request):
                 print(f"  Updated trackers: {result.get('trackers_updated', 0)}")
                 print(f"  Updated transactions: {result.get('transactions_updated', 0)}")
                 print(f"  Orders updated: {result.get('orders_updated', 0)}")
-                return HttpResponse(status=200, content='Payment intent failure processed successfully')
+                return HttpResponse(status=200, content='Payment intent failure processed successfully'.encode('utf-8'))
             else:
                 print(f"⚠️ Payment intent failure processing had issues: {result.get('errors', [])}")
-                return HttpResponse(status=200, content='payment_intent.payment_failed event processed with issues')
+                return HttpResponse(status=200, content='payment_intent.payment_failed event processed with issues'.encode('utf-8'))
         except Exception as e:
             print(f" Error processing payment_intent.payment_failed: {e}")
             logger.error(f"Error processing payment_intent.payment_failed: {e}")
-            return HttpResponse(status=200, content='payment_intent.payment_failed event processed with errors')
+            return HttpResponse(status=200, content='payment_intent.payment_failed event processed with errors'.encode('utf-8'))
         
         print(f"🔔 ================================================================")
-        return HttpResponse(status=200, content='payment_intent.payment_failed event successfully processed')
+        return HttpResponse(status=200, content='payment_intent.payment_failed event successfully processed'.encode('utf-8'))
         
     else:
         print(f"ℹ️ Unhandled event type: {event.type}")
-        return HttpResponse(status=200, content=f'{event.type} event received but not processed')
+        return HttpResponse(status=200, content=f'{event.type} event received but not processed'.encode('utf-8'))
     
     print("🔵 ==================== END OF WEBHOOK EVENT ====================")
     # Fallback return (should not be reached with explicit returns above)
-    return HttpResponse(status=200, content='Webhook event successfully processed')
+    return HttpResponse(status=200, content='Webhook event successfully processed'.encode('utf-8'))
 
 
 def update_payment_trackers_for_payout(payout, event_type):
@@ -1212,7 +1206,7 @@ def stripe_webhook_connect(request):
         print(f"🔔 Event constructed successfully: {event.type}")
     except ValueError as e:
         print(f" Error constructing event: {e}")
-        return HttpResponse(status=400)
+        return HttpResponse(status=400, content=''.encode('utf-8'))
 
     # Only verify the event if you've defined an endpoint secret
     # Otherwise, use the basic event deserialized with JSON
@@ -1222,10 +1216,10 @@ def stripe_webhook_connect(request):
         )
     except stripe.error.SignatureVerificationError as e:
         print('⚠️  Webhook signature verification failed.' + str(e))
-        return HttpResponse(status=400, content='Webhook signature verification failed.')
+        return HttpResponse(status=400, content='Webhook signature verification failed.'.encode('utf-8'))
     except Exception as e:
         print(' Error parsing webhook payload: ' + str(e))
-        return HttpResponse(status=400, content='Webhook payload parsing failed.')
+        return HttpResponse(status=400, content='Webhook payload parsing failed.'.encode('utf-8'))
 
     print(f"🔔 Received Stripe event: {event.type}")
     if event.type in ['payout.paid', 'payout.failed', 'payout.updated', 'payout.canceled']:
@@ -1281,7 +1275,7 @@ def stripe_webhook_connect(request):
     else :
         print(f"ℹ️ Unhandled payout event type: {event.type}")
 
-    return HttpResponse(status=200, content=f'{event.type} connect webhook successfully processed')
+    return HttpResponse(status=200, content=f'{event.type} connect webhook successfully processed'.encode('utf-8'))
 
 # Create PaymentTransaction records for each seller in the order
 def create_payment_transactions(order, session):

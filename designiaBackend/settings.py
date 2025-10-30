@@ -14,6 +14,7 @@ from pathlib import Path
 import os
 from dotenv import load_dotenv
 import pymysql
+from datetime import timedelta
 
 # Install PyMySQL as MySQLdb (compatibility with Django's MySQL backend)
 pymysql.install_as_MySQLdb()
@@ -24,9 +25,9 @@ load_dotenv()
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
+# SECURITY WARNING: don't run with debug turned on in production!
+# SECURITY FIX: Default to False to prevent information disclosure in production
+DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
 
 # SECURITY WARNING: keep the secret key used in production secret!
 # SECURITY FIX: Require SECRET_KEY environment variable in production
@@ -37,10 +38,6 @@ if not SECRET_KEY:
         SECRET_KEY = 'django-insecure-development-key-only-for-debug-mode'
     else:
         raise ValueError("SECRET_KEY environment variable must be set in production")
-
-# SECURITY WARNING: don't run with debug turned on in production!
-# SECURITY FIX: Default to False to prevent information disclosure in production
-DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
 
 # Parse ALLOWED_HOSTS from environment variable
 ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', '192.168.3.2,localhost,127.0.0.1').split(',')
@@ -58,7 +55,6 @@ if DEBUG:
         print("   This is a potential security risk - use specific NGROK_DOMAIN in production-like environments")
         print("   Set NGROK_DOMAIN=your-specific-subdomain.ngrok-free.app for better security")
 # In production, ngrok domains are never allowed
-
 
 
 # Application definition
@@ -122,29 +118,32 @@ ASGI_APPLICATION = 'designiaBackend.asgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-# Database Configuration - Always use MySQL RDS
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.mysql',
-        'NAME': os.getenv('DB_NAME', 'designia_db'),
-        'USER': os.getenv('DB_USER', 'admin'),
-        'PASSWORD': os.getenv('DB_PASSWORD', ''),
-        'HOST': os.getenv('DB_HOST', 'localhost'),
-        'PORT': os.getenv('DB_PORT', '3306'),
-        'OPTIONS': {
-            'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
-            'charset': 'utf8mb4',
-            'use_unicode': True,
-        },
-        'CONN_MAX_AGE': 60,
-        'CONN_HEALTH_CHECKS': True,
-    },
-    # Keep SQLite as secondary database for migration
-    'sqlite': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+# Database Configuration - Use MySQL RDS for production, SQLite for development
+if DEBUG:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
     }
-}
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.mysql',
+            'NAME': os.getenv('DB_NAME', 'designia_db'),
+            'USER': os.getenv('DB_USER', 'admin'),
+            'PASSWORD': os.getenv('DB_PASSWORD', ''),
+            'HOST': os.getenv('DB_HOST', 'localhost'),
+            'PORT': os.getenv('DB_PORT', '3306'),
+            'OPTIONS': {
+                'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
+                'charset': 'utf8mb4',
+                'use_unicode': True,
+            },
+            'CONN_MAX_AGE': 60,
+            'CONN_HEALTH_CHECKS': True,
+        }
+    }
 
 
 # Password validation
@@ -195,16 +194,22 @@ AUTH_USER_MODEL = 'authentication.CustomUser'
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework_simplejwt.authentication.JWTAuthentication',
-        'rest_framework.authentication.SessionAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
     ],
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.AnonRateThrottle',
+        'rest_framework.throttling.UserRateThrottle'
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'anon': '60/min',
+        'user': '120/min'
+    },
 }
 
 
 # JWT Settings
-from datetime import timedelta
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
@@ -234,7 +239,7 @@ SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
 # Disable CSRF for API endpoints since we're using JWT authentication
 CSRF_TRUSTED_ORIGINS = os.getenv(
     'CSRF_TRUSTED_ORIGINS',
-    'http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174'
+'http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174'
 ).split(',')
 
 # AWS S3 / MinIO Storage Configuration
@@ -275,7 +280,7 @@ else:
     STATIC_URL = 'static/'
     STATICFILES_DIRS = [BASE_DIR / 'static']
     STATIC_ROOT = BASE_DIR / 'staticfiles'
-    
+
     # Media files
     MEDIA_URL = '/media/'
     MEDIA_ROOT = BASE_DIR / 'media'

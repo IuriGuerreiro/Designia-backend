@@ -6,7 +6,6 @@ from django.contrib.auth.models import AnonymousUser
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from django.contrib.auth import get_user_model
-from .models import UserClick
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -37,7 +36,7 @@ class ActivityConsumer(AsyncWebsocketConsumer):
         )
         
         await self.accept()
-        logger.info(f"  User {self.user.username} connected to activity WebSocket")
+        logger.info(f"User {self.user.username} connected to activity WebSocket")
         
         # Send connection success with current cart count and unread messages
         cart_count = await self.get_user_cart_count()
@@ -50,7 +49,7 @@ class ActivityConsumer(AsyncWebsocketConsumer):
             'message': 'Connected to activity notifications'
         }))
 
-    async def disconnect(self, close_code):
+    async def disconnect(self, code):
         """Handle WebSocket disconnection"""
         if hasattr(self, 'user') and self.user:
             logger.info(f"User {self.user.username} disconnected from activity WebSocket")
@@ -65,22 +64,32 @@ class ActivityConsumer(AsyncWebsocketConsumer):
     async def receive(self, text_data):
         """Handle incoming WebSocket messages"""
         try:
-            text_data_json = json.loads(text_data)
-            message_type = text_data_json.get('type')
+            if not text_data:
+                return
+            data = json.loads(text_data)
+            message_type = data.get('type')
             
             if message_type == 'get_cart_count':
                 await self.handle_get_cart_count()
             elif message_type == 'get_unread_count':
                 await self.handle_get_unread_count()
             elif message_type == 'track_activity':
-                await self.handle_track_activity(text_data_json)
+                await self.handle_track_activity(data)
             else:
                 logger.warning(f"Unknown activity message type: {message_type}")
                 
         except json.JSONDecodeError:
             logger.error(f"Invalid JSON received: {text_data}")
+            await self.send(text_data=json.dumps({
+                'type': 'error',
+                'message': 'Invalid JSON format'
+            }))
         except Exception as e:
             logger.error(f"Error processing activity WebSocket message: {str(e)}")
+            await self.send(text_data=json.dumps({
+                'type': 'error',
+                'message': 'Internal server error'
+            }))
 
     async def handle_get_cart_count(self):
         """Handle request for current cart count"""
@@ -104,7 +113,10 @@ class ActivityConsumer(AsyncWebsocketConsumer):
         action = data.get('action')
         
         if not product_id or not action:
-            await self.send_error('product_id and action are required')
+            await self.send(text_data=json.dumps({
+                'type': 'error',
+                'message': 'product_id and action are required'
+            }))
             return
             
         # Track the activity
@@ -195,10 +207,8 @@ class ActivityConsumer(AsyncWebsocketConsumer):
     def get_user_unread_messages(self):
         """Get current user's unread messages count"""
         try:
-            from chat.utils import UnreadMessageTracker
-            # Use sync method since we're already in database_sync_to_async
-            from django.db import models
             from chat.models import Chat, Message
+            from django.db import models
             
             # Get all chats where user is participant
             user_chats = Chat.objects.filter(
@@ -224,6 +234,8 @@ class ActivityConsumer(AsyncWebsocketConsumer):
         """Track user activity"""
         try:
             from marketplace.models import Product
+            from .models import UserClick
+            
             product = Product.objects.get(id=product_id)
             UserClick.track_activity(
                 product=product,

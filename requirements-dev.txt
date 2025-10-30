@@ -1,0 +1,7 @@
+# Development-specific dependencies
+# Use this file for tools not required in production
+# Install with: pip install -r requirements-dev.txt
+
+black
+ruff
+isort

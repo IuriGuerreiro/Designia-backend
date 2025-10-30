@@ -1071,10 +1071,31 @@ class CartViewSet(viewsets.ModelViewSet):
         return cart
 
     def list(self, request, *args, **kwargs):
-        """Get user's cart"""
+         """Get user's cart"""
+         cart = Cart.get_or_create_cart(user=request.user)
+         serializer = self.get_serializer(cart)
+         return Response(serializer.data)
+
+    @action(detail=False, methods=['get'])
+    def status(self, request, *args, **kwargs):
+        """Lightweight cart status for initial page loads"""
         cart = Cart.get_or_create_cart(user=request.user)
-        serializer = self.get_serializer(cart)
-        return Response(serializer.data)
+        try:
+            total_amount = cart.total_amount
+        except Exception:
+            # Fallback in unlikely error cases
+            from decimal import Decimal
+            total_amount = Decimal('0')
+        data = {
+            'id': str(cart.id),
+            'total_items': cart.total_items,
+            'total_amount': str(total_amount),
+            'can_modify': True,   # Cart-level locking not used yet
+            'is_locked': False,   # Reserved for future payment locking
+            'updated_at': cart.updated_at,
+        }
+        return Response(data)
+
 
     @action(detail=False, methods=['post'])
     def add_item(self, request):
