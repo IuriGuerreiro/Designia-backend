@@ -2,6 +2,9 @@
 
 from django.db import migrations
 from django.db.models import Count
+import logging
+
+logger = logging.getLogger(__name__)
 
 def consolidate_carts(apps, schema_editor):
     """
@@ -43,7 +46,7 @@ def consolidate_carts(apps, schema_editor):
                 # Delete the empty cart
                 cart.delete()
         
-        print(f"Consolidated carts for user {user_id}, keeping cart {cart_to_keep.id}")
+        logger.info(f"Consolidated carts for user {user_id}, keeping cart {cart_to_keep.id}")
 
 def reverse_consolidate_carts(apps, schema_editor):
     """

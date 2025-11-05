@@ -1,4 +1,5 @@
 from rest_framework import permissions
+from utils.rbac import is_seller, is_admin
 
 
 class IsSellerOrReadOnly(permissions.BasePermission):
@@ -154,7 +155,7 @@ class IsSellerUser(permissions.BasePermission):
             return False
 
         # Check if user is seller or admin
-        return request.user.can_sell_products()
+        return is_seller(request.user)
 
 
 class IsAdminUser(permissions.BasePermission):
@@ -169,4 +170,4 @@ class IsAdminUser(permissions.BasePermission):
             return False
 
         # Check if user is admin
-        return request.user.is_admin()
+        return is_admin(request.user)

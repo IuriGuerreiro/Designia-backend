@@ -13,6 +13,10 @@ from .seller_serializers import (
     UserRoleSerializer
 )
 from .models import CustomUser
+from utils.rbac import is_admin
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class SellerApplicationCreateView(generics.CreateAPIView):
@@ -56,7 +60,7 @@ class SellerApplicationListView(generics.ListAPIView):
 
     def list(self, request, *args, **kwargs):
         # Check if user has admin privileges
-        if not (request.user.role == 'admin' or request.user.is_superuser):
+        if not is_admin(request.user):
             return Response(
                 {'error': 'Permission denied. Admin access required.'},
                 status=status.HTTP_403_FORBIDDEN
@@ -68,7 +72,7 @@ class SellerApplicationListView(generics.ListAPIView):
         user = self.request.user
 
         # Only admin/superuser can see all applications
-        if not (user.role == 'admin' or user.is_superuser):
+        if not is_admin(user):
             return SellerApplication.objects.none()
 
         # Filter by status if provided
@@ -77,7 +81,7 @@ class SellerApplicationListView(generics.ListAPIView):
 
         if status_filter:
             queryset = queryset.filter(status=status_filter)
-            print(f"Filtered queryset by status: {status_filter}")
+            logger.info(f"Filtered queryset by status: {status_filter}")
 
         return queryset.order_by('-submitted_at')
 
@@ -91,7 +95,8 @@ class SellerApplicationAdminUpdateView(generics.UpdateAPIView):
         user = self.request.user
 
         # Only admin/superuser can update applications
-        if not (user.role == 'admin' or user.is_superuser):
+        from utils.rbac import is_admin
+        if not is_admin(user):
             return SellerApplication.objects.none()
 
         return SellerApplication.objects.all()
@@ -110,7 +115,7 @@ def seller_application_status(request):
     if application:
         return Response({
             'has_application': True,
-            'is_seller': request.user.role == 'seller',
+            'is_seller': is_admin(request.user) or getattr(request.user, 'role', None) == 'seller',
             'status': application.status,
             'application_id': application.id,
             'submitted_at': application.submitted_at,
@@ -120,7 +125,7 @@ def seller_application_status(request):
 
     return Response({
         'has_application': False,
-        'is_seller': request.user.role == 'seller',
+        'is_seller': is_admin(request.user) or getattr(request.user, 'role', None) == 'seller',
         'status': None
     })
 
@@ -171,7 +176,7 @@ def apply_to_become_seller(request):
 
         # Check if user is already a seller
         logger.info("Step 2: Checking if user is already a seller...")
-        if request.user.role == 'seller':
+        if getattr(request.user, 'role', None) == 'seller':
             logger.warning("User is already a seller")
             return Response(
                 {'error': 'You are already a verified seller.'},
@@ -301,8 +306,8 @@ def user_role_info(request):
     serializer = UserRoleSerializer(request.user)
     return Response({
         **serializer.data,
-        'is_seller': request.user.role == 'seller',
-        'is_admin': request.user.role == 'admin' or request.user.is_superuser,
+        'is_seller': is_admin(request.user) or getattr(request.user, 'role', None) == 'seller',
+        'is_admin': is_admin(request.user),
         'can_sell_products': request.user.can_sell_products()
     })
 
@@ -311,7 +316,7 @@ def user_role_info(request):
 @permission_classes([permissions.IsAuthenticated])
 def admin_approve_seller(request, application_id):
     """Admin endpoint to approve seller application"""
-    if not (request.user.role == 'admin' or request.user.is_superuser):
+    if not is_admin(request.user):
         return Response(
             {'error': 'Permission denied. Admin access required.'},
             status=status.HTTP_403_FORBIDDEN
@@ -336,7 +341,7 @@ def admin_approve_seller(request, application_id):
 @permission_classes([permissions.IsAuthenticated])
 def admin_reject_seller(request, application_id):
     """Admin endpoint to reject seller application"""
-    if not (request.user.role == 'admin' or request.user.is_superuser):
+    if not is_admin(request.user):
         return Response(
             {'error': 'Permission denied. Admin access required.'},
             status=status.HTTP_403_FORBIDDEN

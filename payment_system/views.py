@@ -373,9 +373,9 @@ def stripe_webhook(request):
                         refund_amount
                     )
                     if email_sent:
-                         logger.info(f"📧 Failed refund notification email sent to {order.buyer.email}")
+                        logger.info(f"📧 Failed refund notification email sent to {order.buyer.email}")
                     else:
-                         logger.warning(f"⚠️ Failed to send failed refund notification email: {email_message}")
+                        logger.warning(f"⚠️ Failed to send failed refund notification email: {email_message}")
                 except Exception as email_error:
                     logger.error(f" Error sending failed refund notification email: {str(email_error)}")
                     # Don't fail the webhook processing if email fails
@@ -386,7 +386,7 @@ def stripe_webhook(request):
                 logger.error(f" Error processing failed refund for order {order_id}: {e}")
         else:
             # Fallback: try to find order by existing refund tracker or payment tracker
-            print("🔍 No order_id in metadata, searching by payment tracker")
+            logger.info("🔍 No order_id in metadata, searching by payment tracker")
             try:
                 payment_tracker = PaymentTracker.objects.filter(
                     stripe_refund_id=refund_id
@@ -401,7 +401,7 @@ def stripe_webhook(request):
                             order.status = 'cancelled'
                             order.payment_status = 'failed_refund'
                             order.save(update_fields=['status', 'payment_status'])
-                            print(f"  Order {order.id} status set to 'cancelled' and payment_status to 'failed_refund' (fallback)")
+                            logger.info(f"  Order {order.id} status set to 'cancelled' and payment_status to 'failed_refund' (fallback)")
                             
                             # Update PaymentTransaction status from 'waiting_refund' to 'failed_refund'
                             payment_transactions = PaymentTransaction.objects.filter(
@@ -412,12 +412,12 @@ def stripe_webhook(request):
                                 transaction.status = 'failed_refund'
                                 transaction.notes = f"{transaction.notes}\nRefund failed via webhook (fallback): {refund_id} - {failure_reason}" if transaction.notes else f"Refund failed via webhook (fallback): {refund_id} - {failure_reason}"
                                 transaction.save(update_fields=['status', 'notes', 'updated_at'])
-                                print(f"  Updated PaymentTransaction {transaction.id} status to 'failed_refund' (fallback)")
+                                logger.info(f"  Updated PaymentTransaction {transaction.id} status to 'failed_refund' (fallback)")
                     
                     payment_tracker.status = 'failed_refund'
                     payment_tracker.notes = f"{payment_tracker.notes}\nRefund failed: {failure_reason}"
                     payment_tracker.save(update_fields=['status', 'notes', 'updated_at'])
-                    print(f"  Updated existing tracker to failed_refund status")
+                    logger.info(f"  Updated existing tracker to failed_refund status")
                     
                     # Send failed refund notification email if we have an order (fallback path)
                     if payment_tracker.order:
@@ -428,15 +428,15 @@ def stripe_webhook(request):
                                 refund_amount
                             )
                             if email_sent:
-                                print(f"📧 Failed refund notification email sent to {payment_tracker.order.buyer.email} (fallback)")
+                                logger.info(f"📧 Failed refund notification email sent to {payment_tracker.order.buyer.email} (fallback)")
                             else:
-                                print(f"⚠️ Failed to send failed refund notification email (fallback): {email_message}")
+                                logger.warning(f"⚠️ Failed to send failed refund notification email (fallback): {email_message}")
                         except Exception as email_error:
-                            print(f" Error sending failed refund notification email (fallback): {str(email_error)}")
+                            logger.error(f" Error sending failed refund notification email (fallback): {str(email_error)}")
                             # Don't fail the webhook processing if email fails
                 else:
                     # Try to find any payment tracker with the same payment intent to get order info
-                    print(f"🔍 No refund tracker found, searching for related payment tracker")
+                    logger.info(f"🔍 No refund tracker found, searching for related payment tracker")
                     payment_intent_id = None
                     try:
                         # Try to get payment intent from Stripe refund data
@@ -490,24 +490,24 @@ def stripe_webhook(request):
                                         refund_amount
                                     )
                                     if email_sent:
-                                        print(f"📧 Failed refund notification email sent to {order.buyer.email} (via payment intent)")
+                                        logger.info(f"📧 Failed refund notification email sent to {order.buyer.email} (via payment intent)")
                                     else:
-                                        print(f"⚠️ Failed to send failed refund notification email (via payment intent): {email_message}")
+                                        logger.warning(f"⚠️ Failed to send failed refund notification email (via payment intent): {email_message}")
                                 except Exception as email_error:
-                                    print(f" Error sending failed refund notification email (via payment intent): {str(email_error)}")
+                                    logger.error(f" Error sending failed refund notification email (via payment intent): {str(email_error)}")
                                     # Don't fail the webhook processing if email fails
                             else:
-                                print(f"⚠️ No related payment tracker found for payment intent {payment_intent_id}")
+                                logger.warning(f"⚠️ No related payment tracker found for payment intent {payment_intent_id}")
                         else:
-                            print(f"⚠️ No payment intent found in refund object")
+                            logger.warning(f"⚠️ No payment intent found in refund object")
                     except Exception as related_error:
-                        print(f"⚠️ Could not find related payment info: {related_error}")
+                        logger.warning(f"⚠️ Could not find related payment info: {related_error}")
                     
                     if not payment_intent_id:
-                        print(f"⚠️ No payment tracker found for failed refund {refund_id} and no fallback available")
+                        logger.warning(f"⚠️ No payment tracker found for failed refund {refund_id} and no fallback available")
                     
             except Exception as e:
-                print(f" Error updating failed refund tracker: {e}")
+                logger.error(f" Error updating failed refund tracker: {e}")
         
         return HttpResponse(status=200, content='refund.failed event successfully processed'.encode('utf-8'))
     
@@ -515,7 +515,7 @@ def stripe_webhook(request):
     elif event.type == 'account.updated':
         account_object = event.data.object
         account_id = getattr(account_object, 'id', '')
-        print(f"🔔 Account updated event received for account: {account_id}")
+        logger.info(f"🔔 Account updated event received for account: {account_id}")
         
         try:
             # Import the service here to avoid circular imports
@@ -528,13 +528,13 @@ def stripe_webhook(request):
             )
             
             if result['success']:
-                print(f"  Successfully processed account update for account: {account_id}")
-                print(f"  Updated user ID: {result.get('user_id', 'unknown')}")
+                logger.info(f"  Successfully processed account update for account: {account_id}")
+                logger.info(f"  Updated user ID: {result.get('user_id', 'unknown')}")
             else:
-                print(f"⚠️ Failed to process account update: {result['errors']}")
+                logger.warning(f"⚠️ Failed to process account update: {result['errors']}")
                 
         except Exception as e:
-            print(f" Error processing account.updated webhook: {e}")
+            logger.error(f" Error processing account.updated webhook: {e}")
             # Don't fail the webhook for account update errors
         
         return HttpResponse(status=200, content='account.updated event successfully processed'.encode('utf-8'))
@@ -543,7 +543,7 @@ def stripe_webhook(request):
     elif event.type == 'transfer.created':
         transfer_object = event.data.object
 
-        print(f"🔔 Event Type: {event.type}")
+        logger.info(f"🔔 Event Type: {event.type}")
         # Extract transfer data based on the actual Stripe structure
         transfer_id = getattr(transfer_object, 'id', '')  # e.g., "tr_1RwA18CEfT6kDqKIZfcknZlv"
         amount = getattr(transfer_object, 'amount', 0)    # e.g., 205106 (in cents)
@@ -566,11 +566,11 @@ def stripe_webhook(request):
             seller_id = metadata.get('seller_id')           # "1"
             buyer_id = metadata.get('buyer_id')             # "1"
             
-            print(f"🔍 Extracted from metadata:")
-            print(f"   Transaction ID: {transaction_id}")
-            print(f"   Order ID: {order_id}")
-            print(f"   Seller ID: {seller_id}")
-            print(f"   Buyer ID: {buyer_id}")
+            logger.info(f"🔍 Extracted from metadata:")
+            logger.info(f"   Transaction ID: {transaction_id}")
+            logger.info(f"   Order ID: {order_id}")
+            logger.info(f"   Seller ID: {seller_id}")
+            logger.info(f"   Buyer ID: {buyer_id}")
             
             if transaction_id:
                 # Define deadlock-safe operation for transfer success processing
@@ -582,9 +582,9 @@ def stripe_webhook(request):
                 try:
                     payment_transaction = process_transfer_success()
                     logger.info(f"[WEBHOOK] Found payment transaction {transaction_id}")
-                    print(f"  Found PaymentTransaction: {payment_transaction.id}")
-                    print(f"   Current status: {payment_transaction.status}")
-                    print(f"   Current transfer_id: {payment_transaction.transfer_id}")
+                    logger.info(f"  Found PaymentTransaction: {payment_transaction.id}")
+                    logger.info(f"   Current status: {payment_transaction.status}")
+                    logger.info(f"   Current transfer_id: {payment_transaction.transfer_id}")
 
                     # Create a PaymentTracker entry for the transfer
                     try:
@@ -602,16 +602,16 @@ def stripe_webhook(request):
                             notes=f"Transfer to seller {seller.username} for order {order.id} created successfully."
                         )
                         logger.info(f"Created PaymentTracker for transfer {transfer_id}")
-                        print(f"  Created PaymentTracker for transfer {transfer_id}")
+                        logger.info(f"  Created PaymentTracker for transfer {transfer_id}")
                     except Order.DoesNotExist:
                         logger.error(f"Order with id {order_id} not found for transfer {transfer_id}")
-                        print(f" Order with id {order_id} not found for transfer {transfer_id}")
+                        logger.error(f" Order with id {order_id} not found for transfer {transfer_id}")
                     except User.DoesNotExist:
                         logger.error(f"Seller with id {seller_id} not found for transfer {transfer_id}")
-                        print(f" Seller with id {seller_id} not found for transfer {transfer_id}")
+                        logger.error(f" Seller with id {seller_id} not found for transfer {transfer_id}")
                     except Exception as e:
                         logger.error(f"Failed to create PaymentTracker for transfer {transfer_id}: {e}")
-                        print(f" Failed to create PaymentTracker for transfer {transfer_id}: {e}")
+                        logger.error(f" Failed to create PaymentTracker for transfer {transfer_id}: {e}")
                     
                     # Since this is transfer.created, the transfer was successfully created
                     # This means the payment is now successfully released to the seller
@@ -633,27 +633,27 @@ def stripe_webhook(request):
                                 ])
                                 
                                 logger.info(f"[SUCCESS] Payment transaction {transaction_id} status updated: {old_status} -> released")
-                                print(f"  Transfer {transfer_id} SUCCESS - payment released to seller")
-                                print(f"   Amount: {amount/100:.2f} {currency.upper()}")
-                                print(f"   Status: {old_status} -> released (SUCCESS)")
+                                logger.info(f"  Transfer {transfer_id} SUCCESS - payment released to seller")
+                                logger.info(f"   Amount: {amount/100:.2f} {currency.upper()}")
+                                logger.info(f"   Status: {old_status} -> released (SUCCESS)")
                                 
                                 # Then update PaymentTracker status (PaymentTracker model - second in same isolation)
                                 existing_tracker = PaymentTracker.objects.filter(stripe_transfer_id=transfer_id).select_for_update().first()
                                 if existing_tracker:
                                     existing_tracker.status = 'succeeded'  # Mark tracker as succeeded
                                     existing_tracker.save(update_fields=['status', 'updated_at'])
-                                    print(f"  PaymentTracker status updated to succeeded (inside same transaction)")
+                                    logger.info(f"  PaymentTracker status updated to succeeded (inside same transaction)")
                                 else:
-                                    print(f"⚠️ No existing PaymentTracker found for transfer {transfer_id}")
+                                    logger.warning(f"⚠️ No existing PaymentTracker found for transfer {transfer_id}")
                                 
                             else:
                                 logger.warning(f"[WARNING] Transaction {transaction_id} not in processing status (current: {transaction_for_update.status})")
-                                print(f"⚠️ Transaction not in processing status: {transaction_for_update.status}")
+                                logger.warning(f"⚠️ Transaction not in processing status: {transaction_for_update.status}")
                                 
                     else:
                         # Transfer was reversed - this would be unusual for a .created event
                         logger.warning(f"[REVERSED] Transfer {transfer_id} was reversed")
-                        print(f"⚠️ Transfer {transfer_id} was reversed - unusual for created event")
+                        logger.warning(f"⚠️ Transfer {transfer_id} was reversed - unusual for created event")
                         
                     # Update metadata with webhook information (outside main transaction to avoid conflicts)
                     try:
@@ -671,23 +671,23 @@ def stripe_webhook(request):
                                     'transfer_success_status': 'released'
                                 })
                                 transaction_for_metadata.save(update_fields=['metadata', 'updated_at'])
-                                print(f"📝 Updated transaction metadata with webhook success info")
+                                logger.info(f"📝 Updated transaction metadata with webhook success info")
                     except Exception as metadata_error:
                         logger.warning(f"Failed to update metadata: {metadata_error}")
-                        print(f"⚠️ Failed to update metadata: {metadata_error}")
+                        logger.warning(f"⚠️ Failed to update metadata: {metadata_error}")
                         
                 except PaymentTransaction.DoesNotExist:
                     logger.error(f"[ERROR] Payment transaction {transaction_id} not found")
-                    print(f" PaymentTransaction {transaction_id} not found in database")
+                    logger.error(f" PaymentTransaction {transaction_id} not found in database")
                     
             else:
                 logger.warning(f"[WARNING] No transaction_id found in transfer metadata")
-                print(f"⚠️ No transaction_id found in transfer metadata")
-                print(f"   Available metadata keys: {list(metadata.keys())}")
+                logger.warning(f"⚠️ No transaction_id found in transfer metadata")
+                logger.info(f"   Available metadata keys: {list(metadata.keys())}")
                 
         except Exception as e:
             logger.error(f"[ERROR] Error processing transfer.created webhook: {e}")
-            print(f" Error processing transfer webhook: {e}")
+            logger.error(f" Error processing transfer webhook: {e}")
             import traceback
             traceback.print_exc()
             # Don't fail the webhook for transfer processing errors

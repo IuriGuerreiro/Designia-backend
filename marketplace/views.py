@@ -470,10 +470,10 @@ class ProductViewSet(viewsets.ModelViewSet):
                     logger.info(f"  - Primary Image ID: {primary_image.get('id')}")
                     logger.info(f"  - S3 Key: {primary_image.get('s3_key')}")
                     logger.info(f"  - Presigned URL: {primary_image.get('presigned_url')}")
-                    print(f"📋 LIST - AWS PRESIGNED URL for {product_data.get('name')}: {primary_image.get('presigned_url')}")
+                    logger.info(f"📋 LIST - AWS PRESIGNED URL for {product_data.get('name')}: {primary_image.get('presigned_url')}")
                 else:
                     logger.info(f"  - No primary image found")
-                    print(f"⚠️  LIST - No primary image for: {product_data.get('name')}")
+                    logger.warning(f"⚠️  LIST - No primary image for: {product_data.get('name')}")
             
             response = self.get_paginated_response(response_data)
             
@@ -497,10 +497,10 @@ class ProductViewSet(viewsets.ModelViewSet):
                 logger.info(f"  - Primary Image ID: {primary_image.get('id')}")
                 logger.info(f"  - S3 Key: {primary_image.get('s3_key')}")
                 logger.info(f"  - Presigned URL: {primary_image.get('presigned_url')}")
-                print(f"📋 LIST - AWS PRESIGNED URL for {product_data.get('name')}: {primary_image.get('presigned_url')}")
+                logger.info(f"📋 LIST - AWS PRESIGNED URL for {product_data.get('name')}: {primary_image.get('presigned_url')}")
             else:
                 logger.info(f"  - No primary image found")
-                print(f"⚠️  LIST - No primary image for: {product_data.get('name')}")
+                logger.warning(f"⚠️  LIST - No primary image for: {product_data.get('name')}")
         
         response = Response(response_data)
         
@@ -594,10 +594,10 @@ class ProductViewSet(viewsets.ModelViewSet):
                 logger.info(f"  - Original Filename: {image.get('original_filename')}")
                 logger.info(f"  - Presigned URL: {image.get('presigned_url')}")
                 logger.info(f"  - Image URL (fallback): {image.get('image_url')}")
-                print(f"🖼️  AWS PRESIGNED URL {i+1}: {image.get('presigned_url')}")
+                logger.info(f"🖼️  AWS PRESIGNED URL {i+1}: {image.get('presigned_url')}")
         else:
             logger.info("No images found for this product")
-            print(f"⚠️  No images found for product: {instance.name}")
+            logger.warning(f"⚠️  No images found for product: {instance.name}")
         
         response = Response(response_data)
         
@@ -901,7 +901,7 @@ class ProductViewSet(viewsets.ModelViewSet):
             logger.info(f"Main Image ID: {image_data['id']}")
             logger.info(f"S3 Key: {image_data['s3_key']}")
             logger.info(f"Presigned URL: {image_data['presigned_url']}")
-            print(f"🖼️  MAIN IMAGE - AWS PRESIGNED URL for {product.name}: {image_data['presigned_url']}")
+            logger.info(f"🖼️  MAIN IMAGE - AWS PRESIGNED URL for {product.name}: {image_data['presigned_url']}")
             
             return Response({
                 'product_id': str(product.id),
@@ -921,7 +921,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         else:
             logger.info(f"=== MAIN IMAGE ENDPOINT - NO IMAGE FOUND ===")
             logger.info(f"Product: {product.name} (ID: {product.id}, Slug: {product.slug})")
-            print(f"⚠️  MAIN IMAGE - No image found for product: {product.name}")
+            logger.warning(f"⚠️  MAIN IMAGE - No image found for product: {product.name}")
             
             return Response({
                 'product_id': str(product.id),

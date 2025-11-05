@@ -5,7 +5,7 @@ from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from .jwt_serializers import CustomRefreshToken
 from django.contrib.auth import authenticate
-from django.views.decorators.csrf import csrf_exempt
+
 from django.utils.decorators import method_decorator
 import logging
 from .models import CustomUser, EmailVerificationToken, TwoFactorCode, EmailRequestAttempt
@@ -17,8 +17,10 @@ from .serializers import (
 )
 from .utils import send_verification_email, verify_email_token, send_2fa_code, verify_2fa_code, get_email_rate_limit_status
 from .google_auth import GoogleAuth
+from utils.logging_utils import sanitize_payload
 from rest_framework.views import APIView
 
+logger = logging.getLogger(__name__)
 
 class PublicProfileDetailView(generics.RetrieveAPIView):
     queryset = CustomUser.objects.all()
@@ -125,13 +127,15 @@ class ProfileUpdateView(generics.RetrieveUpdateAPIView):
             logger.info("Prefetch cache invalidated")
             
         response_data = serializer.data
-        logger.info(f"Response data: {response_data}")
+        try:
+            logger.info("Response data keys: %s", list(response_data.keys()))
+        except Exception:
+            logger.info("Response data prepared")
         logger.info(f"=== PROFILE UPDATE VIEW DEBUG END ===")
         
         return Response(response_data)
 
 
-@csrf_exempt
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def register(request):
@@ -204,7 +208,6 @@ def register(request):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-@csrf_exempt
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def login(request):
@@ -285,7 +288,6 @@ def login(request):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-@csrf_exempt
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def login_verify_2fa(request):
@@ -418,7 +420,6 @@ def check_email_rate_limit(request):
 
 
 # Google Login View (YummiAI exact copy)
-@csrf_exempt
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def google_login(request):
@@ -432,7 +433,7 @@ def google_login(request):
         google_data = serializer.validated_data
         try:
             user = CustomUser.objects.get(email=google_data['email'])
-            print(f"Existing user found for Google login: {google_data['email']}")
+            logger.info(f"Existing user found for Google login: {google_data['email']}")
             
             refresh = CustomRefreshToken.for_user(user)
             
@@ -449,7 +450,7 @@ def google_login(request):
             return Response(response_data)
             
         except CustomUser.DoesNotExist:
-            print(f"User not found, creating new user for Google account: {google_data['email']}")
+            logger.info(f"User not found, creating new user for Google account: {google_data['email']}")
             try:
                 # Automatically create new user if they don't exist
                 username = google_data['email'].split('@')[0]
@@ -468,7 +469,7 @@ def google_login(request):
                     is_email_verified=True,  # Google accounts are pre-verified
                     is_active=True,
                 )
-                print(f"New user created for Google account: {google_data['email']}")
+                logger.info(f"New user created for Google account: {google_data['email']}")
                 
                 refresh = CustomRefreshToken.for_user(user)
                 
@@ -485,25 +486,26 @@ def google_login(request):
                 return Response(response_data)
                 
             except Exception as e:
-                print(f" Error creating user for Google account: {str(e)}")
+                logger.error(f" Error creating user for Google account: {str(e)}")
                 return Response({
                     'success': False,
                     'error': 'Failed to create user account. Please try again.'
                 }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     else:
-        print(f"Google login error: {serializer.errors}")
+        logger.error(f"Google login error: {serializer.errors}")
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 # Google Register View (YummiAI exact copy)
-@csrf_exempt
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def google_register(request):
     """
     Google register endpoint - exact copy from YummiAI
     """
-    print(f"Google register request received: {request.data}")
+    # Avoid logging full request payload; only log the email if present
+    safe_log = sanitize_payload({**request.data}, allowed_keys=['email']) if hasattr(request, 'data') else {}
+    logger.info(f"Google register request received: {safe_log}")
     serializer = GoogleAuthSerializer(data=request.data)
     
     if serializer.is_valid():
@@ -512,10 +514,10 @@ def google_register(request):
         try:
             user = CustomUser.objects.get(email=google_data['email'])
             is_new_user = False
-            print(f"Existing user found for Google account: {google_data['email']}")
+            logger.info(f"Existing user found for Google account: {google_data['email']}")
             
         except CustomUser.DoesNotExist:
-            print(f"Creating new user for Google account: {google_data['email']}")
+            logger.info(f"Creating new user for Google account: {google_data['email']}")
             username = google_data['email'].split('@')[0]
             
             if CustomUser.objects.filter(username=username).exists():
@@ -551,7 +553,6 @@ def google_register(request):
 
 
 # Legacy endpoint for backward compatibility
-@csrf_exempt
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def google_oauth(request):
@@ -790,7 +791,6 @@ def set_password_with_2fa(request):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-@csrf_exempt
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def request_password_reset(request):
@@ -836,7 +836,6 @@ def request_password_reset(request):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-@csrf_exempt
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def reset_password_with_2fa(request):
@@ -887,7 +886,6 @@ def reset_password_with_2fa(request):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-@csrf_exempt
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def resend_2fa_code(request):
@@ -927,7 +925,6 @@ def resend_2fa_code(request):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-@csrf_exempt
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def change_language(request):
@@ -969,7 +966,6 @@ def change_language(request):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-@csrf_exempt
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def upload_profile_picture(request):
@@ -1042,7 +1038,6 @@ def upload_profile_picture(request):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-@csrf_exempt
 @api_view(['DELETE'])
 @permission_classes([IsAuthenticated])
 def delete_profile_picture(request):
@@ -1287,4 +1282,3 @@ class RegisterAPIView(APIView):
             return Response({
                 'error': 'A service may be unavailable. Please try again later.'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-

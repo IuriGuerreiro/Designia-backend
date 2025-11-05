@@ -105,7 +105,8 @@ def get_seller_payment_holds(request):
         user = User.objects.get(id=request.user.id)
 
         # ROLE CHECK: Verify seller or admin role from database
-        if user.role not in ['seller', 'admin']:
+        from utils.rbac import is_seller
+        if not is_seller(user):
             logger.warning(f"Non-seller user {user.username} (ID: {user.id}, Role: {user.role}) attempted to access payment holds")
             return Response({
                 'error': 'SELLER_ACCESS_REQUIRED',
@@ -260,7 +261,8 @@ def user_payouts_list(request):
         user = User.objects.get(id=request.user.id)
 
         # ROLE CHECK: Verify seller or admin role from database
-        if user.role not in ['seller', 'admin']:
+        from utils.rbac import is_seller
+        if not is_seller(user):
             logger.warning(f"Non-seller user {user.username} (ID: {user.id}, Role: {user.role}) attempted to access payouts list")
             return Response({
                 'error': 'SELLER_ACCESS_REQUIRED',
@@ -325,7 +327,8 @@ def payout_detail(request, payout_id):
         user = User.objects.get(id=request.user.id)
 
         # ROLE CHECK: Verify seller or admin role from database
-        if user.role not in ['seller', 'admin']:
+        from utils.rbac import is_seller
+        if not is_seller(user):
             logger.warning(f"Non-seller user {user.username} (ID: {user.id}, Role: {user.role}) attempted to access payout detail")
             return Response({
                 'error': 'SELLER_ACCESS_REQUIRED',
@@ -373,7 +376,8 @@ def payout_orders(request, payout_id):
         user = User.objects.get(id=request.user.id)
 
         # ROLE CHECK: Verify seller or admin role from database
-        if user.role not in ['seller', 'admin']:
+        from utils.rbac import is_seller
+        if not is_seller(user):
             logger.warning(f"Non-seller user {user.username} (ID: {user.id}, Role: {user.role}) attempted to access payout orders")
             return Response({
                 'error': 'SELLER_ACCESS_REQUIRED',
@@ -807,7 +811,7 @@ def update_payout_reconciliation(request, payout_id):
             
             # Track the operation performance
             operation_duration = (timezone.now() - start_time).total_seconds() * 1000
-            print(f"📊 Update took {operation_duration:.2f}ms by user {user.id}")
+            logger.info(f"📊 Update took {operation_duration:.2f}ms by user {user.id}")
             
             response_data = {
                 'success': True,

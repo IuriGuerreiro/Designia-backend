@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 from pathlib import Path
 import os
 from dotenv import load_dotenv
+import logging
 import pymysql
 from datetime import timedelta
 
@@ -51,9 +52,9 @@ if DEBUG:
     else:
         # Wildcard fallback for development convenience
         ALLOWED_HOSTS.append('.ngrok-free.app')
-        print("⚠️  SECURITY WARNING: Using wildcard ngrok domain (.ngrok-free.app)")
-        print("   This is a potential security risk - use specific NGROK_DOMAIN in production-like environments")
-        print("   Set NGROK_DOMAIN=your-specific-subdomain.ngrok-free.app for better security")
+        logging.getLogger(__name__).warning("⚠️  SECURITY WARNING: Using wildcard ngrok domain (.ngrok-free.app)")
+        logging.getLogger(__name__).warning("   This is a potential security risk - use specific NGROK_DOMAIN in production-like environments")
+        logging.getLogger(__name__).warning("   Set NGROK_DOMAIN=your-specific-subdomain.ngrok-free.app for better security")
 # In production, ngrok domains are never allowed
 
 
@@ -84,7 +85,7 @@ MIDDLEWARE = [
     'django.contrib.sessions.middleware.SessionMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
-    # 'django.middleware.csrf.CsrfViewMiddleware',  # Disabled for API endpoints
+    'django.middleware.csrf.CsrfViewMiddleware',  # Enable CSRF protection; JWT auth endpoints are exempt by default
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',

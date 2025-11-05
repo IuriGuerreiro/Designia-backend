@@ -25,6 +25,7 @@ from marketplace.models import Order
 
 # Import transaction utilities
 from utils.transaction_utils import financial_transaction
+from utils.rbac import is_admin
 
 # Initialize logger
 logger = logging.getLogger(__name__)
@@ -56,7 +57,7 @@ def admin_list_all_payouts(request):
         user = User.objects.get(id=request.user.id)
 
         # ADMIN CHECK: Verify admin role from database
-        if user.role != 'admin':
+        if not is_admin(user):
             logger.warning(f"Non-admin user {user.username} (ID: {user.id}, Role: {user.role}) attempted to access admin payouts list")
             return Response({
                 'error': 'ADMIN_ACCESS_REQUIRED',
@@ -186,7 +187,7 @@ def admin_list_all_transactions(request):
         user = User.objects.get(id=request.user.id)
 
         # ADMIN CHECK: Verify admin role from database
-        if user.role != 'admin':
+        if not is_admin(user):
             logger.warning(f"Non-admin user {user.username} (ID: {user.id}, Role: {user.role}) attempted to access admin transactions list")
             return Response({
                 'error': 'ADMIN_ACCESS_REQUIRED',

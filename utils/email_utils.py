@@ -1,8 +1,11 @@
 import sys
+import logging
 from typing import Iterable, Optional, Tuple
 
 from django.conf import settings
 from django.core.mail import send_mail
+
+logger = logging.getLogger(__name__)
 
 
 def send_email(subject: str,
@@ -20,7 +23,7 @@ def send_email(subject: str,
     """
     from_email = from_email or getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@localhost')
 
-    # If console backend, just print the email in a friendly format
+    # If console backend, log the email in a friendly format
     if settings.EMAIL_BACKEND == 'django.core.mail.backends.console.EmailBackend':
         _print_email_fallback(subject, message, recipient_list, html_message)
         return True, 'Email printed to console (development backend)'
@@ -38,7 +41,7 @@ def send_email(subject: str,
             return True, 'Email sent successfully'
         return False, 'Email backend returned 0 sent'
     except Exception as e:
-        # Fallback to printing for visibility in non-console backends on error
+        # Fallback to logging for visibility in non-console backends on error
         _print_email_fallback(subject, message, recipient_list, html_message, error=str(e))
         if fail_silently:
             return False, 'Email send failed (silenced)'
@@ -51,20 +54,25 @@ def _print_email_fallback(subject: str,
                           html_message: Optional[str] = None,
                           *,
                           error: Optional[str] = None) -> None:
-    print('\n' + '=' * 80, file=sys.stdout)
-    if error:
-        print('⚠️  EMAIL SEND FAILED — FALLBACK OUTPUT', file=sys.stdout)
-        print(f'Error: {error}', file=sys.stdout)
-    else:
-        print('✉️  EMAIL (CONSOLE BACKEND)', file=sys.stdout)
-    print('=' * 80, file=sys.stdout)
-    print(f'To: {", ".join(recipient_list)}', file=sys.stdout)
-    print(f'Subject: {subject}', file=sys.stdout)
-    print('-' * 80, file=sys.stdout)
+    header = '\n' + '=' * 80
+    footer = '=' * 80 + '\n'
+    lines = [
+        header,
+        '⚠️  EMAIL SEND FAILED — FALLBACK OUTPUT' if error else '✉️  EMAIL (CONSOLE BACKEND)',
+        '=' * 80,
+        f"To: {', '.join(recipient_list)}",
+        f'Subject: {subject}',
+        '-' * 80,
+    ]
     if html_message:
-        print('(HTML content below)', file=sys.stdout)
-        print(html_message, file=sys.stdout)
-        print('-' * 80, file=sys.stdout)
-    print(message, file=sys.stdout)
-    print('=' * 80 + '\n', file=sys.stdout)
+        lines.append('(HTML content below)')
+        lines.append(str(html_message))
+        lines.append('-' * 80)
+    lines.append(str(message))
+    lines.append(footer)
 
+    log_msg = '\n'.join(lines)
+    if error:
+        logger.error(log_msg)
+    else:
+        logger.info(log_msg)

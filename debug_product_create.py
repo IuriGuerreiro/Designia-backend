@@ -25,7 +25,7 @@ User = get_user_model()
 factory = RequestFactory()
 
 def test_product_creation():
-    print("=== DJANGO DEBUG TEST START ===")
+    logger.info("=== DJANGO DEBUG TEST START ===")
     
     # Get or create a test user
     user, created = User.objects.get_or_create(
@@ -36,14 +36,14 @@ def test_product_creation():
             'last_name': 'User'
         }
     )
-    print(f"Test user: {user.email} (created: {created})")
+    logger.info(f"Test user: {user.email} (created: {created})")
     
     # Get or create a test category
     category, created = Category.objects.get_or_create(
         name='Test Category',
         defaults={'slug': 'test-category'}
     )
-    print(f"Test category: {category.name} (created: {created})")
+    logger.info(f"Test category: {category.name} (created: {created})")
     
     # Test data that matches what the frontend sends
     test_data = {
@@ -68,7 +68,7 @@ def test_product_creation():
         'is_digital': 'false',
     }
     
-    print(f"Test data: {test_data}")
+    logger.debug(f"Test data: {test_data}")
     
     # Create a mock request
     request = factory.post('/api/marketplace/products/', test_data)
@@ -77,20 +77,20 @@ def test_product_creation():
     # Test serializer
     try:
         serializer = ProductCreateUpdateSerializer(data=test_data, context={'request': request})
-        print(f"Serializer is_valid: {serializer.is_valid()}")
+        logger.info(f"Serializer is_valid: {serializer.is_valid()}")
         
         if not serializer.is_valid():
-            print(f"Serializer errors: {serializer.errors}")
+            logger.error(f"Serializer errors: {serializer.errors}")
         else:
             product = serializer.save()
-            print(f"Product created: {product.name} (ID: {product.id})")
+            logger.info(f"Product created: {product.name} (ID: {product.id})")
             
     except Exception as e:
-        print(f"Error: {e}")
+        logger.exception(f"Error: {e}")
         import traceback
         traceback.print_exc()
     
-    print("=== DJANGO DEBUG TEST END ===")
+    logger.info("=== DJANGO DEBUG TEST END ===")
 
 if __name__ == '__main__':
     test_product_creation()
