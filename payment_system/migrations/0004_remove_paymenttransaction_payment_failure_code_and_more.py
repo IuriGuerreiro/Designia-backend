@@ -6,24 +6,38 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('payment_system', '0003_add_payment_intent_failure_tracking'),
+        ("payment_system", "0003_add_payment_intent_failure_tracking"),
     ]
 
     operations = [
         migrations.RemoveField(
-            model_name='paymenttransaction',
-            name='payment_failure_code',
+            model_name="paymenttransaction",
+            name="payment_failure_code",
         ),
         migrations.RemoveField(
-            model_name='paymenttransaction',
-            name='payment_failure_reason',
+            model_name="paymenttransaction",
+            name="payment_failure_reason",
         ),
         migrations.AlterField(
-            model_name='paymenttransaction',
-            name='status',
-            field=models.CharField(choices=[('pending', 'Pending'), ('held', 'On Hold'), ('processing', 'Processing'), ('completed', 'Completed'), ('released', 'Released to Seller'), ('disputed', 'Disputed'), ('refunded', 'Refunded'), ('failed', 'Failed'), ('cancelled', 'Cancelled')], default='pending', max_length=20),
+            model_name="paymenttransaction",
+            name="status",
+            field=models.CharField(
+                choices=[
+                    ("pending", "Pending"),
+                    ("held", "On Hold"),
+                    ("processing", "Processing"),
+                    ("completed", "Completed"),
+                    ("released", "Released to Seller"),
+                    ("disputed", "Disputed"),
+                    ("refunded", "Refunded"),
+                    ("failed", "Failed"),
+                    ("cancelled", "Cancelled"),
+                ],
+                default="pending",
+                max_length=20,
+            ),
         ),
         migrations.DeleteModel(
-            name='WebhookEvent',
+            name="WebhookEvent",
         ),
     ]

@@ -48,7 +48,7 @@ check_python() {
         print_error "Python 3 is not installed. Please install Python 3.9+ first."
         exit 1
     fi
-    
+
     PYTHON_VERSION=$(python3 --version | cut -d' ' -f2)
     print_success "Python $PYTHON_VERSION found"
 }
@@ -56,7 +56,7 @@ check_python() {
 # Setup virtual environment
 setup_venv() {
     print_status "Setting up virtual environment..."
-    
+
     if [ ! -d "$VENV_DIR" ]; then
         print_status "Creating virtual environment..."
         python3 -m venv "$VENV_DIR"
@@ -64,7 +64,7 @@ setup_venv() {
     else
         print_success "Virtual environment already exists"
     fi
-    
+
     # Activate virtual environment
     source "$VENV_DIR/bin/activate"
     print_success "Virtual environment activated"
@@ -73,12 +73,12 @@ setup_venv() {
 # Install dependencies
 install_dependencies() {
     print_status "Installing Python dependencies..."
-    
+
     if [ ! -f "$PROJECT_DIR/requirements.txt" ]; then
         print_error "requirements.txt not found!"
         exit 1
     fi
-    
+
     pip install --upgrade pip
     pip install -r requirements.txt
     print_success "Dependencies installed"
@@ -87,7 +87,7 @@ install_dependencies() {
 # Check database configuration
 check_database() {
     print_status "Checking database configuration..."
-    
+
     # Check if .env file exists
     if [ ! -f "$PROJECT_DIR/.env" ]; then
         print_warning ".env file not found. Creating from example..."
@@ -115,7 +115,7 @@ run_migrations() {
 # Check Redis
 check_redis() {
     print_status "Checking Redis connection..."
-    
+
     if ! command -v redis-cli &> /dev/null; then
         print_warning "Redis CLI not found. Please install Redis server."
         print_warning "You can still run the server, but Celery tasks won't work."
@@ -138,7 +138,7 @@ check_redis() {
 # Create superuser if needed
 create_superuser() {
     print_status "Checking for superuser..."
-    
+
     # Check if superuser exists
     if python manage.py shell -c "from django.contrib.auth.models import User; print('Superuser exists' if User.objects.filter(is_superuser=True).exists() else 'No superuser')" 2>/dev/null | grep -q "Superuser exists"; then
         print_success "Superuser already exists"
@@ -159,7 +159,7 @@ start_daphne() {
     echo ""
     echo -e "${YELLOW}Press Ctrl+C to stop the server${NC}"
     echo ""
-    
+
     # Run Daphne directly (fallback to module if PATH lacks daphne)
     if command -v daphne >/dev/null 2>&1; then
         daphne -b "$HOST" -p "$PORT" designiaBackend.asgi:application
@@ -171,7 +171,7 @@ start_daphne() {
 # Main execution
 main() {
     cd "$PROJECT_DIR"
-    
+
     check_python
     setup_venv
     install_dependencies
@@ -184,8 +184,3 @@ main() {
 
 # Run main function
 main "$@"
-
-
-
-
-

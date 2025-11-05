@@ -14,18 +14,19 @@ Including another URLconf
     1. Import the include() function: from django.urls import include, path
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
-from django.contrib import admin
-from django.urls import path, include
+
 from django.conf import settings
 from django.conf.urls.static import static
+from django.contrib import admin
+from django.urls import include, path
 
 urlpatterns = [
-    path('admin/', admin.site.urls),
-    path('api/auth/', include('authentication.urls')),
-    path('api/marketplace/', include('marketplace.urls')),
-    path('api/activity/', include('activity.urls')),
-    path('api/payments/', include('payment_system.urls')),
-    path('api/chat/', include('chat.urls')),
+    path("admin/", admin.site.urls),
+    path("api/auth/", include("authentication.urls")),
+    path("api/marketplace/", include("marketplace.urls")),
+    path("api/activity/", include("activity.urls")),
+    path("api/payments/", include("payment_system.urls")),
+    path("api/chat/", include("chat.urls")),
 ]
 
 # Serve media files during development

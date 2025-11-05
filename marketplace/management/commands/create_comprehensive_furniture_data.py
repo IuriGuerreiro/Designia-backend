@@ -27,20 +27,27 @@ Examples:
     python manage.py create_comprehensive_furniture_data --categories living_room,bedroom --products 100
 """
 
-from django.core.management.base import BaseCommand, CommandError
-from django.contrib.auth import get_user_model
-from django.utils.text import slugify
-from django.db import transaction
-from django.utils import timezone
-from decimal import Decimal, ROUND_HALF_UP
 import random
 import uuid
 from datetime import timedelta
-from typing import List, Dict, Any, Optional
+from decimal import ROUND_HALF_UP, Decimal
+from typing import Any, Dict, List, Optional
+
+from django.contrib.auth import get_user_model
+from django.core.management.base import BaseCommand, CommandError
+from django.db import transaction
+from django.utils import timezone
+from django.utils.text import slugify
 
 from marketplace.models import (
-    Category, Product, ProductImage, ProductReview,
-    ProductFavorite, Cart, CartItem, ProductMetrics
+    Cart,
+    CartItem,
+    Category,
+    Product,
+    ProductFavorite,
+    ProductImage,
+    ProductMetrics,
+    ProductReview,
 )
 
 User = get_user_model()
@@ -60,205 +67,272 @@ class FurnitureDataGenerator:
         """Generate realistic furniture brand names."""
         return [
             # Luxury brands
-            'Heritage Crafts', 'Artisan Studio', 'Royal Oak', 'Prestige Living',
-            'Elite Furnishings', 'Sovereign Interiors', 'Noble House', 'Majestic Home',
-
+            "Heritage Crafts",
+            "Artisan Studio",
+            "Royal Oak",
+            "Prestige Living",
+            "Elite Furnishings",
+            "Sovereign Interiors",
+            "Noble House",
+            "Majestic Home",
             # Contemporary brands
-            'ModernSpace', 'UrbanLoft', 'Contemporary Design Co', 'Sleek Living',
-            'MetroStyle', 'CityChic', 'Minimalist Home', 'Design Forward',
-
+            "ModernSpace",
+            "UrbanLoft",
+            "Contemporary Design Co",
+            "Sleek Living",
+            "MetroStyle",
+            "CityChic",
+            "Minimalist Home",
+            "Design Forward",
             # Traditional brands
-            'Classic Comfort', 'Traditional Home', 'Timeless Pieces', 'Country Manor',
-            'Rustic Charm', 'Vintage Collection', 'Antique Style', 'Heritage Home',
-
+            "Classic Comfort",
+            "Traditional Home",
+            "Timeless Pieces",
+            "Country Manor",
+            "Rustic Charm",
+            "Vintage Collection",
+            "Antique Style",
+            "Heritage Home",
             # Affordable brands
-            'HomeEssentials', 'FurnitureValue', 'Budget Living', 'SmartHome',
-            'EconoStyle', 'QuickFurnish', 'BasicComfort', 'SimpleStyle',
-
+            "HomeEssentials",
+            "FurnitureValue",
+            "Budget Living",
+            "SmartHome",
+            "EconoStyle",
+            "QuickFurnish",
+            "BasicComfort",
+            "SimpleStyle",
             # Specialty brands
-            'EcoGreen Furniture', 'Sustainable Living', 'GreenChoice', 'NaturalHome',
-            'TechFurniture', 'SmartLiving', 'InnovateFurn', 'FutureFurn',
-
+            "EcoGreen Furniture",
+            "Sustainable Living",
+            "GreenChoice",
+            "NaturalHome",
+            "TechFurniture",
+            "SmartLiving",
+            "InnovateFurn",
+            "FutureFurn",
             # International brands
-            'Scandinavian Nordic', 'Italian Luxe', 'German Precision', 'French Elegance',
-            'Japanese Zen', 'American Craft', 'British Classic', 'Swiss Design'
+            "Scandinavian Nordic",
+            "Italian Luxe",
+            "German Precision",
+            "French Elegance",
+            "Japanese Zen",
+            "American Craft",
+            "British Classic",
+            "Swiss Design",
         ]
 
     def _generate_material_combinations(self) -> Dict[str, List[str]]:
         """Generate realistic material combinations by furniture type."""
         return {
-            'seating': [
-                'Premium Leather, Hardwood Frame, Memory Foam',
-                'Velvet Upholstery, Birch Wood, High-Density Foam',
-                'Breathable Mesh, Aluminum Frame, Ergonomic Padding',
-                'Linen Fabric, Oak Frame, Spring System',
-                'Microfiber, Steel Frame, Polyurethane Foam',
-                'Canvas, Reclaimed Wood, Natural Latex',
-                'Wool Blend, Walnut Wood, Down Fill',
-                'Synthetic Leather, Pine Frame, Gel Memory Foam'
+            "seating": [
+                "Premium Leather, Hardwood Frame, Memory Foam",
+                "Velvet Upholstery, Birch Wood, High-Density Foam",
+                "Breathable Mesh, Aluminum Frame, Ergonomic Padding",
+                "Linen Fabric, Oak Frame, Spring System",
+                "Microfiber, Steel Frame, Polyurethane Foam",
+                "Canvas, Reclaimed Wood, Natural Latex",
+                "Wool Blend, Walnut Wood, Down Fill",
+                "Synthetic Leather, Pine Frame, Gel Memory Foam",
             ],
-            'tables': [
-                'Solid Oak, Steel Hardware, Natural Finish',
-                'Tempered Glass, Chrome Base, Safety Edges',
-                'Reclaimed Wood, Industrial Metal, Vintage Finish',
-                'Marble Top, Brass Base, Polished Finish',
-                'Bamboo Surface, Steel Legs, Eco-Friendly Coating',
-                'Live Edge Wood, Raw Steel, Natural Oils',
-                'High-Gloss Lacquer, MDF Core, UV Protection',
-                'Concrete Top, Powder-Coated Steel, Sealed Surface'
+            "tables": [
+                "Solid Oak, Steel Hardware, Natural Finish",
+                "Tempered Glass, Chrome Base, Safety Edges",
+                "Reclaimed Wood, Industrial Metal, Vintage Finish",
+                "Marble Top, Brass Base, Polished Finish",
+                "Bamboo Surface, Steel Legs, Eco-Friendly Coating",
+                "Live Edge Wood, Raw Steel, Natural Oils",
+                "High-Gloss Lacquer, MDF Core, UV Protection",
+                "Concrete Top, Powder-Coated Steel, Sealed Surface",
             ],
-            'storage': [
-                'Engineered Wood, Metal Hardware, Laminate Finish',
-                'Solid Pine, Brass Handles, Natural Stain',
-                'Plywood, Soft-Close Hinges, Painted Finish',
-                'Particle Board, Chrome Handles, Melamine Surface',
-                'Hardwood Veneer, Steel Frame, Water-Resistant Coating',
-                'Bamboo Panels, Aluminum Frame, Sustainable Finish',
-                'MDF, Hidden Hinges, High-Gloss Paint',
-                'Reclaimed Barnwood, Iron Hardware, Weathered Finish'
+            "storage": [
+                "Engineered Wood, Metal Hardware, Laminate Finish",
+                "Solid Pine, Brass Handles, Natural Stain",
+                "Plywood, Soft-Close Hinges, Painted Finish",
+                "Particle Board, Chrome Handles, Melamine Surface",
+                "Hardwood Veneer, Steel Frame, Water-Resistant Coating",
+                "Bamboo Panels, Aluminum Frame, Sustainable Finish",
+                "MDF, Hidden Hinges, High-Gloss Paint",
+                "Reclaimed Barnwood, Iron Hardware, Weathered Finish",
             ],
-            'lighting': [
-                'Brushed Aluminum, Fabric Shade, LED Compatible',
-                'Brass Finish, Glass Shade, Dimmable Controls',
-                'Powder-Coated Steel, Linen Shade, Touch Controls',
-                'Crystal Elements, Chrome Base, RGB LED',
-                'Natural Wood, Paper Shade, Smart Controls',
-                'Copper Finish, Metal Shade, Industrial Style',
-                'Ceramic Base, Silk Shade, Traditional Style',
-                'Plastic Housing, Acrylic Diffuser, Modern LED'
-            ]
+            "lighting": [
+                "Brushed Aluminum, Fabric Shade, LED Compatible",
+                "Brass Finish, Glass Shade, Dimmable Controls",
+                "Powder-Coated Steel, Linen Shade, Touch Controls",
+                "Crystal Elements, Chrome Base, RGB LED",
+                "Natural Wood, Paper Shade, Smart Controls",
+                "Copper Finish, Metal Shade, Industrial Style",
+                "Ceramic Base, Silk Shade, Traditional Style",
+                "Plastic Housing, Acrylic Diffuser, Modern LED",
+            ],
         }
 
     def _generate_color_palettes(self) -> Dict[str, List[List[str]]]:
         """Generate realistic color combinations by style."""
         return {
-            'modern': [
-                ['White', 'Black', 'Gray'],
-                ['Charcoal', 'Silver', 'White'],
-                ['Navy', 'White', 'Gold'],
-                ['Black', 'Walnut', 'Steel'],
-                ['Cream', 'Taupe', 'Bronze']
+            "modern": [
+                ["White", "Black", "Gray"],
+                ["Charcoal", "Silver", "White"],
+                ["Navy", "White", "Gold"],
+                ["Black", "Walnut", "Steel"],
+                ["Cream", "Taupe", "Bronze"],
             ],
-            'traditional': [
-                ['Mahogany', 'Burgundy', 'Gold'],
-                ['Cherry', 'Forest Green', 'Brass'],
-                ['Oak', 'Ivory', 'Antique Bronze'],
-                ['Espresso', 'Cream', 'Copper'],
-                ['Walnut', 'Hunter Green', 'Gold']
+            "traditional": [
+                ["Mahogany", "Burgundy", "Gold"],
+                ["Cherry", "Forest Green", "Brass"],
+                ["Oak", "Ivory", "Antique Bronze"],
+                ["Espresso", "Cream", "Copper"],
+                ["Walnut", "Hunter Green", "Gold"],
             ],
-            'scandinavian': [
-                ['White', 'Natural Wood', 'Light Gray'],
-                ['Birch', 'Off-White', 'Soft Blue'],
-                ['Pine', 'Cream', 'Sage Green'],
-                ['Ash Wood', 'Pure White', 'Charcoal'],
-                ['Maple', 'Ivory', 'Dusty Rose']
+            "scandinavian": [
+                ["White", "Natural Wood", "Light Gray"],
+                ["Birch", "Off-White", "Soft Blue"],
+                ["Pine", "Cream", "Sage Green"],
+                ["Ash Wood", "Pure White", "Charcoal"],
+                ["Maple", "Ivory", "Dusty Rose"],
             ],
-            'industrial': [
-                ['Black', 'Raw Steel', 'Charcoal'],
-                ['Rust', 'Dark Gray', 'Copper'],
-                ['Gunmetal', 'Concrete Gray', 'Bronze'],
-                ['Iron Black', 'Weathered Steel', 'Dark Brown'],
-                ['Anthracite', 'Brushed Metal', 'Charcoal'
-]
+            "industrial": [
+                ["Black", "Raw Steel", "Charcoal"],
+                ["Rust", "Dark Gray", "Copper"],
+                ["Gunmetal", "Concrete Gray", "Bronze"],
+                ["Iron Black", "Weathered Steel", "Dark Brown"],
+                ["Anthracite", "Brushed Metal", "Charcoal"],
             ],
-            'bohemian': [
-                ['Terracotta', 'Cream', 'Gold'],
-                ['Emerald', 'Brass', 'Ivory'],
-                ['Rust', 'Sage', 'Natural'],
-                ['Mustard', 'Teal', 'Copper'],
-                ['Burnt Orange', 'Forest Green', 'Bronze']
-            ]
+            "bohemian": [
+                ["Terracotta", "Cream", "Gold"],
+                ["Emerald", "Brass", "Ivory"],
+                ["Rust", "Sage", "Natural"],
+                ["Mustard", "Teal", "Copper"],
+                ["Burnt Orange", "Forest Green", "Bronze"],
+            ],
         }
 
     def _generate_descriptors(self) -> Dict[str, List[str]]:
         """Generate descriptive adjectives and features by category."""
         return {
-            'quality': [
-                'Premium', 'Luxury', 'High-Quality', 'Professional', 'Commercial-Grade',
-                'Artisan-Crafted', 'Hand-Selected', 'Superior', 'Elite', 'Masterwork'
+            "quality": [
+                "Premium",
+                "Luxury",
+                "High-Quality",
+                "Professional",
+                "Commercial-Grade",
+                "Artisan-Crafted",
+                "Hand-Selected",
+                "Superior",
+                "Elite",
+                "Masterwork",
             ],
-            'style': [
-                'Modern', 'Contemporary', 'Traditional', 'Rustic', 'Industrial',
-                'Scandinavian', 'Mid-Century', 'Bohemian', 'Minimalist', 'Eclectic',
-                'Vintage', 'Art Deco', 'Farmhouse', 'Mediterranean', 'Transitional'
+            "style": [
+                "Modern",
+                "Contemporary",
+                "Traditional",
+                "Rustic",
+                "Industrial",
+                "Scandinavian",
+                "Mid-Century",
+                "Bohemian",
+                "Minimalist",
+                "Eclectic",
+                "Vintage",
+                "Art Deco",
+                "Farmhouse",
+                "Mediterranean",
+                "Transitional",
             ],
-            'comfort': [
-                'Ergonomic', 'Comfortable', 'Supportive', 'Plush', 'Cushioned',
-                'Breathable', 'Adaptive', 'Contoured', 'Soft', 'Firm'
+            "comfort": [
+                "Ergonomic",
+                "Comfortable",
+                "Supportive",
+                "Plush",
+                "Cushioned",
+                "Breathable",
+                "Adaptive",
+                "Contoured",
+                "Soft",
+                "Firm",
             ],
-            'features': [
-                'Adjustable', 'Convertible', 'Modular', 'Space-Saving', 'Multi-Functional',
-                'Storage-Equipped', 'Weather-Resistant', 'Easy-Assembly', 'Tool-Free',
-                'Stackable', 'Foldable', 'Expandable'
-            ]
+            "features": [
+                "Adjustable",
+                "Convertible",
+                "Modular",
+                "Space-Saving",
+                "Multi-Functional",
+                "Storage-Equipped",
+                "Weather-Resistant",
+                "Easy-Assembly",
+                "Tool-Free",
+                "Stackable",
+                "Foldable",
+                "Expandable",
+            ],
         }
 
 
 class Command(BaseCommand):
-    help = 'Create comprehensive, realistic furniture marketplace data with full ecosystem'
+    help = "Create comprehensive, realistic furniture marketplace data with full ecosystem"
 
     def add_arguments(self, parser):
         parser.add_argument(
-            '--clear',
-            action='store_true',
-            help='Clear existing marketplace data before creating new data',
+            "--clear",
+            action="store_true",
+            help="Clear existing marketplace data before creating new data",
         )
         parser.add_argument(
-            '--products',
+            "--products",
             type=int,
             default=500,
-            help='Number of products to create (default: 500)',
+            help="Number of products to create (default: 500)",
         )
         parser.add_argument(
-            '--users',
+            "--users",
             type=int,
             default=20,
-            help='Number of test users to create (default: 20)',
+            help="Number of test users to create (default: 20)",
         )
         parser.add_argument(
-            '--categories',
+            "--categories",
             type=str,
-            help='Comma-separated category filters (e.g., living_room,bedroom)',
+            help="Comma-separated category filters (e.g., living_room,bedroom)",
         )
         parser.add_argument(
-            '--reviews',
+            "--reviews",
             type=int,
             default=1000,
-            help='Number of product reviews to create (default: 1000)',
+            help="Number of product reviews to create (default: 1000)",
         )
         parser.add_argument(
-            '--favorites',
+            "--favorites",
             type=int,
             default=500,
-            help='Number of favorite relationships to create (default: 500)',
+            help="Number of favorite relationships to create (default: 500)",
         )
         parser.add_argument(
-            '--cart-items',
+            "--cart-items",
             type=int,
             default=100,
-            help='Number of cart items to create (default: 100)',
+            help="Number of cart items to create (default: 100)",
         )
         parser.add_argument(
-            '--no-images',
-            action='store_true',
-            help='Skip creating product images (faster generation)',
+            "--no-images",
+            action="store_true",
+            help="Skip creating product images (faster generation)",
         )
         parser.add_argument(
-            '--seed',
+            "--seed",
             type=int,
-            help='Random seed for reproducible data generation',
+            help="Random seed for reproducible data generation",
         )
         parser.add_argument(
-            '--batch-size',
+            "--batch-size",
             type=int,
             default=50,
-            help='Batch size for bulk operations (default: 50)',
+            help="Batch size for bulk operations (default: 50)",
         )
 
     def handle(self, *args, **options):
         # Set random seed for reproducible results
-        if options['seed']:
-            random.seed(options['seed'])
+        if options["seed"]:
+            random.seed(options["seed"])
             self.stdout.write(f"Using random seed: {options['seed']}")
 
         # Initialize data generator
@@ -266,33 +340,32 @@ class Command(BaseCommand):
 
         # Parse category filter
         category_filter = None
-        if options['categories']:
-            category_filter = [cat.strip() for cat in options['categories'].split(',')]
+        if options["categories"]:
+            category_filter = [cat.strip() for cat in options["categories"].split(",")]
             self.stdout.write(f"Creating data for categories: {category_filter}")
 
         try:
             with transaction.atomic():
-                if options['clear']:
+                if options["clear"]:
                     self._clear_existing_data()
 
                 # Create data in proper order
                 categories = self._create_comprehensive_categories(category_filter)
-                users = self._create_diverse_users(options['users'])
+                users = self._create_diverse_users(options["users"])
                 products = self._create_realistic_products(
-                    categories, users, options['products'],
-                    not options['no_images'], options['batch_size']
+                    categories, users, options["products"], not options["no_images"], options["batch_size"]
                 )
 
                 if products:
-                    self._create_product_reviews(products, users, options['reviews'])
-                    self._create_favorites(products, users, options['favorites'])
-                    self._create_cart_items(products, users, options['cart_items'])
+                    self._create_product_reviews(products, users, options["reviews"])
+                    self._create_favorites(products, users, options["favorites"])
+                    self._create_cart_items(products, users, options["cart_items"])
                     self._update_product_metrics(products)
 
                 self._display_summary(categories, users, products, options)
 
         except Exception as e:
-            raise CommandError(f"Data generation failed: {str(e)}")
+            raise CommandError(f"Data generation failed: {str(e)}") from e
 
     def _clear_existing_data(self):
         """Safely clear existing marketplace data."""
@@ -317,122 +390,121 @@ class Command(BaseCommand):
 
         # Comprehensive category structure with subcategories
         categories_structure = {
-            'living_room': {
-                'name': 'Living Room',
-                'description': 'Furniture for comfortable living spaces',
-                'subcategories': [
-                    ('Sofas & Sectionals', 'All types of sofas, sectionals, and couches'),
-                    ('Coffee Tables', 'Coffee tables, side tables, and accent tables'),
-                    ('TV Stands & Media', 'Entertainment centers, TV stands, and media storage'),
-                    ('Accent Chairs', 'Armchairs, recliners, and accent seating'),
-                    ('Ottomans & Benches', 'Ottomans, footstools, and storage benches'),
-                    ('Bookcases & Shelving', 'Living room storage and display units'),
-                ]
+            "living_room": {
+                "name": "Living Room",
+                "description": "Furniture for comfortable living spaces",
+                "subcategories": [
+                    ("Sofas & Sectionals", "All types of sofas, sectionals, and couches"),
+                    ("Coffee Tables", "Coffee tables, side tables, and accent tables"),
+                    ("TV Stands & Media", "Entertainment centers, TV stands, and media storage"),
+                    ("Accent Chairs", "Armchairs, recliners, and accent seating"),
+                    ("Ottomans & Benches", "Ottomans, footstools, and storage benches"),
+                    ("Bookcases & Shelving", "Living room storage and display units"),
+                ],
             },
-            'bedroom': {
-                'name': 'Bedroom',
-                'description': 'Furniture for restful bedroom spaces',
-                'subcategories': [
-                    ('Beds & Frames', 'Bed frames, platform beds, and headboards'),
-                    ('Mattresses', 'Memory foam, spring, and hybrid mattresses'),
-                    ('Dressers & Chests', 'Bedroom storage and organization'),
-                    ('Nightstands', 'Bedside tables and night storage'),
-                    ('Wardrobes & Armoires', 'Bedroom clothing storage'),
-                    ('Vanities & Mirrors', 'Makeup vanities and bedroom mirrors'),
-                ]
+            "bedroom": {
+                "name": "Bedroom",
+                "description": "Furniture for restful bedroom spaces",
+                "subcategories": [
+                    ("Beds & Frames", "Bed frames, platform beds, and headboards"),
+                    ("Mattresses", "Memory foam, spring, and hybrid mattresses"),
+                    ("Dressers & Chests", "Bedroom storage and organization"),
+                    ("Nightstands", "Bedside tables and night storage"),
+                    ("Wardrobes & Armoires", "Bedroom clothing storage"),
+                    ("Vanities & Mirrors", "Makeup vanities and bedroom mirrors"),
+                ],
             },
-            'dining_room': {
-                'name': 'Dining Room',
-                'description': 'Furniture for dining and entertaining',
-                'subcategories': [
-                    ('Dining Tables', 'All sizes and styles of dining tables'),
-                    ('Dining Chairs', 'Dining room seating solutions'),
-                    ('Bar Stools', 'Counter height and bar height seating'),
-                    ('Buffets & Sideboards', 'Dining room storage and serving'),
-                    ('China Cabinets', 'Display and storage for dishes'),
-                    ('Kitchen Islands', 'Mobile and fixed kitchen islands'),
-                ]
+            "dining_room": {
+                "name": "Dining Room",
+                "description": "Furniture for dining and entertaining",
+                "subcategories": [
+                    ("Dining Tables", "All sizes and styles of dining tables"),
+                    ("Dining Chairs", "Dining room seating solutions"),
+                    ("Bar Stools", "Counter height and bar height seating"),
+                    ("Buffets & Sideboards", "Dining room storage and serving"),
+                    ("China Cabinets", "Display and storage for dishes"),
+                    ("Kitchen Islands", "Mobile and fixed kitchen islands"),
+                ],
             },
-            'office': {
-                'name': 'Office & Study',
-                'description': 'Furniture for productive workspaces',
-                'subcategories': [
-                    ('Desks', 'Computer desks, writing desks, and workstations'),
-                    ('Office Chairs', 'Ergonomic and executive office seating'),
-                    ('Filing Cabinets', 'Document and office storage'),
-                    ('Bookcases', 'Office and study storage'),
-                    ('Conference Tables', 'Meeting and conference room furniture'),
-                    ('Reception Furniture', 'Waiting area and reception seating'),
-                ]
+            "office": {
+                "name": "Office & Study",
+                "description": "Furniture for productive workspaces",
+                "subcategories": [
+                    ("Desks", "Computer desks, writing desks, and workstations"),
+                    ("Office Chairs", "Ergonomic and executive office seating"),
+                    ("Filing Cabinets", "Document and office storage"),
+                    ("Bookcases", "Office and study storage"),
+                    ("Conference Tables", "Meeting and conference room furniture"),
+                    ("Reception Furniture", "Waiting area and reception seating"),
+                ],
             },
-            'outdoor': {
-                'name': 'Outdoor & Patio',
-                'description': 'Weather-resistant outdoor furniture',
-                'subcategories': [
-                    ('Patio Sets', 'Complete outdoor dining and seating sets'),
-                    ('Outdoor Sofas', 'Weather-resistant outdoor seating'),
-                    ('Garden Furniture', 'Benches, planters, and garden accessories'),
-                    ('Umbrellas & Shade', 'Patio umbrellas and shade structures'),
-                    ('Outdoor Storage', 'Deck boxes and outdoor organization'),
-                    ('Fire Pits & Heaters', 'Outdoor heating and fire features'),
-                ]
+            "outdoor": {
+                "name": "Outdoor & Patio",
+                "description": "Weather-resistant outdoor furniture",
+                "subcategories": [
+                    ("Patio Sets", "Complete outdoor dining and seating sets"),
+                    ("Outdoor Sofas", "Weather-resistant outdoor seating"),
+                    ("Garden Furniture", "Benches, planters, and garden accessories"),
+                    ("Umbrellas & Shade", "Patio umbrellas and shade structures"),
+                    ("Outdoor Storage", "Deck boxes and outdoor organization"),
+                    ("Fire Pits & Heaters", "Outdoor heating and fire features"),
+                ],
             },
-            'storage': {
-                'name': 'Storage & Organization',
-                'description': 'Solutions for home organization',
-                'subcategories': [
-                    ('Shelving Units', 'Freestanding and wall-mounted shelving'),
-                    ('Storage Cabinets', 'Multi-purpose storage solutions'),
-                    ('Closet Systems', 'Wardrobe and closet organization'),
-                    ('Garage Storage', 'Heavy-duty garage organization'),
-                    ('Pantry Storage', 'Kitchen and pantry organization'),
-                    ('Bathroom Storage', 'Bathroom organization solutions'),
-                ]
+            "storage": {
+                "name": "Storage & Organization",
+                "description": "Solutions for home organization",
+                "subcategories": [
+                    ("Shelving Units", "Freestanding and wall-mounted shelving"),
+                    ("Storage Cabinets", "Multi-purpose storage solutions"),
+                    ("Closet Systems", "Wardrobe and closet organization"),
+                    ("Garage Storage", "Heavy-duty garage organization"),
+                    ("Pantry Storage", "Kitchen and pantry organization"),
+                    ("Bathroom Storage", "Bathroom organization solutions"),
+                ],
             },
-            'lighting': {
-                'name': 'Lighting',
-                'description': 'Illumination for every room',
-                'subcategories': [
-                    ('Table Lamps', 'Desk lamps and accent lighting'),
-                    ('Floor Lamps', 'Standing lamps and torchieres'),
-                    ('Chandeliers', 'Ceiling-mounted decorative lighting'),
-                    ('Pendant Lights', 'Hanging lights and fixtures'),
-                    ('Wall Sconces', 'Wall-mounted lighting'),
-                    ('Smart Lighting', 'App-controlled and smart lighting'),
-                ]
+            "lighting": {
+                "name": "Lighting",
+                "description": "Illumination for every room",
+                "subcategories": [
+                    ("Table Lamps", "Desk lamps and accent lighting"),
+                    ("Floor Lamps", "Standing lamps and torchieres"),
+                    ("Chandeliers", "Ceiling-mounted decorative lighting"),
+                    ("Pendant Lights", "Hanging lights and fixtures"),
+                    ("Wall Sconces", "Wall-mounted lighting"),
+                    ("Smart Lighting", "App-controlled and smart lighting"),
+                ],
             },
-            'decor': {
-                'name': 'Decor & Accessories',
-                'description': 'Decorative items and accessories',
-                'subcategories': [
-                    ('Wall Art', 'Paintings, prints, and wall decorations'),
-                    ('Mirrors', 'Decorative and functional mirrors'),
-                    ('Rugs & Carpets', 'Area rugs and floor coverings'),
-                    ('Curtains & Blinds', 'Window treatments and privacy'),
-                    ('Vases & Planters', 'Decorative containers and plant holders'),
-                    ('Sculptures & Figurines', 'Decorative art objects'),
-                ]
-            }
+            "decor": {
+                "name": "Decor & Accessories",
+                "description": "Decorative items and accessories",
+                "subcategories": [
+                    ("Wall Art", "Paintings, prints, and wall decorations"),
+                    ("Mirrors", "Decorative and functional mirrors"),
+                    ("Rugs & Carpets", "Area rugs and floor coverings"),
+                    ("Curtains & Blinds", "Window treatments and privacy"),
+                    ("Vases & Planters", "Decorative containers and plant holders"),
+                    ("Sculptures & Figurines", "Decorative art objects"),
+                ],
+            },
         }
 
         # Filter categories if specified
         if category_filter:
-            filtered_structure = {k: v for k, v in categories_structure.items()
-                                if k in category_filter}
+            filtered_structure = {k: v for k, v in categories_structure.items() if k in category_filter}
             categories_structure = filtered_structure
 
         created_categories = []
 
-        for cat_key, cat_data in categories_structure.items():
+        for _cat_key, cat_data in categories_structure.items():
             # Create main category
             main_category, created = Category.objects.get_or_create(
-                slug=slugify(cat_data['name']),
+                slug=slugify(cat_data["name"]),
                 defaults={
-                    'name': cat_data['name'],
-                    'description': cat_data['description'],
-                    'parent': None,
-                    'is_active': True
-                }
+                    "name": cat_data["name"],
+                    "description": cat_data["description"],
+                    "parent": None,
+                    "is_active": True,
+                },
             )
             created_categories.append(main_category)
 
@@ -440,15 +512,15 @@ class Command(BaseCommand):
                 self.stdout.write(f"  [FOLDER] Created main category: {main_category.name}")
 
             # Create subcategories
-            for subcat_name, subcat_desc in cat_data['subcategories']:
+            for subcat_name, subcat_desc in cat_data["subcategories"]:
                 subcategory, sub_created = Category.objects.get_or_create(
                     slug=slugify(subcat_name),
                     defaults={
-                        'name': subcat_name,
-                        'description': subcat_desc,
-                        'parent': main_category,
-                        'is_active': True
-                    }
+                        "name": subcat_name,
+                        "description": subcat_desc,
+                        "parent": main_category,
+                        "is_active": True,
+                    },
                 )
                 created_categories.append(subcategory)
 
@@ -465,106 +537,126 @@ class Command(BaseCommand):
         user_profiles = [
             # Individual sellers
             {
-                'type': 'individual',
-                'usernames': ['furniture_lover', 'home_decorator', 'design_enthusiast', 'collector_vintage'],
-                'first_names': ['Alice', 'Bob', 'Carol', 'David', 'Emma', 'Frank', 'Grace', 'Henry'],
-                'last_names': ['Smith', 'Johnson', 'Williams', 'Brown', 'Jones', 'Garcia', 'Miller', 'Davis'],
-                'bio_templates': [
-                    'Passionate about interior design and finding unique pieces.',
-                    'Love discovering and sharing beautiful furniture.',
-                    'Home decorator with an eye for quality pieces.',
-                    'Collector of vintage and antique furniture.'
+                "type": "individual",
+                "usernames": ["furniture_lover", "home_decorator", "design_enthusiast", "collector_vintage"],
+                "first_names": ["Alice", "Bob", "Carol", "David", "Emma", "Frank", "Grace", "Henry"],
+                "last_names": ["Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller", "Davis"],
+                "bio_templates": [
+                    "Passionate about interior design and finding unique pieces.",
+                    "Love discovering and sharing beautiful furniture.",
+                    "Home decorator with an eye for quality pieces.",
+                    "Collector of vintage and antique furniture.",
                 ],
-                'account_type': 'personal'
+                "account_type": "personal",
             },
             # Business sellers
             {
-                'type': 'business',
-                'usernames': ['premium_furnishings', 'modern_living_store', 'classic_interiors', 'eco_furniture_co'],
-                'company_names': [
-                    'Premium Furnishings Ltd', 'Modern Living Store', 'Classic Interiors Inc',
-                    'Eco Furniture Company', 'Luxury Home Solutions', 'Urban Design Studio',
-                    'Heritage Furniture House', 'Contemporary Living Co'
+                "type": "business",
+                "usernames": ["premium_furnishings", "modern_living_store", "classic_interiors", "eco_furniture_co"],
+                "company_names": [
+                    "Premium Furnishings Ltd",
+                    "Modern Living Store",
+                    "Classic Interiors Inc",
+                    "Eco Furniture Company",
+                    "Luxury Home Solutions",
+                    "Urban Design Studio",
+                    "Heritage Furniture House",
+                    "Contemporary Living Co",
                 ],
-                'bio_templates': [
-                    'Professional furniture retailer specializing in quality pieces.',
-                    'Curated collection of modern and contemporary furniture.',
-                    'Family-owned business serving customers for over 20 years.',
-                    'Sustainable furniture solutions for eco-conscious homes.'
+                "bio_templates": [
+                    "Professional furniture retailer specializing in quality pieces.",
+                    "Curated collection of modern and contemporary furniture.",
+                    "Family-owned business serving customers for over 20 years.",
+                    "Sustainable furniture solutions for eco-conscious homes.",
                 ],
-                'account_type': 'business'
+                "account_type": "business",
             },
             # Creator/Designer sellers
             {
-                'type': 'creator',
-                'usernames': ['artisan_woodworks', 'custom_designs', 'handcraft_studio', 'designer_pieces'],
-                'company_names': [
-                    'Artisan Woodworks', 'Custom Design Studio', 'Handcraft Furniture',
-                    'Designer Pieces Workshop', 'Bespoke Interiors', 'Craft & Design Co'
+                "type": "creator",
+                "usernames": ["artisan_woodworks", "custom_designs", "handcraft_studio", "designer_pieces"],
+                "company_names": [
+                    "Artisan Woodworks",
+                    "Custom Design Studio",
+                    "Handcraft Furniture",
+                    "Designer Pieces Workshop",
+                    "Bespoke Interiors",
+                    "Craft & Design Co",
                 ],
-                'bio_templates': [
-                    'Custom furniture designer creating unique, handcrafted pieces.',
-                    'Artisan woodworker specializing in bespoke furniture.',
-                    'Independent designer focused on sustainable, modern pieces.',
-                    'Creative studio producing limited edition furniture collections.'
+                "bio_templates": [
+                    "Custom furniture designer creating unique, handcrafted pieces.",
+                    "Artisan woodworker specializing in bespoke furniture.",
+                    "Independent designer focused on sustainable, modern pieces.",
+                    "Creative studio producing limited edition furniture collections.",
                 ],
-                'account_type': 'creator'
-            }
+                "account_type": "creator",
+            },
         ]
 
         created_users = []
-        languages = ['en', 'pt', 'es', 'fr', 'de']
-        countries = ['United States', 'Portugal', 'Spain', 'France', 'Germany', 'United Kingdom', 'Canada']
+        languages = ["en", "pt", "es", "fr", "de"]
+        countries = ["United States", "Portugal", "Spain", "France", "Germany", "United Kingdom", "Canada"]
         cities = [
-            'New York', 'Los Angeles', 'Chicago', 'Houston', 'Phoenix',
-            'Lisbon', 'Porto', 'Madrid', 'Barcelona', 'Paris',
-            'Berlin', 'London', 'Toronto', 'Vancouver'
+            "New York",
+            "Los Angeles",
+            "Chicago",
+            "Houston",
+            "Phoenix",
+            "Lisbon",
+            "Porto",
+            "Madrid",
+            "Barcelona",
+            "Paris",
+            "Berlin",
+            "London",
+            "Toronto",
+            "Vancouver",
         ]
 
         for i in range(count):
             profile_type = user_profiles[i % len(user_profiles)]
 
             # Generate unique username
-            base_username = random.choice(profile_type['usernames'])
-            username = f"{base_username}_{i + 1}" if i >= len(profile_type['usernames']) else base_username
+            base_username = random.choice(profile_type["usernames"])
+            username = f"{base_username}_{i + 1}" if i >= len(profile_type["usernames"]) else base_username
 
             # Generate email
             email = f"{username}@example.com"
 
             # Generate names
-            if profile_type['type'] == 'individual':
-                first_name = random.choice(profile_type['first_names'])
-                last_name = random.choice(profile_type['last_names'])
+            if profile_type["type"] == "individual":
+                first_name = random.choice(profile_type["first_names"])
+                last_name = random.choice(profile_type["last_names"])
                 company = None
             else:
-                first_name = random.choice(['John', 'Jane', 'Michael', 'Sarah', 'David', 'Lisa'])
-                last_name = random.choice(['Smith', 'Johnson', 'Brown', 'Wilson'])
-                company = random.choice(profile_type['company_names'])
+                first_name = random.choice(["John", "Jane", "Michael", "Sarah", "David", "Lisa"])
+                last_name = random.choice(["Smith", "Johnson", "Brown", "Wilson"])
+                company = random.choice(profile_type["company_names"])
 
             # Create user
             user, created = User.objects.get_or_create(
                 username=username,
                 defaults={
-                    'email': email,
-                    'first_name': first_name,
-                    'last_name': last_name,
-                    'is_active': True,
-                    'is_email_verified': True,
-                    'language': random.choice(languages),
-                }
+                    "email": email,
+                    "first_name": first_name,
+                    "last_name": last_name,
+                    "is_active": True,
+                    "is_email_verified": True,
+                    "language": random.choice(languages),
+                },
             )
 
             if created:
                 # Update profile with rich information
                 profile = user.profile
-                profile.bio = random.choice(profile_type['bio_templates'])
-                profile.account_type = profile_type['account_type']
+                profile.bio = random.choice(profile_type["bio_templates"])
+                profile.account_type = profile_type["account_type"]
                 profile.company = company
                 profile.location = f"{random.choice(cities)}, {random.choice(countries)}"
                 profile.phone_number = f"+1-555-{random.randint(100, 999)}-{random.randint(1000, 9999)}"
                 profile.is_verified_seller = random.choice([True, False])
-                profile.seller_type = profile_type['type']
-                profile.job_title = self._generate_job_title(profile_type['type'])
+                profile.seller_type = profile_type["type"]
+                profile.job_title = self._generate_job_title(profile_type["type"])
                 profile.marketing_emails_enabled = random.choice([True, False])
                 profile.newsletter_enabled = random.choice([True, False])
                 profile.save()
@@ -578,24 +670,43 @@ class Command(BaseCommand):
     def _generate_job_title(self, account_type: str) -> str:
         """Generate appropriate job titles based on account type."""
         titles = {
-            'individual': [
-                'Interior Design Enthusiast', 'Home Decorator', 'Furniture Collector',
-                'Vintage Furniture Hunter', 'Design Blogger', 'Home Stylist'
+            "individual": [
+                "Interior Design Enthusiast",
+                "Home Decorator",
+                "Furniture Collector",
+                "Vintage Furniture Hunter",
+                "Design Blogger",
+                "Home Stylist",
             ],
-            'business': [
-                'Store Manager', 'Sales Director', 'Furniture Buyer', 'Store Owner',
-                'Retail Manager', 'Inventory Specialist', 'Customer Experience Manager'
+            "business": [
+                "Store Manager",
+                "Sales Director",
+                "Furniture Buyer",
+                "Store Owner",
+                "Retail Manager",
+                "Inventory Specialist",
+                "Customer Experience Manager",
             ],
-            'creator': [
-                'Furniture Designer', 'Master Craftsperson', 'Creative Director',
-                'Artisan', 'Workshop Owner', 'Custom Furniture Maker', 'Design Studio Founder'
-            ]
+            "creator": [
+                "Furniture Designer",
+                "Master Craftsperson",
+                "Creative Director",
+                "Artisan",
+                "Workshop Owner",
+                "Custom Furniture Maker",
+                "Design Studio Founder",
+            ],
         }
-        return random.choice(titles.get(account_type, ['Furniture Professional']))
+        return random.choice(titles.get(account_type, ["Furniture Professional"]))
 
-    def _create_realistic_products(self, categories: List[Category], users: List[User],
-                                 count: int, create_images: bool = True,
-                                 batch_size: int = 50) -> List[Product]:
+    def _create_realistic_products(
+        self,
+        categories: List[Category],
+        users: List[User],
+        count: int,
+        create_images: bool = True,
+        batch_size: int = 50,
+    ) -> List[Product]:
         """Create realistic furniture products with comprehensive specifications."""
         self.stdout.write(f"[FURNITURE] Creating {count} realistic furniture products...")
 
@@ -620,8 +731,9 @@ class Command(BaseCommand):
             # Find matching templates or use generic
             matching_templates = []
             for template_cat, templates in furniture_templates.items():
-                if template_cat.lower() in subcategory.name.lower() or \
-                   any(keyword in subcategory.name.lower() for keyword in template_cat.split('_')):
+                if template_cat.lower() in subcategory.name.lower() or any(
+                    keyword in subcategory.name.lower() for keyword in template_cat.split("_")
+                ):
                     matching_templates.extend(templates)
 
             if not matching_templates:
@@ -634,11 +746,11 @@ class Command(BaseCommand):
             template = random.choice(matching_templates)
 
             # Generate unique product name
-            name_variation = self._generate_name_variation(template['base_name'], i)
+            name_variation = self._generate_name_variation(template["base_name"], i)
 
             # Generate realistic specifications
             product_data = self._generate_product_specifications(template, subcategory, users)
-            product_data['name'] = name_variation
+            product_data["name"] = name_variation
 
             # Create product
             try:
@@ -646,8 +758,8 @@ class Command(BaseCommand):
                 created_products.append(product)
 
                 # Create product images
-                if create_images and template.get('image_urls'):
-                    self._create_product_images(product, template['image_urls'])
+                if create_images and template.get("image_urls"):
+                    self._create_product_images(product, template["image_urls"])
 
                 # Batch commit for performance
                 if len(created_products) % batch_size == 0:
@@ -663,420 +775,427 @@ class Command(BaseCommand):
         """Get comprehensive furniture templates with realistic specifications."""
         return {
             # LIVING ROOM FURNITURE
-            'sofas': [
+            "sofas": [
                 {
-                    'base_name': 'L-Shaped Sectional Sofa',
-                    'descriptions': [
-                        'Spacious L-shaped sectional perfect for family gatherings. Features deep seating and premium upholstery.',
-                        'Modern sectional sofa with reversible chaise. Ideal for entertaining and relaxation.',
-                        'Comfortable L-sectional with built-in USB charging ports and cup holders.'
+                    "base_name": "L-Shaped Sectional Sofa",
+                    "descriptions": [
+                        "Spacious L-shaped sectional perfect for family gatherings. Features deep seating and premium upholstery.",
+                        "Modern sectional sofa with reversible chaise. Ideal for entertaining and relaxation.",
+                        "Comfortable L-sectional with built-in USB charging ports and cup holders.",
                     ],
-                    'price_range': (800, 2500),
-                    'materials': 'seating',
-                    'dimensions': {'length': (240, 300), 'width': (160, 200), 'height': (80, 95)},
-                    'weight_range': (75, 120),
-                    'tags': ['sectional', 'family', 'spacious', 'modern'],
-                    'image_urls': ['https://images.unsplash.com/photo-1555041469-a586c61ea9bc?w=800']
+                    "price_range": (800, 2500),
+                    "materials": "seating",
+                    "dimensions": {"length": (240, 300), "width": (160, 200), "height": (80, 95)},
+                    "weight_range": (75, 120),
+                    "tags": ["sectional", "family", "spacious", "modern"],
+                    "image_urls": ["https://images.unsplash.com/photo-1555041469-a586c61ea9bc?w=800"],
                 },
                 {
-                    'base_name': 'Classic Chesterfield Sofa',
-                    'descriptions': [
-                        'Timeless Chesterfield sofa with button tufting and rolled arms in premium leather.',
-                        'Traditional English-style sofa featuring deep button tufting and nail head trim.',
-                        'Luxury leather Chesterfield with hand-finished details and solid hardwood frame.'
+                    "base_name": "Classic Chesterfield Sofa",
+                    "descriptions": [
+                        "Timeless Chesterfield sofa with button tufting and rolled arms in premium leather.",
+                        "Traditional English-style sofa featuring deep button tufting and nail head trim.",
+                        "Luxury leather Chesterfield with hand-finished details and solid hardwood frame.",
                     ],
-                    'price_range': (1200, 3500),
-                    'materials': 'seating',
-                    'dimensions': {'length': (180, 220), 'width': (80, 100), 'height': (75, 90)},
-                    'weight_range': (60, 90),
-                    'tags': ['traditional', 'leather', 'luxury', 'classic'],
-                    'image_urls': ['https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=800']
+                    "price_range": (1200, 3500),
+                    "materials": "seating",
+                    "dimensions": {"length": (180, 220), "width": (80, 100), "height": (75, 90)},
+                    "weight_range": (60, 90),
+                    "tags": ["traditional", "leather", "luxury", "classic"],
+                    "image_urls": ["https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=800"],
                 },
                 {
-                    'base_name': 'Modern Loveseat',
-                    'descriptions': [
-                        'Compact two-seat sofa perfect for smaller spaces without compromising comfort.',
-                        'Contemporary loveseat with clean lines and plush cushioning.',
-                        'Space-saving loveseat ideal for apartments and cozy living rooms.'
+                    "base_name": "Modern Loveseat",
+                    "descriptions": [
+                        "Compact two-seat sofa perfect for smaller spaces without compromising comfort.",
+                        "Contemporary loveseat with clean lines and plush cushioning.",
+                        "Space-saving loveseat ideal for apartments and cozy living rooms.",
                     ],
-                    'price_range': (400, 1200),
-                    'materials': 'seating',
-                    'dimensions': {'length': (130, 160), 'width': (75, 90), 'height': (70, 85)},
-                    'weight_range': (35, 55),
-                    'tags': ['loveseat', 'compact', 'modern', 'space-saving'],
-                    'image_urls': ['https://images.unsplash.com/photo-1555041469-a586c61ea9bc?w=800']
-                }
+                    "price_range": (400, 1200),
+                    "materials": "seating",
+                    "dimensions": {"length": (130, 160), "width": (75, 90), "height": (70, 85)},
+                    "weight_range": (35, 55),
+                    "tags": ["loveseat", "compact", "modern", "space-saving"],
+                    "image_urls": ["https://images.unsplash.com/photo-1555041469-a586c61ea9bc?w=800"],
+                },
             ],
-            'coffee_tables': [
+            "coffee_tables": [
                 {
-                    'base_name': 'Glass Coffee Table',
-                    'descriptions': [
-                        'Modern glass coffee table with sleek metal base. Perfect for contemporary spaces.',
-                        'Tempered glass top coffee table with geometric chrome legs.',
-                        'Minimalist glass table that creates an airy, open feeling in your living room.'
+                    "base_name": "Glass Coffee Table",
+                    "descriptions": [
+                        "Modern glass coffee table with sleek metal base. Perfect for contemporary spaces.",
+                        "Tempered glass top coffee table with geometric chrome legs.",
+                        "Minimalist glass table that creates an airy, open feeling in your living room.",
                     ],
-                    'price_range': (300, 800),
-                    'materials': 'tables',
-                    'dimensions': {'length': (100, 140), 'width': (50, 80), 'height': (40, 50)},
-                    'weight_range': (20, 35),
-                    'tags': ['glass', 'modern', 'minimalist', 'contemporary'],
-                    'image_urls': ['https://images.unsplash.com/photo-1549497538-303791108f95?w=800']
+                    "price_range": (300, 800),
+                    "materials": "tables",
+                    "dimensions": {"length": (100, 140), "width": (50, 80), "height": (40, 50)},
+                    "weight_range": (20, 35),
+                    "tags": ["glass", "modern", "minimalist", "contemporary"],
+                    "image_urls": ["https://images.unsplash.com/photo-1549497538-303791108f95?w=800"],
                 },
                 {
-                    'base_name': 'Rustic Wood Coffee Table',
-                    'descriptions': [
-                        'Handcrafted rustic coffee table made from reclaimed barn wood.',
-                        'Farmhouse-style coffee table with authentic weathered finish.',
-                        'Live-edge wooden table featuring natural wood grain and metal accents.'
+                    "base_name": "Rustic Wood Coffee Table",
+                    "descriptions": [
+                        "Handcrafted rustic coffee table made from reclaimed barn wood.",
+                        "Farmhouse-style coffee table with authentic weathered finish.",
+                        "Live-edge wooden table featuring natural wood grain and metal accents.",
                     ],
-                    'price_range': (400, 1200),
-                    'materials': 'tables',
-                    'dimensions': {'length': (110, 150), 'width': (60, 90), 'height': (45, 55)},
-                    'weight_range': (25, 45),
-                    'tags': ['rustic', 'reclaimed', 'farmhouse', 'handcrafted'],
-                    'image_urls': ['https://images.unsplash.com/photo-1449247709967-d4461a6a6103?w=800']
+                    "price_range": (400, 1200),
+                    "materials": "tables",
+                    "dimensions": {"length": (110, 150), "width": (60, 90), "height": (45, 55)},
+                    "weight_range": (25, 45),
+                    "tags": ["rustic", "reclaimed", "farmhouse", "handcrafted"],
+                    "image_urls": ["https://images.unsplash.com/photo-1449247709967-d4461a6a6103?w=800"],
                 },
                 {
-                    'base_name': 'Storage Ottoman Coffee Table',
-                    'descriptions': [
-                        'Multi-functional coffee table with hidden storage compartment.',
-                        'Upholstered ottoman that doubles as seating and storage solution.',
-                        'Versatile ottoman with removable tray top and spacious interior storage.'
+                    "base_name": "Storage Ottoman Coffee Table",
+                    "descriptions": [
+                        "Multi-functional coffee table with hidden storage compartment.",
+                        "Upholstered ottoman that doubles as seating and storage solution.",
+                        "Versatile ottoman with removable tray top and spacious interior storage.",
                     ],
-                    'price_range': (200, 600),
-                    'materials': 'seating',
-                    'dimensions': {'length': (90, 120), 'width': (60, 80), 'height': (40, 50)},
-                    'weight_range': (15, 30),
-                    'tags': ['ottoman', 'storage', 'multi-functional', 'upholstered'],
-                    'image_urls': ['https://images.unsplash.com/photo-1549497538-303791108f95?w=800']
-                }
+                    "price_range": (200, 600),
+                    "materials": "seating",
+                    "dimensions": {"length": (90, 120), "width": (60, 80), "height": (40, 50)},
+                    "weight_range": (15, 30),
+                    "tags": ["ottoman", "storage", "multi-functional", "upholstered"],
+                    "image_urls": ["https://images.unsplash.com/photo-1549497538-303791108f95?w=800"],
+                },
             ],
-            'accent_chairs': [
+            "accent_chairs": [
                 {
-                    'base_name': 'Mid-Century Accent Chair',
-                    'descriptions': [
-                        'Stylish mid-century modern accent chair in premium velvet upholstery.',
-                        'Iconic mid-century design with tapered wooden legs and curved backrest.',
-                        'Statement accent chair that adds retro charm to any living space.'
+                    "base_name": "Mid-Century Accent Chair",
+                    "descriptions": [
+                        "Stylish mid-century modern accent chair in premium velvet upholstery.",
+                        "Iconic mid-century design with tapered wooden legs and curved backrest.",
+                        "Statement accent chair that adds retro charm to any living space.",
                     ],
-                    'price_range': (300, 800),
-                    'materials': 'seating',
-                    'dimensions': {'length': (70, 80), 'width': (65, 75), 'height': (75, 90)},
-                    'weight_range': (15, 25),
-                    'tags': ['mid-century', 'accent', 'velvet', 'retro'],
-                    'image_urls': ['https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=800']
+                    "price_range": (300, 800),
+                    "materials": "seating",
+                    "dimensions": {"length": (70, 80), "width": (65, 75), "height": (75, 90)},
+                    "weight_range": (15, 25),
+                    "tags": ["mid-century", "accent", "velvet", "retro"],
+                    "image_urls": ["https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=800"],
                 },
                 {
-                    'base_name': 'Wingback Reading Chair',
-                    'descriptions': [
-                        'Classic wingback chair perfect for reading nooks and quiet corners.',
-                        'Traditional high-back chair with wing sides for added comfort and privacy.',
-                        'Elegant wingback chair featuring button tufting and rolled arms.'
+                    "base_name": "Wingback Reading Chair",
+                    "descriptions": [
+                        "Classic wingback chair perfect for reading nooks and quiet corners.",
+                        "Traditional high-back chair with wing sides for added comfort and privacy.",
+                        "Elegant wingback chair featuring button tufting and rolled arms.",
                     ],
-                    'price_range': (500, 1400),
-                    'materials': 'seating',
-                    'dimensions': {'length': (75, 90), 'width': (70, 85), 'height': (100, 115)},
-                    'weight_range': (25, 40),
-                    'tags': ['wingback', 'reading', 'traditional', 'high-back'],
-                    'image_urls': ['https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=800']
-                }
+                    "price_range": (500, 1400),
+                    "materials": "seating",
+                    "dimensions": {"length": (75, 90), "width": (70, 85), "height": (100, 115)},
+                    "weight_range": (25, 40),
+                    "tags": ["wingback", "reading", "traditional", "high-back"],
+                    "image_urls": ["https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=800"],
+                },
             ],
-
             # BEDROOM FURNITURE
-            'beds': [
+            "beds": [
                 {
-                    'base_name': 'Platform Bed Frame',
-                    'descriptions': [
-                        'Modern platform bed frame with clean lines and sturdy construction.',
-                        'Minimalist bed frame that eliminates the need for a box spring.',
-                        'Contemporary platform bed with integrated LED lighting and USB ports.'
+                    "base_name": "Platform Bed Frame",
+                    "descriptions": [
+                        "Modern platform bed frame with clean lines and sturdy construction.",
+                        "Minimalist bed frame that eliminates the need for a box spring.",
+                        "Contemporary platform bed with integrated LED lighting and USB ports.",
                     ],
-                    'price_range': (400, 1200),
-                    'materials': 'storage',
-                    'dimensions': {'length': (200, 220), 'width': (140, 180), 'height': (35, 50)},
-                    'weight_range': (40, 80),
-                    'tags': ['platform', 'modern', 'minimalist', 'sturdy'],
-                    'image_urls': ['https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?w=800']
+                    "price_range": (400, 1200),
+                    "materials": "storage",
+                    "dimensions": {"length": (200, 220), "width": (140, 180), "height": (35, 50)},
+                    "weight_range": (40, 80),
+                    "tags": ["platform", "modern", "minimalist", "sturdy"],
+                    "image_urls": ["https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?w=800"],
                 },
                 {
-                    'base_name': 'Upholstered Bed Frame',
-                    'descriptions': [
-                        'Luxury upholstered bed frame with tufted headboard and premium fabric.',
-                        'Elegant padded bed frame featuring button tufting and nail head trim.',
-                        'Sophisticated upholstered bed with wingback headboard design.'
+                    "base_name": "Upholstered Bed Frame",
+                    "descriptions": [
+                        "Luxury upholstered bed frame with tufted headboard and premium fabric.",
+                        "Elegant padded bed frame featuring button tufting and nail head trim.",
+                        "Sophisticated upholstered bed with wingback headboard design.",
                     ],
-                    'price_range': (600, 2000),
-                    'materials': 'seating',
-                    'dimensions': {'length': (200, 220), 'width': (140, 180), 'height': (120, 140)},
-                    'weight_range': (50, 90),
-                    'tags': ['upholstered', 'luxury', 'tufted', 'elegant'],
-                    'image_urls': ['https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?w=800']
-                }
+                    "price_range": (600, 2000),
+                    "materials": "seating",
+                    "dimensions": {"length": (200, 220), "width": (140, 180), "height": (120, 140)},
+                    "weight_range": (50, 90),
+                    "tags": ["upholstered", "luxury", "tufted", "elegant"],
+                    "image_urls": ["https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?w=800"],
+                },
             ],
-            'dressers': [
+            "dressers": [
                 {
-                    'base_name': 'Modern 6-Drawer Dresser',
-                    'descriptions': [
-                        'Spacious 6-drawer dresser with soft-close drawers and contemporary design.',
-                        'Modern bedroom storage solution with clean lines and ample space.',
-                        'Versatile dresser perfect for organizing clothes and bedroom essentials.'
+                    "base_name": "Modern 6-Drawer Dresser",
+                    "descriptions": [
+                        "Spacious 6-drawer dresser with soft-close drawers and contemporary design.",
+                        "Modern bedroom storage solution with clean lines and ample space.",
+                        "Versatile dresser perfect for organizing clothes and bedroom essentials.",
                     ],
-                    'price_range': (400, 1000),
-                    'materials': 'storage',
-                    'dimensions': {'length': (140, 180), 'width': (40, 55), 'height': (75, 90)},
-                    'weight_range': (40, 70),
-                    'tags': ['dresser', 'storage', 'modern', 'soft-close'],
-                    'image_urls': ['https://images.unsplash.com/photo-1594224457193-09e515a8c2a3?w=800']
+                    "price_range": (400, 1000),
+                    "materials": "storage",
+                    "dimensions": {"length": (140, 180), "width": (40, 55), "height": (75, 90)},
+                    "weight_range": (40, 70),
+                    "tags": ["dresser", "storage", "modern", "soft-close"],
+                    "image_urls": ["https://images.unsplash.com/photo-1594224457193-09e515a8c2a3?w=800"],
                 }
             ],
-            'nightstands': [
+            "nightstands": [
                 {
-                    'base_name': 'Bedside Nightstand',
-                    'descriptions': [
-                        'Compact bedside table with drawer and open shelf storage.',
-                        'Modern nightstand with wireless charging pad and USB outlets.',
-                        'Scandinavian-style bedside table with clean lines and natural wood finish.'
+                    "base_name": "Bedside Nightstand",
+                    "descriptions": [
+                        "Compact bedside table with drawer and open shelf storage.",
+                        "Modern nightstand with wireless charging pad and USB outlets.",
+                        "Scandinavian-style bedside table with clean lines and natural wood finish.",
                     ],
-                    'price_range': (80, 300),
-                    'materials': 'storage',
-                    'dimensions': {'length': (40, 60), 'width': (35, 45), 'height': (55, 70)},
-                    'weight_range': (10, 25),
-                    'tags': ['nightstand', 'bedside', 'compact', 'storage'],
-                    'image_urls': ['https://images.unsplash.com/photo-1594224457193-09e515a8c2a3?w=800']
+                    "price_range": (80, 300),
+                    "materials": "storage",
+                    "dimensions": {"length": (40, 60), "width": (35, 45), "height": (55, 70)},
+                    "weight_range": (10, 25),
+                    "tags": ["nightstand", "bedside", "compact", "storage"],
+                    "image_urls": ["https://images.unsplash.com/photo-1594224457193-09e515a8c2a3?w=800"],
                 }
             ],
-
             # DINING ROOM FURNITURE
-            'dining_tables': [
+            "dining_tables": [
                 {
-                    'base_name': 'Expandable Dining Table',
-                    'descriptions': [
-                        'Versatile expandable dining table that grows with your entertaining needs.',
-                        'Space-saving dining solution that extends to accommodate extra guests.',
-                        'Smart dining table with easy-to-use butterfly leaf extension mechanism.'
+                    "base_name": "Expandable Dining Table",
+                    "descriptions": [
+                        "Versatile expandable dining table that grows with your entertaining needs.",
+                        "Space-saving dining solution that extends to accommodate extra guests.",
+                        "Smart dining table with easy-to-use butterfly leaf extension mechanism.",
                     ],
-                    'price_range': (700, 2000),
-                    'materials': 'tables',
-                    'dimensions': {'length': (140, 200), 'width': (80, 110), 'height': (72, 78)},
-                    'weight_range': (35, 65),
-                    'tags': ['expandable', 'dining', 'versatile', 'space-saving'],
-                    'image_urls': ['https://images.unsplash.com/photo-1449247709967-d4461a6a6103?w=800']
+                    "price_range": (700, 2000),
+                    "materials": "tables",
+                    "dimensions": {"length": (140, 200), "width": (80, 110), "height": (72, 78)},
+                    "weight_range": (35, 65),
+                    "tags": ["expandable", "dining", "versatile", "space-saving"],
+                    "image_urls": ["https://images.unsplash.com/photo-1449247709967-d4461a6a6103?w=800"],
                 },
                 {
-                    'base_name': 'Round Pedestal Dining Table',
-                    'descriptions': [
-                        'Classic round dining table with elegant pedestal base design.',
-                        'Space-efficient round table perfect for intimate dining and conversation.',
-                        'Timeless pedestal table that maximizes legroom and seating flexibility.'
+                    "base_name": "Round Pedestal Dining Table",
+                    "descriptions": [
+                        "Classic round dining table with elegant pedestal base design.",
+                        "Space-efficient round table perfect for intimate dining and conversation.",
+                        "Timeless pedestal table that maximizes legroom and seating flexibility.",
                     ],
-                    'price_range': (500, 1500),
-                    'materials': 'tables',
-                    'dimensions': {'length': (100, 140), 'width': (100, 140), 'height': (72, 78)},
-                    'weight_range': (30, 55),
-                    'tags': ['round', 'pedestal', 'classic', 'space-efficient'],
-                    'image_urls': ['https://images.unsplash.com/photo-1449247709967-d4461a6a6103?w=800']
-                }
+                    "price_range": (500, 1500),
+                    "materials": "tables",
+                    "dimensions": {"length": (100, 140), "width": (100, 140), "height": (72, 78)},
+                    "weight_range": (30, 55),
+                    "tags": ["round", "pedestal", "classic", "space-efficient"],
+                    "image_urls": ["https://images.unsplash.com/photo-1449247709967-d4461a6a6103?w=800"],
+                },
             ],
-            'dining_chairs': [
+            "dining_chairs": [
                 {
-                    'base_name': 'Upholstered Dining Chair',
-                    'descriptions': [
-                        'Comfortable upholstered dining chair with padded seat and backrest.',
-                        'Elegant dining chair featuring high-quality fabric and solid wood frame.',
-                        'Modern dining chair with ergonomic design and stylish upholstery.'
+                    "base_name": "Upholstered Dining Chair",
+                    "descriptions": [
+                        "Comfortable upholstered dining chair with padded seat and backrest.",
+                        "Elegant dining chair featuring high-quality fabric and solid wood frame.",
+                        "Modern dining chair with ergonomic design and stylish upholstery.",
                     ],
-                    'price_range': (80, 250),
-                    'materials': 'seating',
-                    'dimensions': {'length': (45, 55), 'width': (45, 55), 'height': (80, 95)},
-                    'weight_range': (8, 15),
-                    'tags': ['dining', 'upholstered', 'comfortable', 'padded'],
-                    'image_urls': ['https://images.unsplash.com/photo-1549497538-303791108f95?w=800']
+                    "price_range": (80, 250),
+                    "materials": "seating",
+                    "dimensions": {"length": (45, 55), "width": (45, 55), "height": (80, 95)},
+                    "weight_range": (8, 15),
+                    "tags": ["dining", "upholstered", "comfortable", "padded"],
+                    "image_urls": ["https://images.unsplash.com/photo-1549497538-303791108f95?w=800"],
                 }
             ],
-
             # OFFICE FURNITURE
-            'office_chairs': [
+            "office_chairs": [
                 {
-                    'base_name': 'Ergonomic Executive Chair',
-                    'descriptions': [
-                        'Premium executive chair with advanced ergonomic features and lumbar support.',
-                        'Professional office chair designed for all-day comfort and productivity.',
-                        'High-end ergonomic chair with memory foam cushioning and breathable mesh back.'
+                    "base_name": "Ergonomic Executive Chair",
+                    "descriptions": [
+                        "Premium executive chair with advanced ergonomic features and lumbar support.",
+                        "Professional office chair designed for all-day comfort and productivity.",
+                        "High-end ergonomic chair with memory foam cushioning and breathable mesh back.",
                     ],
-                    'price_range': (250, 800),
-                    'materials': 'seating',
-                    'dimensions': {'length': (60, 70), 'width': (60, 70), 'height': (110, 130)},
-                    'weight_range': (15, 25),
-                    'tags': ['ergonomic', 'executive', 'office', 'professional'],
-                    'image_urls': ['https://images.unsplash.com/photo-1541558869434-2840d308329a?w=800']
+                    "price_range": (250, 800),
+                    "materials": "seating",
+                    "dimensions": {"length": (60, 70), "width": (60, 70), "height": (110, 130)},
+                    "weight_range": (15, 25),
+                    "tags": ["ergonomic", "executive", "office", "professional"],
+                    "image_urls": ["https://images.unsplash.com/photo-1541558869434-2840d308329a?w=800"],
                 },
                 {
-                    'base_name': 'Task Chair',
-                    'descriptions': [
-                        'Affordable task chair with essential ergonomic features for home office.',
-                        'Basic office chair with adjustable height and swivel functionality.',
-                        'Budget-friendly desk chair perfect for students and home workers.'
+                    "base_name": "Task Chair",
+                    "descriptions": [
+                        "Affordable task chair with essential ergonomic features for home office.",
+                        "Basic office chair with adjustable height and swivel functionality.",
+                        "Budget-friendly desk chair perfect for students and home workers.",
                     ],
-                    'price_range': (100, 300),
-                    'materials': 'seating',
-                    'dimensions': {'length': (55, 65), 'width': (55, 65), 'height': (90, 110)},
-                    'weight_range': (10, 18),
-                    'tags': ['task', 'affordable', 'basic', 'adjustable'],
-                    'image_urls': ['https://images.unsplash.com/photo-1541558869434-2840d308329a?w=800']
-                }
+                    "price_range": (100, 300),
+                    "materials": "seating",
+                    "dimensions": {"length": (55, 65), "width": (55, 65), "height": (90, 110)},
+                    "weight_range": (10, 18),
+                    "tags": ["task", "affordable", "basic", "adjustable"],
+                    "image_urls": ["https://images.unsplash.com/photo-1541558869434-2840d308329a?w=800"],
+                },
             ],
-            'desks': [
+            "desks": [
                 {
-                    'base_name': 'Standing Desk',
-                    'descriptions': [
-                        'Electric height-adjustable standing desk for healthy work habits.',
-                        'Ergonomic sit-stand desk with memory presets and cable management.',
-                        'Modern adjustable desk promoting better posture and productivity.'
+                    "base_name": "Standing Desk",
+                    "descriptions": [
+                        "Electric height-adjustable standing desk for healthy work habits.",
+                        "Ergonomic sit-stand desk with memory presets and cable management.",
+                        "Modern adjustable desk promoting better posture and productivity.",
                     ],
-                    'price_range': (400, 1200),
-                    'materials': 'tables',
-                    'dimensions': {'length': (120, 180), 'width': (60, 80), 'height': (65, 125)},
-                    'weight_range': (30, 60),
-                    'tags': ['standing', 'adjustable', 'ergonomic', 'electric'],
-                    'image_urls': ['https://images.unsplash.com/photo-1549497538-303791108f95?w=800']
+                    "price_range": (400, 1200),
+                    "materials": "tables",
+                    "dimensions": {"length": (120, 180), "width": (60, 80), "height": (65, 125)},
+                    "weight_range": (30, 60),
+                    "tags": ["standing", "adjustable", "ergonomic", "electric"],
+                    "image_urls": ["https://images.unsplash.com/photo-1549497538-303791108f95?w=800"],
                 },
                 {
-                    'base_name': 'Computer Desk',
-                    'descriptions': [
-                        'Compact computer desk with keyboard tray and CPU storage.',
-                        'Space-saving desk perfect for home office and small spaces.',
-                        'Functional computer workstation with built-in cable management.'
+                    "base_name": "Computer Desk",
+                    "descriptions": [
+                        "Compact computer desk with keyboard tray and CPU storage.",
+                        "Space-saving desk perfect for home office and small spaces.",
+                        "Functional computer workstation with built-in cable management.",
                     ],
-                    'price_range': (150, 500),
-                    'materials': 'storage',
-                    'dimensions': {'length': (100, 140), 'width': (50, 70), 'height': (70, 80)},
-                    'weight_range': (20, 40),
-                    'tags': ['computer', 'compact', 'workstation', 'storage'],
-                    'image_urls': ['https://images.unsplash.com/photo-1549497538-303791108f95?w=800']
-                }
+                    "price_range": (150, 500),
+                    "materials": "storage",
+                    "dimensions": {"length": (100, 140), "width": (50, 70), "height": (70, 80)},
+                    "weight_range": (20, 40),
+                    "tags": ["computer", "compact", "workstation", "storage"],
+                    "image_urls": ["https://images.unsplash.com/photo-1549497538-303791108f95?w=800"],
+                },
             ],
-
             # STORAGE FURNITURE
-            'bookcases': [
+            "bookcases": [
                 {
-                    'base_name': 'Ladder Bookshelf',
-                    'descriptions': [
-                        'Modern ladder-style bookshelf with ascending shelf design.',
-                        'Space-efficient leaning bookcase perfect for small rooms.',
-                        'Contemporary ladder shelf for books, decor, and display items.'
+                    "base_name": "Ladder Bookshelf",
+                    "descriptions": [
+                        "Modern ladder-style bookshelf with ascending shelf design.",
+                        "Space-efficient leaning bookcase perfect for small rooms.",
+                        "Contemporary ladder shelf for books, decor, and display items.",
                     ],
-                    'price_range': (120, 400),
-                    'materials': 'storage',
-                    'dimensions': {'length': (60, 80), 'width': (35, 45), 'height': (160, 200)},
-                    'weight_range': (15, 30),
-                    'tags': ['ladder', 'bookshelf', 'modern', 'space-efficient'],
-                    'image_urls': ['https://images.unsplash.com/photo-1594224457193-09e515a8c2a3?w=800']
+                    "price_range": (120, 400),
+                    "materials": "storage",
+                    "dimensions": {"length": (60, 80), "width": (35, 45), "height": (160, 200)},
+                    "weight_range": (15, 30),
+                    "tags": ["ladder", "bookshelf", "modern", "space-efficient"],
+                    "image_urls": ["https://images.unsplash.com/photo-1594224457193-09e515a8c2a3?w=800"],
                 },
                 {
-                    'base_name': 'Traditional Bookcase',
-                    'descriptions': [
-                        'Classic wooden bookcase with adjustable shelves and traditional styling.',
-                        'Solid wood bookshelf with crown molding and rich finish.',
-                        'Timeless bookcase perfect for libraries and traditional home offices.'
+                    "base_name": "Traditional Bookcase",
+                    "descriptions": [
+                        "Classic wooden bookcase with adjustable shelves and traditional styling.",
+                        "Solid wood bookshelf with crown molding and rich finish.",
+                        "Timeless bookcase perfect for libraries and traditional home offices.",
                     ],
-                    'price_range': (200, 800),
-                    'materials': 'storage',
-                    'dimensions': {'length': (75, 100), 'width': (30, 40), 'height': (180, 220)},
-                    'weight_range': (35, 60),
-                    'tags': ['traditional', 'bookcase', 'adjustable', 'solid-wood'],
-                    'image_urls': ['https://images.unsplash.com/photo-1594224457193-09e515a8c2a3?w=800']
-                }
+                    "price_range": (200, 800),
+                    "materials": "storage",
+                    "dimensions": {"length": (75, 100), "width": (30, 40), "height": (180, 220)},
+                    "weight_range": (35, 60),
+                    "tags": ["traditional", "bookcase", "adjustable", "solid-wood"],
+                    "image_urls": ["https://images.unsplash.com/photo-1594224457193-09e515a8c2a3?w=800"],
+                },
             ],
-
             # LIGHTING
-            'table_lamps': [
+            "table_lamps": [
                 {
-                    'base_name': 'Modern Table Lamp',
-                    'descriptions': [
-                        'Sleek modern table lamp with touch controls and dimming functionality.',
-                        'Contemporary bedside lamp with fabric shade and metal base.',
-                        'Minimalist table lamp perfect for reading and ambient lighting.'
+                    "base_name": "Modern Table Lamp",
+                    "descriptions": [
+                        "Sleek modern table lamp with touch controls and dimming functionality.",
+                        "Contemporary bedside lamp with fabric shade and metal base.",
+                        "Minimalist table lamp perfect for reading and ambient lighting.",
                     ],
-                    'price_range': (50, 200),
-                    'materials': 'lighting',
-                    'dimensions': {'length': (25, 35), 'width': (25, 35), 'height': (45, 65)},
-                    'weight_range': (2, 8),
-                    'tags': ['table lamp', 'modern', 'touch', 'bedside'],
-                    'image_urls': ['https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=800']
+                    "price_range": (50, 200),
+                    "materials": "lighting",
+                    "dimensions": {"length": (25, 35), "width": (25, 35), "height": (45, 65)},
+                    "weight_range": (2, 8),
+                    "tags": ["table lamp", "modern", "touch", "bedside"],
+                    "image_urls": ["https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=800"],
                 }
             ],
-            'floor_lamps': [
+            "floor_lamps": [
                 {
-                    'base_name': 'Arc Floor Lamp',
-                    'descriptions': [
-                        'Dramatic arc floor lamp that curves over seating areas.',
-                        'Modern arc lamp perfect for reading and task lighting.',
-                        'Statement floor lamp with adjustable height and swivel head.'
+                    "base_name": "Arc Floor Lamp",
+                    "descriptions": [
+                        "Dramatic arc floor lamp that curves over seating areas.",
+                        "Modern arc lamp perfect for reading and task lighting.",
+                        "Statement floor lamp with adjustable height and swivel head.",
                     ],
-                    'price_range': (150, 500),
-                    'materials': 'lighting',
-                    'dimensions': {'length': (40, 60), 'width': (40, 60), 'height': (180, 220)},
-                    'weight_range': (8, 20),
-                    'tags': ['arc', 'floor lamp', 'dramatic', 'adjustable'],
-                    'image_urls': ['https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=800']
+                    "price_range": (150, 500),
+                    "materials": "lighting",
+                    "dimensions": {"length": (40, 60), "width": (40, 60), "height": (180, 220)},
+                    "weight_range": (8, 20),
+                    "tags": ["arc", "floor lamp", "dramatic", "adjustable"],
+                    "image_urls": ["https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=800"],
                 },
                 {
-                    'base_name': 'Tripod Floor Lamp',
-                    'descriptions': [
-                        'Modern tripod floor lamp with wooden legs and fabric shade.',
-                        'Scandinavian-style standing lamp with natural wood tripod base.',
-                        'Designer floor lamp featuring adjustable tripod legs and linen shade.'
+                    "base_name": "Tripod Floor Lamp",
+                    "descriptions": [
+                        "Modern tripod floor lamp with wooden legs and fabric shade.",
+                        "Scandinavian-style standing lamp with natural wood tripod base.",
+                        "Designer floor lamp featuring adjustable tripod legs and linen shade.",
                     ],
-                    'price_range': (120, 350),
-                    'materials': 'lighting',
-                    'dimensions': {'length': (50, 70), 'width': (50, 70), 'height': (140, 170)},
-                    'weight_range': (5, 12),
-                    'tags': ['tripod', 'scandinavian', 'wooden', 'fabric'],
-                    'image_urls': ['https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=800']
-                }
+                    "price_range": (120, 350),
+                    "materials": "lighting",
+                    "dimensions": {"length": (50, 70), "width": (50, 70), "height": (140, 170)},
+                    "weight_range": (5, 12),
+                    "tags": ["tripod", "scandinavian", "wooden", "fabric"],
+                    "image_urls": ["https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=800"],
+                },
             ],
-
             # OUTDOOR FURNITURE
-            'patio_sets': [
+            "patio_sets": [
                 {
-                    'base_name': 'Wicker Patio Set',
-                    'descriptions': [
-                        'Weather-resistant wicker patio set with plush outdoor cushions.',
-                        'Complete outdoor dining set with table and four matching chairs.',
-                        'All-weather patio furniture perfect for deck and garden entertaining.'
+                    "base_name": "Wicker Patio Set",
+                    "descriptions": [
+                        "Weather-resistant wicker patio set with plush outdoor cushions.",
+                        "Complete outdoor dining set with table and four matching chairs.",
+                        "All-weather patio furniture perfect for deck and garden entertaining.",
                     ],
-                    'price_range': (600, 2000),
-                    'materials': 'seating',
-                    'dimensions': {'length': (120, 180), 'width': (120, 180), 'height': (70, 85)},
-                    'weight_range': (40, 80),
-                    'tags': ['patio', 'wicker', 'weather-resistant', 'outdoor'],
-                    'image_urls': ['https://images.unsplash.com/photo-1549497538-303791108f95?w=800']
+                    "price_range": (600, 2000),
+                    "materials": "seating",
+                    "dimensions": {"length": (120, 180), "width": (120, 180), "height": (70, 85)},
+                    "weight_range": (40, 80),
+                    "tags": ["patio", "wicker", "weather-resistant", "outdoor"],
+                    "image_urls": ["https://images.unsplash.com/photo-1549497538-303791108f95?w=800"],
                 }
             ],
-            'outdoor_sofas': [
+            "outdoor_sofas": [
                 {
-                    'base_name': 'Outdoor Sectional Sofa',
-                    'descriptions': [
-                        'Modular outdoor sectional with weather-resistant fabric and aluminum frame.',
-                        'Luxury patio sofa set with quick-dry cushions and UV-resistant materials.',
-                        'Contemporary outdoor seating perfect for poolside and garden relaxation.'
+                    "base_name": "Outdoor Sectional Sofa",
+                    "descriptions": [
+                        "Modular outdoor sectional with weather-resistant fabric and aluminum frame.",
+                        "Luxury patio sofa set with quick-dry cushions and UV-resistant materials.",
+                        "Contemporary outdoor seating perfect for poolside and garden relaxation.",
                     ],
-                    'price_range': (800, 3000),
-                    'materials': 'seating',
-                    'dimensions': {'length': (200, 300), 'width': (150, 200), 'height': (65, 80)},
-                    'weight_range': (50, 100),
-                    'tags': ['outdoor', 'sectional', 'weather-resistant', 'modular'],
-                    'image_urls': ['https://images.unsplash.com/photo-1549497538-303791108f95?w=800']
+                    "price_range": (800, 3000),
+                    "materials": "seating",
+                    "dimensions": {"length": (200, 300), "width": (150, 200), "height": (65, 80)},
+                    "weight_range": (50, 100),
+                    "tags": ["outdoor", "sectional", "weather-resistant", "modular"],
+                    "image_urls": ["https://images.unsplash.com/photo-1549497538-303791108f95?w=800"],
                 }
-            ]
+            ],
         }
 
     def _generate_name_variation(self, base_name: str, index: int) -> str:
         """Generate variations of product names to avoid duplicates."""
         variations = [
-            '', 'Deluxe', 'Premium', 'Elite', 'Professional', 'Commercial',
-            'Signature', 'Classic', 'Modern', 'Contemporary', 'Traditional',
-            'Plus', 'Pro', 'XL', 'Compact', 'Standard'
+            "",
+            "Deluxe",
+            "Premium",
+            "Elite",
+            "Professional",
+            "Commercial",
+            "Signature",
+            "Classic",
+            "Modern",
+            "Contemporary",
+            "Traditional",
+            "Plus",
+            "Pro",
+            "XL",
+            "Compact",
+            "Standard",
         ]
 
         if index == 0:
@@ -1088,107 +1207,104 @@ class Command(BaseCommand):
         else:
             return f"{base_name} - Model {index + 1}"
 
-    def _generate_product_specifications(self, template: Dict[str, Any],
-                                       category: Category, users: List[User]) -> Dict[str, Any]:
+    def _generate_product_specifications(
+        self, template: Dict[str, Any], category: Category, users: List[User]
+    ) -> Dict[str, Any]:
         """Generate realistic product specifications based on template."""
 
         # Price generation with realistic distribution
-        min_price, max_price = template['price_range']
+        min_price, max_price = template["price_range"]
         base_price = random.uniform(min_price, max_price)
 
         # Add price variations based on condition and features
         condition = random.choices(
-            ['new', 'like_new', 'good', 'fair'],
-            weights=[60, 25, 12, 3],  # Weighted toward better conditions
-            k=1
+            ["new", "like_new", "good", "fair"], weights=[60, 25, 12, 3], k=1  # Weighted toward better conditions
         )[0]
 
         condition_multipliers = {
-            'new': Decimal('1.0'),
-            'like_new': Decimal('0.85'),
-            'good': Decimal('0.70'),
-            'fair': Decimal('0.55')
+            "new": Decimal("1.0"),
+            "like_new": Decimal("0.85"),
+            "good": Decimal("0.70"),
+            "fair": Decimal("0.55"),
         }
 
         final_price = (Decimal(str(base_price)) * condition_multipliers[condition]).quantize(
-            Decimal('0.01'), rounding=ROUND_HALF_UP
+            Decimal("0.01"), rounding=ROUND_HALF_UP
         )
 
         # Original price for sales
         original_price = None
         if random.choice([True, False, False]):  # 33% chance of sale
             multiplier = Decimal(str(random.uniform(1.15, 1.4)))
-            original_price = (final_price * multiplier).quantize(
-                Decimal('0.01'), rounding=ROUND_HALF_UP
-            )
+            original_price = (final_price * multiplier).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
         # Generate dimensions
-        dims = template['dimensions']
-        length = Decimal(str(random.uniform(*dims['length']))).quantize(Decimal('0.1'))
-        width = Decimal(str(random.uniform(*dims['width']))).quantize(Decimal('0.1'))
-        height = Decimal(str(random.uniform(*dims['height']))).quantize(Decimal('0.1'))
+        dims = template["dimensions"]
+        length = Decimal(str(random.uniform(*dims["length"]))).quantize(Decimal("0.1"))
+        width = Decimal(str(random.uniform(*dims["width"]))).quantize(Decimal("0.1"))
+        height = Decimal(str(random.uniform(*dims["height"]))).quantize(Decimal("0.1"))
 
         # Generate weight
-        weight_min, weight_max = template['weight_range']
-        weight = Decimal(str(random.uniform(weight_min, weight_max))).quantize(Decimal('0.1'))
+        weight_min, weight_max = template["weight_range"]
+        weight = Decimal(str(random.uniform(weight_min, weight_max))).quantize(Decimal("0.1"))
 
         # Select materials and colors
-        material_type = template['materials']
+        material_type = template["materials"]
         materials = random.choice(self.generator.materials_combinations[material_type])
 
         # Generate color palette
-        style = random.choice(['modern', 'traditional', 'scandinavian', 'industrial', 'bohemian'])
+        style = random.choice(["modern", "traditional", "scandinavian", "industrial", "bohemian"])
         colors = random.choice(self.generator.color_palettes[style])
 
         # Generate brand
         brand = random.choice(self.generator.brands)
 
         # Generate realistic stock
-        if condition == 'new':
+        if condition == "new":
             stock = random.choices(
-                range(1, 101),
-                weights=[max(1, 50 - i) for i in range(100)],  # Weighted toward lower stock
-                k=1
+                range(1, 101), weights=[max(1, 50 - i) for i in range(100)], k=1  # Weighted toward lower stock
             )[0]
         else:
             stock = random.randint(1, 5)  # Used items typically have lower stock
 
         # Generate tags
-        tags = list(template['tags'])
-        tags.extend(random.sample(self.generator.furniture_descriptors['style'], 2))
+        tags = list(template["tags"])
+        tags.extend(random.sample(self.generator.furniture_descriptors["style"], 2))
         if random.choice([True, False]):
-            tags.extend(random.sample(self.generator.furniture_descriptors['features'], 1))
+            tags.extend(random.sample(self.generator.furniture_descriptors["features"], 1))
 
         # Generate description
-        description = random.choice(template['descriptions'])
+        description = random.choice(template["descriptions"])
         if len(description) < 100:
             # Enhance short descriptions
-            quality_adj = random.choice(self.generator.furniture_descriptors['quality'])
-            comfort_adj = random.choice(self.generator.furniture_descriptors['comfort'])
-            description += f" This {quality_adj.lower()} piece offers {comfort_adj.lower()} design perfect for modern homes."
+            quality_adj = random.choice(self.generator.furniture_descriptors["quality"])
+            comfort_adj = random.choice(self.generator.furniture_descriptors["comfort"])
+            description += (
+                f" This {quality_adj.lower()} piece offers {comfort_adj.lower()} design perfect for modern homes."
+            )
 
         return {
-            'description': description,
-            'short_description': description[:300],
-            'category': category,
-            'seller': random.choice(users),
-            'price': final_price,
-            'original_price': original_price,
-            'stock_quantity': stock,
-            'condition': condition,
-            'brand': brand,
-            'weight': weight,
-            'dimensions_length': length,
-            'dimensions_width': width,
-            'dimensions_height': height,
-            'colors': colors[:3],  # Limit to 3 colors
-            'materials': materials,
-            'tags': tags[:6],  # Limit to 6 tags
-            'is_featured': random.choices([True, False], weights=[10, 90], k=1)[0],  # 10% featured
-            'is_active': True,
-            'view_count': random.randint(0, 500),
-            'click_count': random.randint(0, 100),
-            'favorite_count': random.randint(0, 50),
+            "description": description,
+            "short_description": description[:300],
+            "category": category,
+            "seller": random.choice(users),
+            "price": final_price,
+            "original_price": original_price,
+            "stock_quantity": stock,
+            "condition": condition,
+            "brand": brand,
+            "weight": weight,
+            "dimensions_length": length,
+            "dimensions_width": width,
+            "dimensions_height": height,
+            "colors": colors[:3],  # Limit to 3 colors
+            "materials": materials,
+            "tags": tags[:6],  # Limit to 6 tags
+            "is_featured": random.choices([True, False], weights=[10, 90], k=1)[0],  # 10% featured
+            "is_active": True,
+            "view_count": random.randint(0, 500),
+            "click_count": random.randint(0, 100),
+            "favorite_count": random.randint(0, 50),
         }
 
     def _create_product_images(self, product: Product, image_urls: List[str]):
@@ -1198,7 +1314,7 @@ class Command(BaseCommand):
             num_images = random.choices([1, 2, 3, 4], weights=[40, 35, 20, 5], k=1)[0]
 
             for i in range(num_images):
-                image_url = random.choice(image_urls)
+                _image_url = random.choice(image_urls)
 
                 ProductImage.objects.create(
                     product=product,
@@ -1209,7 +1325,7 @@ class Command(BaseCommand):
                     content_type="image/jpeg",
                     alt_text=f"{product.name} - Image {i+1}",
                     is_primary=(i == 0),
-                    order=i
+                    order=i,
                 )
 
         except Exception as e:
@@ -1225,44 +1341,44 @@ class Command(BaseCommand):
                 "Outstanding product. Great build quality and fast shipping.",
                 "Perfect addition to our home. Highly recommend!",
                 "Exceeded expectations. Beautiful craftsmanship and very sturdy.",
-                "Amazing quality for the price. Will definitely buy from this seller again."
+                "Amazing quality for the price. Will definitely buy from this seller again.",
             ],
             4: [  # Good reviews
                 "Very happy with this purchase. Good quality and looks great.",
                 "Nice piece of furniture. Well-made and as advertised.",
                 "Good value for money. Minor assembly required but worth it.",
                 "Solid construction and attractive design. Pleased with the purchase.",
-                "Quality product that fits perfectly in our space."
+                "Quality product that fits perfectly in our space.",
             ],
             3: [  # Average reviews
                 "It's okay. Does the job but nothing spectacular.",
                 "Average quality. Some minor issues but acceptable for the price.",
                 "Decent furniture piece. Assembly was a bit challenging.",
                 "Fair quality. Looks good but could be more durable.",
-                "Acceptable purchase. Met basic expectations."
+                "Acceptable purchase. Met basic expectations.",
             ],
             2: [  # Poor reviews
                 "Not what I expected. Quality is below average.",
                 "Disappointed with the build quality. Feels flimsy.",
                 "Had issues with assembly. Instructions were unclear.",
                 "Lower quality than advertised. Wouldn't recommend.",
-                "Price doesn't match the quality. Expected better."
+                "Price doesn't match the quality. Expected better.",
             ],
             1: [  # Bad reviews
                 "Very poor quality. Broke within a week.",
                 "Terrible experience. Product arrived damaged.",
                 "Complete waste of money. Extremely poor build quality.",
                 "Do not buy! Falls apart easily and poor customer service.",
-                "Worst furniture purchase ever. Completely unusable."
-            ]
+                "Worst furniture purchase ever. Completely unusable.",
+            ],
         }
 
         created_reviews = []
 
-        for i in range(count):
-            if i % 100 == 0:
-                progress = int((i / count) * 100)
-                self.stdout.write(f"  [STATS] Progress: {progress}% ({i}/{count} reviews)")
+        for _i in range(count):
+            if _i % 100 == 0:
+                progress = int((_i / count) * 100)
+                self.stdout.write(f"  [STATS] Progress: {progress}% ({_i}/{count} reviews)")
 
             product = random.choice(products)
             reviewer = random.choice(users)
@@ -1273,20 +1389,18 @@ class Command(BaseCommand):
 
             # Generate rating with realistic distribution (skewed toward positive)
             rating = random.choices(
-                [1, 2, 3, 4, 5],
-                weights=[5, 8, 15, 35, 37],  # Skewed toward positive reviews
-                k=1
+                [1, 2, 3, 4, 5], weights=[5, 8, 15, 35, 37], k=1  # Skewed toward positive reviews
             )[0]
 
             comment = random.choice(review_templates[rating])
 
             # Generate review title
             title_templates = {
-                5: ['Excellent!', 'Perfect!', 'Amazing quality', 'Love it!', 'Highly recommend'],
-                4: ['Great purchase', 'Very satisfied', 'Good quality', 'Happy with it', 'Nice piece'],
-                3: ['It\'s okay', 'Average', 'Does the job', 'Fair quality', 'Acceptable'],
-                2: ['Disappointed', 'Below expectations', 'Not great', 'Could be better', 'Poor quality'],
-                1: ['Terrible', 'Waste of money', 'Very poor', 'Completely disappointed', 'Avoid']
+                5: ["Excellent!", "Perfect!", "Amazing quality", "Love it!", "Highly recommend"],
+                4: ["Great purchase", "Very satisfied", "Good quality", "Happy with it", "Nice piece"],
+                3: ["It's okay", "Average", "Does the job", "Fair quality", "Acceptable"],
+                2: ["Disappointed", "Below expectations", "Not great", "Could be better", "Poor quality"],
+                1: ["Terrible", "Waste of money", "Very poor", "Completely disappointed", "Avoid"],
             }
             title = random.choice(title_templates[rating])
 
@@ -1299,11 +1413,8 @@ class Command(BaseCommand):
                 comment=comment,
                 is_verified_purchase=random.choices([True, False], weights=[70, 30], k=1)[0],
                 is_active=True,
-                created_at=timezone.now() - timedelta(
-                    days=random.randint(1, 365),
-                    hours=random.randint(0, 23),
-                    minutes=random.randint(0, 59)
-                )
+                created_at=timezone.now()
+                - timedelta(days=random.randint(1, 365), hours=random.randint(0, 23), minutes=random.randint(0, 59)),
             )
             created_reviews.append(review)
 
@@ -1315,7 +1426,7 @@ class Command(BaseCommand):
 
         created_favorites = []
 
-        for i in range(count):
+        for _i in range(count):
             user = random.choice(users)
             product = random.choice(products)
 
@@ -1326,10 +1437,7 @@ class Command(BaseCommand):
             favorite = ProductFavorite.objects.create(
                 user=user,
                 product=product,
-                created_at=timezone.now() - timedelta(
-                    days=random.randint(1, 180),
-                    hours=random.randint(0, 23)
-                )
+                created_at=timezone.now() - timedelta(days=random.randint(1, 180), hours=random.randint(0, 23)),
             )
             created_favorites.append(favorite)
 
@@ -1341,7 +1449,7 @@ class Command(BaseCommand):
 
         created_cart_items = []
 
-        for i in range(count):
+        for _i in range(count):
             user = random.choice(users)
             product = random.choice(products)
 
@@ -1359,10 +1467,7 @@ class Command(BaseCommand):
                 cart=cart,
                 product=product,
                 quantity=quantity,
-                added_at=timezone.now() - timedelta(
-                    days=random.randint(0, 30),
-                    hours=random.randint(0, 23)
-                )
+                added_at=timezone.now() - timedelta(days=random.randint(0, 30), hours=random.randint(0, 23)),
             )
             created_cart_items.append(cart_item)
 
@@ -1382,7 +1487,7 @@ class Command(BaseCommand):
             cart_count = CartItem.objects.filter(product=product).count()
 
             # Generate realistic view and click counts
-            base_popularity = (reviews_count * 10 + favorites_count * 5 + cart_count * 3)
+            base_popularity = reviews_count * 10 + favorites_count * 5 + cart_count * 3
             view_count = max(product.view_count, base_popularity + random.randint(50, 500))
             click_count = max(product.click_count, int(view_count * random.uniform(0.1, 0.3)))
 
@@ -1399,12 +1504,13 @@ class Command(BaseCommand):
             product.view_count = view_count
             product.click_count = click_count
             product.favorite_count = favorites_count
-            product.save(update_fields=['view_count', 'click_count', 'favorite_count'])
+            product.save(update_fields=["view_count", "click_count", "favorite_count"])
 
         self.stdout.write("[DONE] Product metrics updated")
 
-    def _display_summary(self, categories: List[Category], users: List[User],
-                        products: List[Product], options: Dict[str, Any]):
+    def _display_summary(
+        self, categories: List[Category], users: List[User], products: List[Product], options: Dict[str, Any]
+    ):
         """Display comprehensive summary of created data."""
 
         # Calculate statistics
@@ -1483,17 +1589,18 @@ Your marketplace now has comprehensive, realistic furniture data ready for:
         self.stdout.write(self.style.SUCCESS(summary))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # This allows the command to be tested independently
-    import django
     import os
     import sys
 
+    import django
+
     # Add the project directory to Python path
-    sys.path.append('/mnt/f/Nigger/Projects/Programmes/WebApps/Desginia/Designia-backend')
+    sys.path.append("/mnt/f/Nigger/Projects/Programmes/WebApps/Desginia/Designia-backend")
 
     # Setup Django
-    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'designiaBackend.settings')
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "designiaBackend.settings")
     django.setup()
 
     # Create and run command

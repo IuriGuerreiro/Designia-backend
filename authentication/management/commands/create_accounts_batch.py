@@ -15,7 +15,7 @@ JSON Format:
         "account_type": "personal"
     },
     {
-        "name": "Jane Smith", 
+        "name": "Jane Smith",
         "username": "janesmith",
         "email": "jane@example.com",
         "language": "es",
@@ -37,54 +37,43 @@ Features:
 - Transaction support for rollback on critical errors
 """
 
-import json
 import csv
+import json
 import os
+import re
+
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
-from authentication.models import CustomUser, Profile
-import re
+
+from authentication.models import CustomUser
 
 
 class Command(BaseCommand):
-    help = 'Create multiple user accounts from JSON or CSV file (email verified, password: D!ferente)'
+    help = "Create multiple user accounts from JSON or CSV file (email verified, password: D!ferente)"
 
     def add_arguments(self, parser):
         # Required arguments
-        parser.add_argument(
-            '--file',
-            type=str,
-            required=True,
-            help='Path to JSON or CSV file containing account data'
-        )
-        
+        parser.add_argument("--file", type=str, required=True, help="Path to JSON or CSV file containing account data")
+
         # Optional arguments
         parser.add_argument(
-            '--format',
+            "--format",
             type=str,
-            choices=['json', 'csv'],
-            default='json',
-            help='File format (default: json, auto-detected from extension)'
+            choices=["json", "csv"],
+            default="json",
+            help="File format (default: json, auto-detected from extension)",
         )
         parser.add_argument(
-            '--force',
-            action='store_true',
-            help='Skip existing users instead of stopping on duplicates'
+            "--force", action="store_true", help="Skip existing users instead of stopping on duplicates"
         )
+        parser.add_argument("--dry-run", action="store_true", help="Validate data without creating accounts")
         parser.add_argument(
-            '--dry-run',
-            action='store_true',
-            help='Validate data without creating accounts'
-        )
-        parser.add_argument(
-            '--rollback-on-error',
-            action='store_true',
-            help='Rollback all changes if any account creation fails'
+            "--rollback-on-error", action="store_true", help="Rollback all changes if any account creation fails"
         )
 
     def validate_email(self, email):
         """Validate email format"""
-        email_regex = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        email_regex = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
         return re.match(email_regex, email) is not None
 
     def validate_language(self, language):
@@ -96,116 +85,116 @@ class Command(BaseCommand):
         """Split full name into first and last name"""
         name_parts = full_name.strip().split()
         if len(name_parts) == 1:
-            return name_parts[0], ''
+            return name_parts[0], ""
         elif len(name_parts) == 2:
             return name_parts[0], name_parts[1]
         else:
-            return name_parts[0], ' '.join(name_parts[1:])
+            return name_parts[0], " ".join(name_parts[1:])
 
     def validate_account_data(self, account_data):
         """Validate individual account data"""
         errors = []
-        
+
         # Required fields
-        required_fields = ['name', 'username', 'email']
+        required_fields = ["name", "username", "email"]
         for field in required_fields:
-            if not account_data.get(field, '').strip():
-                errors.append(f'Missing required field: {field}')
-        
+            if not account_data.get(field, "").strip():
+                errors.append(f"Missing required field: {field}")
+
         if errors:
             return errors
-        
+
         # Validate email
-        email = account_data['email'].lower().strip()
+        email = account_data["email"].lower().strip()
         if not self.validate_email(email):
-            errors.append(f'Invalid email format: {email}')
-        
+            errors.append(f"Invalid email format: {email}")
+
         # Validate username
-        username = account_data['username'].strip()
+        username = account_data["username"].strip()
         if len(username) < 3:
-            errors.append('Username must be at least 3 characters long')
-        
+            errors.append("Username must be at least 3 characters long")
+
         # Validate name
-        name = account_data['name'].strip()
+        name = account_data["name"].strip()
         if len(name) < 2:
-            errors.append('Name must be at least 2 characters long')
-        
+            errors.append("Name must be at least 2 characters long")
+
         # Validate optional fields
-        language = account_data.get('language', 'en')
+        language = account_data.get("language", "en")
         if not self.validate_language(language):
             valid_langs = [choice[0] for choice in CustomUser.LANGUAGE_CHOICES]
             errors.append(f'Invalid language code: {language}. Valid options: {", ".join(valid_langs)}')
-        
-        account_type = account_data.get('account_type', 'personal')
-        if account_type not in ['personal', 'business', 'creator']:
-            errors.append(f'Invalid account type: {account_type}. Valid options: personal, business, creator')
-        
+
+        account_type = account_data.get("account_type", "personal")
+        if account_type not in ["personal", "business", "creator"]:
+            errors.append(f"Invalid account type: {account_type}. Valid options: personal, business, creator")
+
         return errors
 
     def load_accounts_from_json(self, file_path):
         """Load accounts from JSON file"""
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            
+
             if not isinstance(data, list):
-                raise CommandError('JSON file must contain an array of account objects')
-            
+                raise CommandError("JSON file must contain an array of account objects")
+
             return data
         except json.JSONDecodeError as e:
-            raise CommandError(f'Invalid JSON format: {str(e)}')
+            raise CommandError(f"Invalid JSON format: {str(e)}") from e
         except FileNotFoundError:
-            raise CommandError(f'File not found: {file_path}')
+            raise CommandError(f"File not found: {file_path}") from None
 
     def load_accounts_from_csv(self, file_path):
         """Load accounts from CSV file"""
         try:
             accounts = []
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, "r", encoding="utf-8") as f:
                 reader = csv.DictReader(f)
-                for row_num, row in enumerate(reader, start=2):  # Start at 2 because header is row 1
+                for _row_num, row in enumerate(reader, start=2):  # Start at 2 because header is row 1
                     # Clean up the data
                     account_data = {k.strip(): v.strip() for k, v in row.items() if k}
                     if account_data:  # Skip empty rows
                         accounts.append(account_data)
-            
+
             return accounts
         except FileNotFoundError:
-            raise CommandError(f'File not found: {file_path}')
+            raise CommandError(f"File not found: {file_path}") from None
         except Exception as e:
-            raise CommandError(f'Error reading CSV file: {str(e)}')
+            raise CommandError(f"Error reading CSV file: {str(e)}") from e
 
     def detect_file_format(self, file_path):
         """Auto-detect file format from extension"""
         _, ext = os.path.splitext(file_path.lower())
-        if ext == '.json':
-            return 'json'
-        elif ext == '.csv':
-            return 'csv'
+        if ext == ".json":
+            return "json"
+        elif ext == ".csv":
+            return "csv"
         else:
-            return 'json'  # Default
+            return "json"  # Default
 
     def handle(self, *args, **options):
-        file_path = options['file']
-        file_format = options['format']
-        force = options['force']
-        dry_run = options['dry_run']
-        rollback_on_error = options['rollback_on_error']
+        file_path = options["file"]
+        file_format = options["format"]
+        force = options["force"]
+        dry_run = options["dry_run"]
+        rollback_on_error = options["rollback_on_error"]
 
         # Auto-detect format if not specified explicitly
-        if file_format == 'json' and not options.get('format_specified'):
+        if file_format == "json" and not options.get("format_specified"):
             file_format = self.detect_file_format(file_path)
 
         # Load accounts data
-        if file_format == 'json':
+        if file_format == "json":
             accounts_data = self.load_accounts_from_json(file_path)
         else:
             accounts_data = self.load_accounts_from_csv(file_path)
 
         if not accounts_data:
-            raise CommandError('No account data found in file')
+            raise CommandError("No account data found in file")
 
-        self.stdout.write(f'Found {len(accounts_data)} accounts to process...\n')
+        self.stdout.write(f"Found {len(accounts_data)} accounts to process...\n")
 
         # Validate all accounts first
         validation_errors = []
@@ -215,32 +204,32 @@ class Command(BaseCommand):
                 validation_errors.append(f'Account {i + 1}: {"; ".join(errors)}')
 
         if validation_errors:
-            self.stdout.write(self.style.ERROR('Validation errors found:'))
+            self.stdout.write(self.style.ERROR("Validation errors found:"))
             for error in validation_errors:
-                self.stdout.write(self.style.ERROR(f'   {error}'))
-            raise CommandError('Fix validation errors before proceeding')
+                self.stdout.write(self.style.ERROR(f"   {error}"))
+            raise CommandError("Fix validation errors before proceeding")
 
         if dry_run:
-            self.stdout.write(self.style.SUCCESS('  Dry run successful - all account data is valid'))
+            self.stdout.write(self.style.SUCCESS("  Dry run successful - all account data is valid"))
             return
 
         # Process accounts
         created_count = 0
         skipped_count = 0
         errors_count = 0
-        
+
         def process_accounts():
             nonlocal created_count, skipped_count, errors_count
-            
+
             for i, account_data in enumerate(accounts_data):
                 try:
                     # Prepare data
-                    username = account_data['username'].strip()
-                    email = account_data['email'].lower().strip()
-                    full_name = account_data['name'].strip()
-                    language = account_data.get('language', 'en')
-                    account_type = account_data.get('account_type', 'personal')
-                    
+                    username = account_data["username"].strip()
+                    email = account_data["email"].lower().strip()
+                    full_name = account_data["name"].strip()
+                    language = account_data.get("language", "en")
+                    account_type = account_data.get("account_type", "personal")
+
                     first_name, last_name = self.split_name(full_name)
 
                     # Check for existing users
@@ -250,23 +239,23 @@ class Command(BaseCommand):
                     if username_exists or email_exists:
                         if force:
                             self.stdout.write(
-                                self.style.WARNING(f'  ⏭️  Account {i + 1} ({username}): Skipped (user exists)')
+                                self.style.WARNING(f"  ⏭️  Account {i + 1} ({username}): Skipped (user exists)")
                             )
                             skipped_count += 1
                             continue
                         else:
-                            raise CommandError(f'Account {i + 1} ({username}): User already exists')
+                            raise CommandError(f"Account {i + 1} ({username}): User already exists")
 
                     # Create user
                     user = CustomUser.objects.create_user(
                         username=username,
                         email=email,
-                        password='D!ferente',
+                        password="D!ferente",
                         first_name=first_name,
                         last_name=last_name,
                         language=language,
                         is_email_verified=True,
-                        is_active=True
+                        is_active=True,
                     )
 
                     # Update profile
@@ -275,17 +264,17 @@ class Command(BaseCommand):
                     profile.save()
 
                     self.stdout.write(
-                        self.style.SUCCESS(f'    Account {i + 1}: {username} ({email}) created successfully')
+                        self.style.SUCCESS(f"    Account {i + 1}: {username} ({email}) created successfully")
                     )
                     created_count += 1
 
                 except Exception as e:
                     error_msg = f'Account {i + 1} ({account_data.get("username", "unknown")}): {str(e)}'
-                    self.stdout.write(self.style.ERROR(f'   {error_msg}'))
+                    self.stdout.write(self.style.ERROR(f"   {error_msg}"))
                     errors_count += 1
-                    
+
                     if not force:
-                        raise CommandError(f'Account creation failed: {str(e)}')
+                        raise CommandError(f"Account creation failed: {str(e)}") from e
 
         # Execute account creation
         if rollback_on_error:
@@ -293,16 +282,16 @@ class Command(BaseCommand):
                 with transaction.atomic():
                     process_accounts()
             except Exception as e:
-                raise CommandError(f'Transaction rolled back due to error: {str(e)}')
+                raise CommandError(f"Transaction rolled back due to error: {str(e)}") from e
         else:
             process_accounts()
 
         # Summary
-        self.stdout.write('\n' + '='*50)
-        self.stdout.write(self.style.SUCCESS(f'  Created: {created_count} accounts'))
+        self.stdout.write("\n" + "=" * 50)
+        self.stdout.write(self.style.SUCCESS(f"  Created: {created_count} accounts"))
         if skipped_count > 0:
-            self.stdout.write(self.style.WARNING(f'⏭️  Skipped: {skipped_count} accounts'))
+            self.stdout.write(self.style.WARNING(f"⏭️  Skipped: {skipped_count} accounts"))
         if errors_count > 0:
-            self.stdout.write(self.style.ERROR(f' Errors: {errors_count} accounts'))
-        self.stdout.write(f'📄 Total processed: {len(accounts_data)} accounts')
-        self.stdout.write('='*50)
+            self.stdout.write(self.style.ERROR(f" Errors: {errors_count} accounts"))
+        self.stdout.write(f"📄 Total processed: {len(accounts_data)} accounts")
+        self.stdout.write("=" * 50)

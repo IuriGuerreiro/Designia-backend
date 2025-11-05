@@ -6,13 +6,28 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('payment_system', '0004_remove_paymenttransaction_payment_failure_code_and_more'),
+        ("payment_system", "0004_remove_paymenttransaction_payment_failure_code_and_more"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='paymenttransaction',
-            name='status',
-            field=models.CharField(choices=[('pending', 'Pending'), ('held', 'On Hold'), ('processing', 'Processing'), ('completed', 'Completed'), ('released', 'Released to Seller'), ('disputed', 'Disputed'), ('waiting_refund', 'Waiting for Refund'), ('refunded', 'Refunded'), ('failed', 'Failed'), ('cancelled', 'Cancelled')], default='pending', max_length=20),
+            model_name="paymenttransaction",
+            name="status",
+            field=models.CharField(
+                choices=[
+                    ("pending", "Pending"),
+                    ("held", "On Hold"),
+                    ("processing", "Processing"),
+                    ("completed", "Completed"),
+                    ("released", "Released to Seller"),
+                    ("disputed", "Disputed"),
+                    ("waiting_refund", "Waiting for Refund"),
+                    ("refunded", "Refunded"),
+                    ("failed", "Failed"),
+                    ("cancelled", "Cancelled"),
+                ],
+                default="pending",
+                max_length=20,
+            ),
         ),
     ]

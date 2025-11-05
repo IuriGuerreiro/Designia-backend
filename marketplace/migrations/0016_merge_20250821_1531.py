@@ -6,9 +6,8 @@ from django.db import migrations
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('marketplace', '0015_add_s3_fields_to_productimage'),
-        ('marketplace', '0015_alter_order_payment_status'),
+        ("marketplace", "0015_add_s3_fields_to_productimage"),
+        ("marketplace", "0015_alter_order_payment_status"),
     ]
 
-    operations = [
-    ]
+    operations = []

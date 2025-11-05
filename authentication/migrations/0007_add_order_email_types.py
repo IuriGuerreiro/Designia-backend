@@ -6,13 +6,23 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('authentication', '0006_profile_account_type_profile_city_profile_company_and_more'),
+        ("authentication", "0006_profile_account_type_profile_city_profile_company_and_more"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='emailrequestattempt',
-            name='request_type',
-            field=models.CharField(choices=[('email_verification', 'Email Verification'), ('password_reset', 'Password Reset'), ('two_factor_code', 'Two Factor Code'), ('order_receipt', 'Order Receipt'), ('order_status_update', 'Order Status Update'), ('order_cancellation', 'Order Cancellation')], max_length=30),
+            model_name="emailrequestattempt",
+            name="request_type",
+            field=models.CharField(
+                choices=[
+                    ("email_verification", "Email Verification"),
+                    ("password_reset", "Password Reset"),
+                    ("two_factor_code", "Two Factor Code"),
+                    ("order_receipt", "Order Receipt"),
+                    ("order_status_update", "Order Status Update"),
+                    ("order_cancellation", "Order Cancellation"),
+                ],
+                max_length=30,
+            ),
         ),
     ]

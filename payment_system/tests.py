@@ -6,10 +6,10 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.test import Client, TestCase
 from django.urls import reverse
-from django.utils import timezone
 
 from marketplace.models import Order, Product
-from .models import PaymentTransaction, PaymentTracker
+
+from .models import PaymentTracker, PaymentTransaction
 
 User = get_user_model()
 
@@ -17,12 +17,8 @@ User = get_user_model()
 class StripeWebhookTransferCreatedTest(TestCase):
     def setUp(self):
         self.client = Client()
-        self.seller = User.objects.create_user(
-            username="seller", password="password", email="seller@example.com"
-        )
-        self.buyer = User.objects.create_user(
-            username="buyer", password="password", email="buyer@example.com"
-        )
+        self.seller = User.objects.create_user(username="seller", password="password", email="seller@example.com")
+        self.buyer = User.objects.create_user(username="buyer", password="password", email="buyer@example.com")
         self.product = Product.objects.create(
             name="Test Product",
             price=Decimal("100.00"),
@@ -90,7 +86,9 @@ class StripeWebhookTransferCreatedTest(TestCase):
     def test_transfer_created_webhook_success(self, mock_construct_event):
         mock_event_data = self._generate_mock_transfer_event()
         # The event object needs to be accessible via attribute, not dict key
-        mock_event = type('Event', (), {'type': 'transfer.created', 'data': {'object': mock_event_data['data']['object']}})()
+        mock_event = type(
+            "Event", (), {"type": "transfer.created", "data": {"object": mock_event_data["data"]["object"]}}
+        )()
         mock_construct_event.return_value = mock_event
 
         response = self.client.post(

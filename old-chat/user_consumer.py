@@ -1,70 +1,67 @@
 import json
 import logging
-from channels.generic.websocket import AsyncWebsocketConsumer
+
 from channels.db import database_sync_to_async
+from channels.generic.websocket import AsyncWebsocketConsumer
+from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AnonymousUser
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
-from django.contrib.auth import get_user_model
+
 from .models import Chat, Message
 from .serializers import MessageSerializer
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
 
+
 class UserConsumer(AsyncWebsocketConsumer):
     """
     Global WebSocket consumer for user-level real-time notifications.
     Handles messages from all chats the user participates in.
     """
-    
+
     async def connect(self):
         """Handle WebSocket connection"""
         # Authenticate user from query parameters
         self.user = await self.get_user_from_token()
-        
+
         if self.user is None or isinstance(self.user, AnonymousUser):
-            logger.warning(f"Unauthenticated WebSocket connection attempt")
+            logger.warning("Unauthenticated WebSocket connection attempt")
             await self.close(code=4001)  # Unauthorized
             return
-        
+
         # Create user-specific group
-        self.user_group_name = f'user_{self.user.id}'
-        
+        self.user_group_name = f"user_{self.user.id}"
+
         # Join user group
-        await self.channel_layer.group_add(
-            self.user_group_name,
-            self.channel_name
-        )
-        
+        await self.channel_layer.group_add(self.user_group_name, self.channel_name)
+
         # Also join all chat groups the user is part of
         await self.join_user_chat_groups()
-        
+
         await self.accept()
         logger.info(f"  User {self.user.username} connected to global WebSocket")
-        
+
         # Notify about successful connection
-        await self.send(text_data=json.dumps({
-            'type': 'connection_success',
-            'user_id': self.user.id,
-            'message': 'Connected to global notifications'
-        }))
+        await self.send(
+            text_data=json.dumps(
+                {"type": "connection_success", "user_id": self.user.id, "message": "Connected to global notifications"}
+            )
+        )
 
     async def disconnect(self, close_code):
         """Handle WebSocket disconnection"""
-        if hasattr(self, 'user') and self.user:
+        if hasattr(self, "user") and self.user:
             logger.info(f" User {self.user.username} disconnected from global WebSocket")
-            
+
             # Send typing_stop to all chats where user might be typing
             await self.cleanup_typing_indicators()
-            
+
             # Leave user group
-            if hasattr(self, 'user_group_name'):
-                await self.channel_layer.group_discard(
-                    self.user_group_name,
-                    self.channel_name
-                )
-            
+            if hasattr(self, "user_group_name"):
+                await self.channel_layer.group_discard(self.user_group_name, self.channel_name)
+
             # Leave all chat groups
             await self.leave_user_chat_groups()
 
@@ -72,23 +69,23 @@ class UserConsumer(AsyncWebsocketConsumer):
         """Handle incoming WebSocket messages"""
         try:
             text_data_json = json.loads(text_data)
-            message_type = text_data_json.get('type')
-            
-            if message_type == 'chat_message':
+            message_type = text_data_json.get("type")
+
+            if message_type == "chat_message":
                 await self.handle_chat_message(text_data_json)
-            elif message_type == 'typing_start':
+            elif message_type == "typing_start":
                 await self.handle_typing_start(text_data_json)
-            elif message_type == 'typing_stop':
+            elif message_type == "typing_stop":
                 await self.handle_typing_stop(text_data_json)
-            elif message_type == 'mark_read':
+            elif message_type == "mark_read":
                 await self.handle_mark_read(text_data_json)
-            elif message_type == 'join_chat':
+            elif message_type == "join_chat":
                 await self.handle_join_chat(text_data_json)
-            elif message_type == 'leave_chat':
+            elif message_type == "leave_chat":
                 await self.handle_leave_chat(text_data_json)
             else:
                 logger.warning(f"Unknown message type: {message_type}")
-                
+
         except json.JSONDecodeError:
             logger.error(f"Invalid JSON received: {text_data}")
         except Exception as e:
@@ -97,156 +94,144 @@ class UserConsumer(AsyncWebsocketConsumer):
     # Additional message handlers for any missing types
     async def user_joined(self, event):
         """Send user joined notification to WebSocket"""
-        await self.send(text_data=json.dumps({
-            'type': 'user_joined',
-            'user_id': event['user_id'],
-            'username': event['username'],
-            'chat_id': event.get('chat_id', 'unknown')
-        }))
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "user_joined",
+                    "user_id": event["user_id"],
+                    "username": event["username"],
+                    "chat_id": event.get("chat_id", "unknown"),
+                }
+            )
+        )
         logger.info(f"UserConsumer sent user_joined event: {event}")
 
     async def user_left(self, event):
         """Send user left notification to WebSocket"""
-        await self.send(text_data=json.dumps({
-            'type': 'user_left',
-            'user_id': event['user_id'],
-            'username': event['username'],
-            'chat_id': event.get('chat_id', 'unknown')
-        }))
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "user_left",
+                    "user_id": event["user_id"],
+                    "username": event["username"],
+                    "chat_id": event.get("chat_id", "unknown"),
+                }
+            )
+        )
         logger.info(f"UserConsumer sent user_left event: {event}")
 
     async def handle_chat_message(self, data):
         """Handle sending chat message to specific chat"""
-        chat_id = data.get('chat_id')
-        message_text = data.get('text_content', '').strip()
-        image_url = data.get('image_url')
-        msg_type = data.get('message_type', 'text')
-        
+        chat_id = data.get("chat_id")
+        message_text = data.get("text_content", "").strip()
+        image_url = data.get("image_url")
+        msg_type = data.get("message_type", "text")
+
         if not chat_id:
-            await self.send_error('chat_id is required')
+            await self.send_error("chat_id is required")
             return
-        
+
         # Validate message
-        if msg_type == 'text' and not message_text:
-            await self.send_error('Text message cannot be empty')
+        if msg_type == "text" and not message_text:
+            await self.send_error("Text message cannot be empty")
             return
-            
+
         # Verify user has access to this chat
         has_access = await self.verify_chat_access(chat_id)
         if not has_access:
-            await self.send_error('Access denied to this chat')
+            await self.send_error("Access denied to this chat")
             return
-        
+
         # Create message in database
         message = await self.create_message(chat_id, message_text, image_url, msg_type)
-        
+
         # Serialize message
         message_data = await self.serialize_message(message)
-        
+
         # Broadcast to chat group
-        chat_group_name = f'chat_{chat_id}'
+        chat_group_name = f"chat_{chat_id}"
         await self.channel_layer.group_send(
-            chat_group_name,
-            {
-                'type': 'chat_message',
-                'message': message_data,
-                'chat_id': chat_id
-            }
+            chat_group_name, {"type": "chat_message", "message": message_data, "chat_id": chat_id}
         )
-        
+
         logger.info(f"Message {message.id} sent by user {self.user.id} in chat {chat_id}")
 
     async def handle_typing_start(self, data):
         """Handle typing start notification for specific chat"""
-        chat_id = data.get('chat_id')
+        chat_id = data.get("chat_id")
         if not chat_id:
-            await self.send_error('chat_id is required for typing')
+            await self.send_error("chat_id is required for typing")
             return
-            
+
         has_access = await self.verify_chat_access(chat_id)
         if not has_access:
             return
-            
+
         logger.info(f"User {self.user.username} started typing in chat {chat_id}")
-        
-        chat_group_name = f'chat_{chat_id}'
+
+        chat_group_name = f"chat_{chat_id}"
         await self.channel_layer.group_send(
             chat_group_name,
-            {
-                'type': 'typing_start',
-                'user_id': self.user.id,
-                'username': self.user.username,
-                'chat_id': chat_id
-            }
+            {"type": "typing_start", "user_id": self.user.id, "username": self.user.username, "chat_id": chat_id},
         )
 
     async def handle_typing_stop(self, data):
         """Handle typing stop notification for specific chat"""
-        chat_id = data.get('chat_id')
+        chat_id = data.get("chat_id")
         if not chat_id:
             return
-            
+
         has_access = await self.verify_chat_access(chat_id)
         if not has_access:
             return
-            
+
         logger.info(f"User {self.user.username} stopped typing in chat {chat_id}")
-        
-        chat_group_name = f'chat_{chat_id}'
+
+        chat_group_name = f"chat_{chat_id}"
         await self.channel_layer.group_send(
             chat_group_name,
-            {
-                'type': 'typing_stop',
-                'user_id': self.user.id,
-                'username': self.user.username,
-                'chat_id': chat_id
-            }
+            {"type": "typing_stop", "user_id": self.user.id, "username": self.user.username, "chat_id": chat_id},
         )
 
     async def handle_mark_read(self, data):
         """Handle mark messages as read for specific chat"""
-        chat_id = data.get('chat_id')
+        chat_id = data.get("chat_id")
         if not chat_id:
             return
-            
+
         has_access = await self.verify_chat_access(chat_id)
         if not has_access:
             return
-            
+
         await self.mark_messages_read(chat_id)
-        
-        chat_group_name = f'chat_{chat_id}'
+
+        chat_group_name = f"chat_{chat_id}"
         await self.channel_layer.group_send(
-            chat_group_name,
-            {
-                'type': 'messages_read',
-                'user_id': self.user.id,
-                'chat_id': chat_id
-            }
+            chat_group_name, {"type": "messages_read", "user_id": self.user.id, "chat_id": chat_id}
         )
 
     async def handle_join_chat(self, data):
         """Handle joining a specific chat group"""
-        chat_id = data.get('chat_id')
+        chat_id = data.get("chat_id")
         if not chat_id:
             return
-            
+
         has_access = await self.verify_chat_access(chat_id)
         if not has_access:
-            await self.send_error('Access denied to this chat')
+            await self.send_error("Access denied to this chat")
             return
-            
-        chat_group_name = f'chat_{chat_id}'
+
+        chat_group_name = f"chat_{chat_id}"
         await self.channel_layer.group_add(chat_group_name, self.channel_name)
         logger.info(f"User {self.user.username} joined chat group {chat_id}")
 
     async def handle_leave_chat(self, data):
         """Handle leaving a specific chat group"""
-        chat_id = data.get('chat_id')
+        chat_id = data.get("chat_id")
         if not chat_id:
             return
-            
-        chat_group_name = f'chat_{chat_id}'
+
+        chat_group_name = f"chat_{chat_id}"
         await self.channel_layer.group_discard(chat_group_name, self.channel_name)
         logger.info(f"User {self.user.username} left chat group {chat_id}")
 
@@ -254,76 +239,81 @@ class UserConsumer(AsyncWebsocketConsumer):
     async def chat_message(self, event):
         """Send chat message to WebSocket"""
         # Validate event structure
-        required_keys = ['message', 'chat_id']
+        required_keys = ["message", "chat_id"]
         missing_keys = [key for key in required_keys if key not in event]
-        
+
         if missing_keys:
             logger.error(f"chat_message event missing keys: {missing_keys}, event: {event}")
             return
-            
-        await self.send(text_data=json.dumps({
-            'type': 'chat_message',
-            'message': event['message'],
-            'chat_id': event['chat_id']
-        }))
+
+        await self.send(
+            text_data=json.dumps({"type": "chat_message", "message": event["message"], "chat_id": event["chat_id"]})
+        )
 
     async def typing_start(self, event):
         """Send typing start notification to WebSocket"""
         # Validate event structure
-        required_keys = ['user_id', 'username', 'chat_id']
+        required_keys = ["user_id", "username", "chat_id"]
         missing_keys = [key for key in required_keys if key not in event]
-        
+
         if missing_keys:
             logger.error(f"typing_start event missing keys: {missing_keys}, event: {event}")
             return
-        
+
         # Don't send to the user who is typing
-        if event['user_id'] != self.user.id:
-            logger.info(f"Sending typing_start to user {self.user.username}: {event['username']} is typing in chat {event['chat_id']}")
-            await self.send(text_data=json.dumps({
-                'type': 'typing_start',
-                'user_id': event['user_id'],
-                'username': event['username'],
-                'chat_id': event['chat_id']
-            }))
+        if event["user_id"] != self.user.id:
+            logger.info(
+                f"Sending typing_start to user {self.user.username}: {event['username']} is typing in chat {event['chat_id']}"
+            )
+            await self.send(
+                text_data=json.dumps(
+                    {
+                        "type": "typing_start",
+                        "user_id": event["user_id"],
+                        "username": event["username"],
+                        "chat_id": event["chat_id"],
+                    }
+                )
+            )
 
     async def typing_stop(self, event):
         """Send typing stop notification to WebSocket"""
         # Validate event structure
-        required_keys = ['user_id', 'username', 'chat_id']
+        required_keys = ["user_id", "username", "chat_id"]
         missing_keys = [key for key in required_keys if key not in event]
-        
+
         if missing_keys:
             logger.error(f"typing_stop event missing keys: {missing_keys}, event: {event}")
             return
-        
+
         # Don't send to the user who stopped typing
-        if event['user_id'] != self.user.id:
-            logger.info(f"Sending typing_stop to user {self.user.username}: {event['username']} stopped typing in chat {event['chat_id']}")
-            await self.send(text_data=json.dumps({
-                'type': 'typing_stop',
-                'user_id': event['user_id'],
-                'username': event['username'],
-                'chat_id': event['chat_id']
-            }))
+        if event["user_id"] != self.user.id:
+            logger.info(
+                f"Sending typing_stop to user {self.user.username}: {event['username']} stopped typing in chat {event['chat_id']}"
+            )
+            await self.send(
+                text_data=json.dumps(
+                    {
+                        "type": "typing_stop",
+                        "user_id": event["user_id"],
+                        "username": event["username"],
+                        "chat_id": event["chat_id"],
+                    }
+                )
+            )
 
     async def messages_read(self, event):
         """Send messages read notification to WebSocket"""
-        await self.send(text_data=json.dumps({
-            'type': 'messages_read',
-            'user_id': event['user_id'],
-            'chat_id': event['chat_id']
-        }))
+        await self.send(
+            text_data=json.dumps({"type": "messages_read", "user_id": event["user_id"], "chat_id": event["chat_id"]})
+        )
 
     async def new_chat(self, event):
         """Send new chat notification to WebSocket"""
-        chat_id = event['chat'].get('id', 'unknown')
+        chat_id = event["chat"].get("id", "unknown")
         logger.info(f"Sending new chat notification to user {self.user.username}: chat {chat_id}")
-        
-        await self.send(text_data=json.dumps({
-            'type': 'new_chat',
-            'chat': event['chat']
-        }))
+
+        await self.send(text_data=json.dumps({"type": "new_chat", "chat": event["chat"]}))
 
     # Database operations
     @database_sync_to_async
@@ -332,15 +322,15 @@ class UserConsumer(AsyncWebsocketConsumer):
         try:
             # Get token from query parameters
             token = None
-            query_string = self.scope.get('query_string', b'').decode()
-            
+            query_string = self.scope.get("query_string", b"").decode()
+
             if query_string:
-                params = dict(param.split('=') for param in query_string.split('&') if '=' in param)
-                token = params.get('token')
-            
+                params = dict(param.split("=") for param in query_string.split("&") if "=" in param)
+                token = params.get("token")
+
             if not token:
                 return None
-            
+
             # Validate JWT token and get user
             try:
                 jwt_auth = JWTAuthentication()
@@ -349,7 +339,7 @@ class UserConsumer(AsyncWebsocketConsumer):
                 return user
             except (InvalidToken, TokenError):
                 return None
-                
+
         except Exception as e:
             logger.error(f"Error extracting user from token: {str(e)}")
             return None
@@ -363,21 +353,21 @@ class UserConsumer(AsyncWebsocketConsumer):
         except Chat.DoesNotExist:
             return False
 
-    @database_sync_to_async 
+    @database_sync_to_async
     def create_message(self, chat_id, text_content, image_url, message_type):
         """Create message in database"""
         chat = Chat.objects.get(id=chat_id)
         message = Message.objects.create(
             chat=chat,
             sender=self.user,
-            text_content=text_content if message_type == 'text' else '',
-            image_url=image_url if message_type == 'image' else None,
-            message_type=message_type
+            text_content=text_content if message_type == "text" else "",
+            image_url=image_url if message_type == "image" else None,
+            message_type=message_type,
         )
-        
+
         # Update chat's last activity
         chat.save()  # This updates updated_at automatically
-        
+
         return message
 
     @database_sync_to_async
@@ -391,14 +381,11 @@ class UserConsumer(AsyncWebsocketConsumer):
         """Mark all messages in chat as read for the current user"""
         try:
             chat = Chat.objects.get(id=chat_id)
-            unread_messages = Message.objects.filter(
-                chat=chat,
-                is_read=False
-            ).exclude(sender=self.user)
-            
+            unread_messages = Message.objects.filter(chat=chat, is_read=False).exclude(sender=self.user)
+
             unread_messages.update(is_read=True)
             logger.info(f"Marked {unread_messages.count()} messages as read in chat {chat_id}")
-            
+
         except Exception as e:
             logger.error(f"Error marking messages as read: {str(e)}")
 
@@ -406,13 +393,14 @@ class UserConsumer(AsyncWebsocketConsumer):
     def get_user_chats(self):
         """Get all chats the user participates in"""
         from django.db.models import Q
-        return list(Chat.objects.filter(Q(user1=self.user) | Q(user2=self.user)).values_list('id', flat=True))
+
+        return list(Chat.objects.filter(Q(user1=self.user) | Q(user2=self.user)).values_list("id", flat=True))
 
     async def join_user_chat_groups(self):
         """Join all chat groups the user participates in"""
         chat_ids = await self.get_user_chats()
         for chat_id in chat_ids:
-            chat_group_name = f'chat_{chat_id}'
+            chat_group_name = f"chat_{chat_id}"
             await self.channel_layer.group_add(chat_group_name, self.channel_name)
         logger.info(f"User {self.user.username} joined {len(chat_ids)} chat groups")
 
@@ -420,40 +408,37 @@ class UserConsumer(AsyncWebsocketConsumer):
         """Leave all chat groups the user participates in"""
         chat_ids = await self.get_user_chats()
         for chat_id in chat_ids:
-            chat_group_name = f'chat_{chat_id}'
+            chat_group_name = f"chat_{chat_id}"
             await self.channel_layer.group_discard(chat_group_name, self.channel_name)
         logger.info(f"User {self.user.username} left {len(chat_ids)} chat groups")
 
     async def send_error(self, error_message):
         """Send error message to WebSocket"""
-        await self.send(text_data=json.dumps({
-            'type': 'error',
-            'message': error_message
-        }))
+        await self.send(text_data=json.dumps({"type": "error", "message": error_message}))
 
     async def cleanup_typing_indicators(self):
         """Send typing_stop to all chats when user disconnects"""
         try:
             # Get all chats the user participates in
             chat_ids = await self.get_user_chats()
-            
+
             for chat_id in chat_ids:
-                chat_group_name = f'chat_{chat_id}'
-                
+                chat_group_name = f"chat_{chat_id}"
+
                 # Send typing_stop to the chat group
                 await self.channel_layer.group_send(
                     chat_group_name,
                     {
-                        'type': 'typing_stop',
-                        'user_id': self.user.id,
-                        'username': self.user.username,
-                        'chat_id': chat_id
-                    }
+                        "type": "typing_stop",
+                        "user_id": self.user.id,
+                        "username": self.user.username,
+                        "chat_id": chat_id,
+                    },
                 )
-            
+
             if chat_ids:
                 logger.info(f"Cleaned up typing indicators for user {self.user.username} in {len(chat_ids)} chats")
-            
+
         except Exception as e:
             logger.error(f"Error cleaning up typing indicators for user {getattr(self, 'user', 'unknown')}: {str(e)}")
 
@@ -461,22 +446,16 @@ class UserConsumer(AsyncWebsocketConsumer):
     async def notify_new_chat(user_id, chat_data):
         """Static method to notify a user about a new chat from outside the consumer"""
         from channels.layers import get_channel_layer
-        
+
         try:
             channel_layer = get_channel_layer()
-            user_group_name = f'user_{user_id}'
-            
+            user_group_name = f"user_{user_id}"
+
             logger.info(f"Notifying user {user_id} about new chat {chat_data.get('id')}")
-            
-            await channel_layer.group_send(
-                user_group_name,
-                {
-                    'type': 'new_chat',
-                    'chat': chat_data
-                }
-            )
-            
+
+            await channel_layer.group_send(user_group_name, {"type": "new_chat", "chat": chat_data})
+
             logger.info(f"New chat notification sent to user {user_id}")
-            
+
         except Exception as e:
             logger.error(f"Failed to send new chat notification to user {user_id}: {str(e)}")

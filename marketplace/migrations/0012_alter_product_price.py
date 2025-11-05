@@ -7,13 +7,20 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('marketplace', '0011_remove_processing_status'),
+        ("marketplace", "0011_remove_processing_status"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='product',
-            name='price',
-            field=models.DecimalField(decimal_places=2, max_digits=10, validators=[django.core.validators.MinValueValidator(0.01), django.core.validators.MaxValueValidator(100000)]),
+            model_name="product",
+            name="price",
+            field=models.DecimalField(
+                decimal_places=2,
+                max_digits=10,
+                validators=[
+                    django.core.validators.MinValueValidator(0.01),
+                    django.core.validators.MaxValueValidator(100000),
+                ],
+            ),
         ),
     ]

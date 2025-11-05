@@ -14,4 +14,3 @@ The Designia Team
 
 ---
 © {{ current_year }} Designia. Support: support@designia.com
-

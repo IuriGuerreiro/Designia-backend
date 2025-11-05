@@ -13,7 +13,7 @@ command_exists() {
 # Install Stripe CLI
 install_stripe_cli() {
     echo "📥 Installing Stripe CLI..."
-    
+
     # For Linux (Ubuntu/Debian)
     if command_exists apt-get; then
         echo "Installing on Ubuntu/Debian..."
@@ -21,12 +21,12 @@ install_stripe_cli() {
         echo "deb [signed-by=/usr/share/keyrings/stripe.gpg] https://packages.stripe.dev/stripe-cli-debian-local stable main" | sudo tee -a /etc/apt/sources.list.d/stripe.list
         sudo apt update
         sudo apt install stripe
-    
+
     # For macOS with Homebrew
     elif command_exists brew; then
         echo "Installing on macOS with Homebrew..."
         brew install stripe/stripe-cli/stripe
-    
+
     # For other Linux distributions - direct download
     else
         echo "Installing via direct download..."
@@ -36,7 +36,7 @@ install_stripe_cli() {
         sudo mv /tmp/stripe /usr/local/bin/
         rm /tmp/stripe_cli.tar.gz
     fi
-    
+
     echo "✅ Stripe CLI installed successfully!"
 }
 

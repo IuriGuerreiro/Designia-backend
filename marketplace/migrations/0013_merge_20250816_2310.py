@@ -6,9 +6,8 @@ from django.db import migrations
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('marketplace', '0002_optimize_product_queries'),
-        ('marketplace', '0012_alter_product_price'),
+        ("marketplace", "0002_optimize_product_queries"),
+        ("marketplace", "0012_alter_product_price"),
     ]
 
-    operations = [
-    ]
+    operations = []

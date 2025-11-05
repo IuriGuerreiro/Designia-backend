@@ -1,64 +1,65 @@
-from django.contrib.auth.models import AbstractUser
-from django.db import models
-import uuid
 import random
 import string
+import uuid
 from datetime import timedelta
 from typing import Optional
-from django.utils import timezone
+
 from django.conf import settings
+from django.contrib.auth.models import AbstractUser
+from django.db import models
 from django.db.models.signals import post_save
 from django.dispatch import receiver
+from django.utils import timezone
 
 
 class CustomUser(AbstractUser):
     ROLE_CHOICES = [
-        ('user', 'User'),
-        ('seller', 'Seller'),
-        ('admin', 'Admin'),
+        ("user", "User"),
+        ("seller", "Seller"),
+        ("admin", "Admin"),
     ]
 
     LANGUAGE_CHOICES = [
-        ('en', 'English'),
-        ('pt', 'Portuguese'),
-        ('es', 'Spanish'),
-        ('fr', 'French'),
-        ('de', 'German'),
-        ('it', 'Italian'),
-        ('ru', 'Russian'),
-        ('ja', 'Japanese'),
-        ('ko', 'Korean'),
-        ('zh', 'Chinese'),
-        ('ar', 'Arabic'),
-        ('hi', 'Hindi'),
-        ('nl', 'Dutch'),
-        ('sv', 'Swedish'),
-        ('da', 'Danish'),
-        ('no', 'Norwegian'),
-        ('fi', 'Finnish'),
-        ('pl', 'Polish'),
-        ('tr', 'Turkish'),
-        ('th', 'Thai'),
-        ('vi', 'Vietnamese'),
-        ('id', 'Indonesian'),
-        ('ms', 'Malay'),
-        ('he', 'Hebrew'),
-        ('cs', 'Czech'),
-        ('hu', 'Hungarian'),
-        ('ro', 'Romanian'),
-        ('bg', 'Bulgarian'),
-        ('hr', 'Croatian'),
-        ('sk', 'Slovak'),
-        ('sl', 'Slovenian'),
-        ('et', 'Estonian'),
-        ('lv', 'Latvian'),
-        ('lt', 'Lithuanian'),
-        ('mt', 'Maltese'),
-        ('ga', 'Irish'),
-        ('cy', 'Welsh'),
-        ('eu', 'Basque'),
-        ('ca', 'Catalan'),
-        ('gl', 'Galician'),
+        ("en", "English"),
+        ("pt", "Portuguese"),
+        ("es", "Spanish"),
+        ("fr", "French"),
+        ("de", "German"),
+        ("it", "Italian"),
+        ("ru", "Russian"),
+        ("ja", "Japanese"),
+        ("ko", "Korean"),
+        ("zh", "Chinese"),
+        ("ar", "Arabic"),
+        ("hi", "Hindi"),
+        ("nl", "Dutch"),
+        ("sv", "Swedish"),
+        ("da", "Danish"),
+        ("no", "Norwegian"),
+        ("fi", "Finnish"),
+        ("pl", "Polish"),
+        ("tr", "Turkish"),
+        ("th", "Thai"),
+        ("vi", "Vietnamese"),
+        ("id", "Indonesian"),
+        ("ms", "Malay"),
+        ("he", "Hebrew"),
+        ("cs", "Czech"),
+        ("hu", "Hungarian"),
+        ("ro", "Romanian"),
+        ("bg", "Bulgarian"),
+        ("hr", "Croatian"),
+        ("sk", "Slovak"),
+        ("sl", "Slovenian"),
+        ("et", "Estonian"),
+        ("lv", "Latvian"),
+        ("lt", "Lithuanian"),
+        ("mt", "Maltese"),
+        ("ga", "Irish"),
+        ("cy", "Welsh"),
+        ("eu", "Basque"),
+        ("ca", "Catalan"),
+        ("gl", "Galician"),
     ]
 
     email = models.EmailField(unique=True)
@@ -67,22 +68,22 @@ class CustomUser(AbstractUser):
     date_joined = models.DateTimeField(auto_now_add=True)
     is_active = models.BooleanField(default=False)  # Changed to False - users must verify email first
     is_email_verified = models.BooleanField(default=False)
-    avatar = models.ImageField(upload_to='avatars/', blank=True, null=True)
+    avatar = models.ImageField(upload_to="avatars/", blank=True, null=True)
 
     # Role system - simple field
-    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='user')
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default="user")
 
     # 2FA fields
     two_factor_enabled = models.BooleanField(default=False)
 
     # Language preference
-    language = models.CharField(max_length=5, choices=LANGUAGE_CHOICES, default='en')
+    language = models.CharField(max_length=5, choices=LANGUAGE_CHOICES, default="en")
 
     # Stripe Connect fields
     stripe_account_id = models.CharField(max_length=255, blank=True, null=True, unique=True)
 
-    USERNAME_FIELD = 'email'
-    REQUIRED_FIELDS = ['username']
+    USERNAME_FIELD = "email"
+    REQUIRED_FIELDS = ["username"]
 
     def is_oauth_only_user(self):
         """Check if user is OAuth-only (no password set)"""
@@ -90,11 +91,11 @@ class CustomUser(AbstractUser):
 
     def is_seller(self):
         """Check if user is a verified seller"""
-        return self.role == 'seller'
+        return self.role == "seller"
 
     def is_admin(self):
         """Check if user is an admin"""
-        return self.role == 'admin' or self.is_superuser
+        return self.role == "admin" or self.is_superuser
 
     def can_sell_products(self):
         """Check if user can create and sell products"""
@@ -106,78 +107,80 @@ class CustomUser(AbstractUser):
 
 class Profile(models.Model):
     GENDER_CHOICES = [
-        ('male', 'Male'),
-        ('female', 'Female'),
-        ('non_binary', 'Non-binary'),
-        ('prefer_not_to_say', 'Prefer not to say'),
-        ('other', 'Other'),
-    ]
-    
-    ACCOUNT_TYPE_CHOICES = [
-        ('personal', 'Personal'),
-        ('business', 'Business'),
-        ('creator', 'Creator'),
-    ]
-    
-    PROFILE_VISIBILITY_CHOICES = [
-        ('public', 'Public'),
-        ('private', 'Private'),
-        ('friends_only', 'Friends Only'),
+        ("male", "Male"),
+        ("female", "Female"),
+        ("non_binary", "Non-binary"),
+        ("prefer_not_to_say", "Prefer not to say"),
+        ("other", "Other"),
     ]
 
-    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='profile')
-    
+    ACCOUNT_TYPE_CHOICES = [
+        ("personal", "Personal"),
+        ("business", "Business"),
+        ("creator", "Creator"),
+    ]
+
+    PROFILE_VISIBILITY_CHOICES = [
+        ("public", "Public"),
+        ("private", "Private"),
+        ("friends_only", "Friends Only"),
+    ]
+
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="profile")
+
     # Basic Profile Information
     bio = models.TextField(blank=True, null=True, max_length=500)
     location = models.CharField(max_length=100, blank=True, null=True)
     birth_date = models.DateField(blank=True, null=True)
     gender = models.CharField(max_length=20, choices=GENDER_CHOICES, blank=True, null=True)
     pronouns = models.CharField(max_length=50, blank=True, null=True)
-    
+
     # Contact Information
     phone_number = models.CharField(max_length=20, blank=True, null=True)
-    country_code = models.CharField(max_length=5, blank=True, null=True, default='+1')
+    country_code = models.CharField(max_length=5, blank=True, null=True, default="+1")
     website = models.URLField(blank=True, null=True)
-    
+
     # Professional Information
     job_title = models.CharField(max_length=100, blank=True, null=True)
     company = models.CharField(max_length=100, blank=True, null=True)
-    
+
     # Address Information
     street_address = models.CharField(max_length=255, blank=True, null=True)
     city = models.CharField(max_length=100, blank=True, null=True)
     state_province = models.CharField(max_length=100, blank=True, null=True)
     country = models.CharField(max_length=100, blank=True, null=True)
     postal_code = models.CharField(max_length=20, blank=True, null=True)
-    
+
     # Social Media Links
     instagram_url = models.URLField(blank=True, null=True)
     twitter_url = models.URLField(blank=True, null=True)
     linkedin_url = models.URLField(blank=True, null=True)
     facebook_url = models.URLField(blank=True, null=True)
-    
+
     # Preferences
-    timezone = models.CharField(max_length=50, blank=True, null=True, default='UTC')
-    language_preference = models.CharField(max_length=10, blank=True, null=True, default='en')
-    currency_preference = models.CharField(max_length=3, blank=True, null=True, default='USD')
-    
+    timezone = models.CharField(max_length=50, blank=True, null=True, default="UTC")
+    language_preference = models.CharField(max_length=10, blank=True, null=True, default="en")
+    currency_preference = models.CharField(max_length=3, blank=True, null=True, default="USD")
+
     # Account Settings
-    account_type = models.CharField(max_length=20, choices=ACCOUNT_TYPE_CHOICES, default='personal')
-    profile_visibility = models.CharField(max_length=20, choices=PROFILE_VISIBILITY_CHOICES, default='public')
-    
+    account_type = models.CharField(max_length=20, choices=ACCOUNT_TYPE_CHOICES, default="personal")
+    profile_visibility = models.CharField(max_length=20, choices=PROFILE_VISIBILITY_CHOICES, default="public")
+
     # Verification & Status
     is_verified = models.BooleanField(default=False)
     is_verified_seller = models.BooleanField(default=False)
     seller_type = models.CharField(max_length=50, blank=True, null=True)
-    
+
     # Metadata
     created_at = models.DateTimeField(auto_now_add=True, null=True)
     updated_at = models.DateTimeField(auto_now=True)
     profile_completion_percentage = models.IntegerField(default=0)
-    
+
     # Profile Picture (S3 Storage)
-    profile_picture_url = models.CharField(max_length=500, blank=True, null=True, help_text='S3 object key for profile picture')
-    
+    profile_picture_url = models.CharField(
+        max_length=500, blank=True, null=True, help_text="S3 object key for profile picture"
+    )
+
     # Marketing Preferences
     marketing_emails_enabled = models.BooleanField(default=True)
     newsletter_enabled = models.BooleanField(default=True)
@@ -185,25 +188,29 @@ class Profile(models.Model):
 
     def calculate_profile_completion(self):
         """Calculate profile completion percentage"""
-        import logging
-        logger = logging.getLogger(__name__)
-        
+
         fields_to_check = [
-            'bio', 'location', 'birth_date', 'phone_number', 'job_title',
-            'company', 'city', 'country', 'profile_picture_url'
+            "bio",
+            "location",
+            "birth_date",
+            "phone_number",
+            "job_title",
+            "company",
+            "city",
+            "country",
+            "profile_picture_url",
         ]
-        
+
         completed_fields = []
         empty_fields = []
-        
+
         for field in fields_to_check:
             field_value = getattr(self, field)
             if field_value:
                 completed_fields.append(field)
             else:
                 empty_fields.append(field)
-        
-        old_percentage = self.profile_completion_percentage
+
         self.profile_completion_percentage = int((len(completed_fields) / len(fields_to_check)) * 100)
 
         return self.profile_completion_percentage
@@ -212,17 +219,20 @@ class Profile(models.Model):
         """Get temporary URL for profile picture if it exists in S3"""
         if not self.profile_picture_url:
             return None
-            
+
         try:
             from django.conf import settings
-            if not getattr(settings, 'USE_S3', False):
+
+            if not getattr(settings, "USE_S3", False):
                 return None
-                
+
             from utils.s3_storage import get_s3_storage
+
             s3_storage = get_s3_storage()
             return s3_storage.get_file_url(self.profile_picture_url, expires_in=expires_in)
         except Exception as e:
             import logging
+
             logger = logging.getLogger(__name__)
             logger.warning(f"Failed to generate temp URL for profile picture {self.profile_picture_url}: {str(e)}")
             return None
@@ -232,12 +242,14 @@ class Profile(models.Model):
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f'{self.user.username}\'s Profile'
+        return f"{self.user.username}'s Profile"
+
 
 @receiver(post_save, sender=CustomUser)
 def create_user_profile(sender, instance, created, **kwargs):
     if created:
         Profile.objects.create(user=instance)
+
 
 @receiver(post_save, sender=CustomUser)
 def save_user_profile(sender, instance, created, **kwargs):
@@ -248,82 +260,89 @@ def save_user_profile(sender, instance, created, **kwargs):
 
 
 class EmailVerificationToken(models.Model):
-    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='verification_tokens')
+    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="verification_tokens")
     token = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
     created_at = models.DateTimeField(auto_now_add=True)
     expires_at = models.DateTimeField()
     is_used = models.BooleanField(default=False)
-    
+
     def save(self, *args, **kwargs):
         if not self.expires_at:
             self.expires_at = timezone.now() + timedelta(hours=24)  # Token expires in 24 hours
         super().save(*args, **kwargs)
-    
+
     def is_expired(self):
         return timezone.now() > self.expires_at
-    
+
     def __str__(self):
         return f"Verification token for {self.user.email}"
 
 
 class EmailRequestAttempt(models.Model):
     """Track email request attempts for rate limiting"""
-    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='email_attempts')
+
+    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="email_attempts")
     email = models.EmailField()
-    request_type = models.CharField(max_length=30, choices=[
-        ('email_verification', 'Email Verification'),
-        ('password_reset', 'Password Reset'),
-        ('two_factor_code', 'Two Factor Code'),
-        ('order_receipt', 'Order Receipt'),
-        ('order_status_update', 'Order Status Update'),
-        ('order_cancellation', 'Order Cancellation'),
-    ])
+    request_type = models.CharField(
+        max_length=30,
+        choices=[
+            ("email_verification", "Email Verification"),
+            ("password_reset", "Password Reset"),
+            ("two_factor_code", "Two Factor Code"),
+            ("order_receipt", "Order Receipt"),
+            ("order_status_update", "Order Status Update"),
+            ("order_cancellation", "Order Cancellation"),
+        ],
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     ip_address = models.GenericIPAddressField(null=True, blank=True)
-    
+
     class Meta:
         indexes = [
-            models.Index(fields=['email', 'request_type', 'created_at']),
-            models.Index(fields=['user', 'request_type', 'created_at']),
+            models.Index(fields=["email", "request_type", "created_at"]),
+            models.Index(fields=["user", "request_type", "created_at"]),
         ]
-    
+
     def __str__(self):
         return f"Email request: {self.email} - {self.request_type} at {self.created_at}"
 
 
 class TwoFactorCode(models.Model):
-    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='two_factor_codes')
+    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="two_factor_codes")
     code = models.CharField(max_length=6)
     created_at = models.DateTimeField(auto_now_add=True)
     expires_at = models.DateTimeField()
     is_used = models.BooleanField(default=False)
-    purpose = models.CharField(max_length=20, choices=[
-        ('enable_2fa', 'Enable 2FA'),
-        ('disable_2fa', 'Disable 2FA'),
-        ('login', 'Login Verification'),
-        ('set_password', 'Set Password'),
-        ('reset_password', 'Reset Password'),
-    ], default='enable_2fa')
-    
+    purpose = models.CharField(
+        max_length=20,
+        choices=[
+            ("enable_2fa", "Enable 2FA"),
+            ("disable_2fa", "Disable 2FA"),
+            ("login", "Login Verification"),
+            ("set_password", "Set Password"),
+            ("reset_password", "Reset Password"),
+        ],
+        default="enable_2fa",
+    )
+
     def save(self, *args, **kwargs):
         if not self.code:
             self.code = self.generate_code()
         if not self.expires_at:
             self.expires_at = timezone.now() + timedelta(minutes=10)  # 10 minutes expiry
         super().save(*args, **kwargs)
-    
+
     def generate_code(self):
-        return ''.join(random.choices(string.digits, k=6))
-    
+        return "".join(random.choices(string.digits, k=6))
+
     def is_expired(self):
         return timezone.now() > self.expires_at
-    
+
     def is_valid(self):
         return not self.is_used and not self.is_expired()
-    
+
     def __str__(self):
         return f"2FA code for {self.user.email} - {self.purpose}"
 
 
 # Import seller application models
-from .seller_models import SellerApplication, SellerApplicationImage

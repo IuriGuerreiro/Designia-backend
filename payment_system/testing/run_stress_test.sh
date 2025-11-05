@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# Payment System Extreme Stress Test Runner  
+# Payment System Extreme Stress Test Runner
 # ==========================================
-# 
+#
 # Quick runner for payment system stress testing with 50x concurrency.
 # Tests READ COMMITTED isolation, 10ms deadlock retry, and proper model ordering.
 # WARNING: This generates EXTREME load - ensure your system can handle it!
@@ -64,14 +64,14 @@ run_payment_stress_test(concurrency_multiplier=50)
         echo ""
         read -p "Enter concurrency multiplier (default 50): " multiplier
         multiplier=${multiplier:-50}
-        
+
         echo ""
         echo "🚀 Running CUSTOM EXTREME STRESS TEST"
         echo "📊 ${multiplier}x concurrency ($((multiplier * 5)) threads)"
         echo "⏱️  This may take several minutes with extreme load..."
         echo "⚠️  WARNING: $((multiplier * 5)) concurrent database connections!"
         echo ""
-        
+
         python -c "
 import os, sys, django
 sys.path.append('$(pwd)')
@@ -93,7 +93,7 @@ echo "✅ Stress test completed!"
 echo ""
 echo "📊 EXTREME LOAD Test validated:"
 echo "   • READ COMMITTED isolation level under 50x load"
-echo "   • 10ms deadlock retry functionality under extreme stress" 
+echo "   • 10ms deadlock retry functionality under extreme stress"
 echo "   • Proper model ordering (Order→Tracker→Transaction) at scale"
 echo "   • Massive concurrent webhook processing capability"
 echo "   • Transaction rollback safety under extreme conditions"

@@ -49,7 +49,7 @@ All critical payment operations now use `@financial_transaction` decorator which
 def stripe_webhook(request):
     # Stripe webhook processing with maximum isolation
 
-@financial_transaction  
+@financial_transaction
 def handle_successful_payment(session):
     # Payment confirmation with ACID compliance
 
@@ -73,7 +73,7 @@ with transaction.atomic():
     order.status = 'cancelled'
     order.save()
 
-# New pattern  
+# New pattern
 with atomic_with_isolation('SERIALIZABLE'):
     order.status = 'cancelled'
     order.save()
@@ -93,7 +93,7 @@ Product operations use `@product_transaction` decorator which provides:
 def create(self, request, *args, **kwargs):
     # Product creation with metrics initialization
 
-@product_transaction  
+@product_transaction
 def perform_create(self, serializer):
     # Atomic product creation with metrics
 
@@ -108,10 +108,10 @@ def perform_create(self, serializer):
     with atomic_with_isolation('REPEATABLE READ'):
         # Create the product
         product = serializer.save(seller=user)
-        
+
         # Ensure ProductMetrics exists atomically
         MetricsHelper.ensure_metrics_for_product(product)
-        
+
         return product
 ```
 
@@ -161,7 +161,7 @@ def process_payment(payment_data):
     pass
 ```
 
-### Product Operations  
+### Product Operations
 For product creation, updates, or inventory management:
 ```python
 @product_transaction
@@ -187,7 +187,7 @@ For fine-grained control:
 with atomic_with_isolation('SERIALIZABLE'):
     # Critical section with maximum isolation
     update_financial_records()
-    
+
 with rollback_safe_operation("Complex Operation"):
     # Named operation with automatic rollback
     perform_multiple_updates()
@@ -206,7 +206,7 @@ def monitored_operation():
 
 ### Isolation Level Impact
 - **SERIALIZABLE**: Highest consistency, potential for more deadlocks
-- **REPEATABLE READ**: Good balance, suitable for most operations  
+- **REPEATABLE READ**: Good balance, suitable for most operations
 - **READ COMMITTED**: Lower consistency, better performance
 - **READ UNCOMMITTED**: Lowest consistency, highest performance
 
@@ -260,7 +260,7 @@ python manage.py shell
 ### Test Coverage
 The test suite covers:
 - ✅ Successful transaction commit
-- ✅ Transaction rollback on error  
+- ✅ Transaction rollback on error
 - ✅ Isolation level testing
 - ✅ Deadlock handling and retry
 - ✅ Performance monitoring

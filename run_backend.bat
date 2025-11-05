@@ -131,8 +131,3 @@ REM Run Daphne
 python run_daphne.py --host %HOST% --port %PORT%
 
 pause
-
-
-
-
-

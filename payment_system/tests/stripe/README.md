@@ -109,17 +109,17 @@ import json
 def get_test_connected_account(behavior_type='success'):
     """Get a test connected account by behavior type."""
     accounts_file = os.path.join(
-        settings.BASE_DIR, 
+        settings.BASE_DIR,
         'payment_system/tests/stripe/created_accounts.json'
     )
-    
+
     with open(accounts_file, 'r') as f:
         data = json.load(f)
-    
+
     for account in data['accounts']:
         if account and account['expected_behavior'] == behavior_type:
             return account['account_id']
-    
+
     return None
 
 # Usage in views
@@ -169,7 +169,7 @@ failure_account_id = "acct_test_failure..."
 try:
     stripe.Transfer.create(
         amount=5000,
-        currency='eur', 
+        currency='eur',
         destination=failure_account_id
     )
 except stripe.error.InvalidRequestError as e:
@@ -183,11 +183,11 @@ def test_all_payout_scenarios():
     """Test all possible payout outcomes."""
     with open('created_accounts.json', 'r') as f:
         accounts = json.load(f)
-    
+
     for account in accounts['accounts']:
         if not account:
             continue
-            
+
         test_payout_scenario(
             account['account_id'],
             account['expected_behavior']
@@ -273,7 +273,7 @@ For issues with this script:
 
 ---
 
-**Created for**: Designia Payment System Testing  
-**Last Updated**: 2024-01-15  
-**Dependencies**: stripe, python-dotenv  
+**Created for**: Designia Payment System Testing
+**Last Updated**: 2024-01-15
+**Dependencies**: stripe, python-dotenv
 **Python Version**: 3.7+

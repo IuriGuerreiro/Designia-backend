@@ -1,36 +1,38 @@
-import os
-import stripe
 import json
 import logging
-import decimal
 from decimal import Decimal
+
+import stripe
 from django.conf import settings
-from django.http import JsonResponse, HttpResponse
+from django.contrib.auth import get_user_model
+from django.http import HttpResponse, JsonResponse
+from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
-from django.utils.decorators import method_decorator
-from django.db import transaction, models
-from django.contrib.auth import get_user_model
-from django.utils import timezone
+from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from rest_framework import status
+
 from marketplace.models import Cart, Order, OrderItem
-from .models import PaymentTracker, PaymentTransaction, Payout, PayoutItem
-from .serializers import (
-    PaymentTrackerSerializer, PayoutSerializer, 
-    PayoutSummarySerializer, PayoutItemSerializer
-)
-from .email_utils import send_order_receipt_email, send_order_status_update_email, send_order_cancellation_receipt_email, send_failed_refund_notification_email
 
 # Import transaction utilities
 from utils.transaction_utils import (
-    financial_transaction, serializable_transaction,
-    atomic_with_isolation, rollback_safe_operation, log_transaction_performance,
-    retry_on_deadlock, DeadlockError, TransactionError, get_current_isolation_level,
-    ISOLATION_LEVELS, payment_webhook_transaction
+    DeadlockError,
+    TransactionError,
+    atomic_with_isolation,
+    financial_transaction,
+    get_current_isolation_level,
+    retry_on_deadlock,
+    rollback_safe_operation,
 )
+
+from .email_utils import (
+    send_failed_refund_notification_email,
+    send_order_cancellation_receipt_email,
+    send_order_receipt_email,
+)
+from .models import PaymentTracker, PaymentTransaction, Payout, PayoutItem
 
 # Import security utilities
 from .security import PaymentAuditLogger
@@ -47,11 +49,12 @@ logger = logging.getLogger(__name__)
 
 User = get_user_model()
 
+
 # Handle Stripe webhook events VERY VERY IMPORTANTE
 @csrf_exempt
 @require_POST
 @financial_transaction
-def stripe_webhook(request):
+def stripe_webhook(request):  # noqa: C901
     """Process Stripe webhooks for payments, refunds, transfers, and payouts.
 
     Summary:
@@ -66,190 +69,200 @@ def stripe_webhook(request):
     """
     payload = request.body
     endpoint_secret = settings.STRIPE_WEBHOOK_SECRET
-    sig_header = request.headers.get('stripe-signature')
+    sig_header = request.headers.get("stripe-signature")
 
     # Get client IP for security monitoring
-    client_ip = request.META.get('HTTP_X_FORWARDED_FOR', '').split(',')[0] or request.META.get('REMOTE_ADDR', 'unknown')
+    client_ip = request.META.get("HTTP_X_FORWARDED_FOR", "").split(",")[0] or request.META.get(
+        "REMOTE_ADDR", "unknown"
+    )
 
     # SECURITY FIX: Always require webhook signature verification
     if not endpoint_secret:
         PaymentAuditLogger.log_security_event(
-            'webhook_missing_secret',
+            "webhook_missing_secret",
             client_ip,
-            details='STRIPE_WEBHOOK_SECRET not configured - critical security vulnerability'
+            details="STRIPE_WEBHOOK_SECRET not configured - critical security vulnerability",
         )
         logger.error("Critical Security Error: STRIPE_WEBHOOK_SECRET not configured. Rejecting webhook.")
         return HttpResponse(
             status=500,
-            content='Webhook endpoint secret must be configured for security. Contact system administrator.'.encode('utf-8')
+            content="Webhook endpoint secret must be configured for security. Contact system administrator.".encode(
+                "utf-8"
+            ),
         )
 
     if not sig_header:
         PaymentAuditLogger.log_security_event(
-            'webhook_missing_signature',
-            client_ip,
-            details='Webhook request without stripe-signature header'
+            "webhook_missing_signature", client_ip, details="Webhook request without stripe-signature header"
         )
         logger.warning(f"Webhook rejected: Missing stripe-signature header from IP {client_ip}")
         return HttpResponse(
-            status=400,
-            content='Missing stripe-signature header. Webhook verification required.'.encode('utf-8')
+            status=400, content="Missing stripe-signature header. Webhook verification required.".encode("utf-8")
         )
 
     # SECURITY: Verify webhook signature BEFORE processing any data
     try:
-        event = stripe.Webhook.construct_event(
-            payload, sig_header, endpoint_secret
-        )
+        event = stripe.Webhook.construct_event(payload, sig_header, endpoint_secret)
         # Log successful webhook verification
         PaymentAuditLogger.log_security_event(
-            'webhook_verified',
+            "webhook_verified",
             client_ip,
-            details=f"Successful webhook verification for event: {event.get('type', 'unknown')}"
+            details=f"Successful webhook verification for event: {event.get('type', 'unknown')}",
         )
-        logger.info(f"Webhook signature verified successfully for event: {event.get('type', 'unknown')} from IP {client_ip}")
+        logger.info(
+            f"Webhook signature verified successfully for event: {event.get('type', 'unknown')} from IP {client_ip}"
+        )
     except stripe.error.SignatureVerificationError as e:
         PaymentAuditLogger.log_security_event(
-            'webhook_signature_failed',
-            client_ip,
-            details=f"Signature verification failed: {str(e)}"
+            "webhook_signature_failed", client_ip, details=f"Signature verification failed: {str(e)}"
         )
         logger.warning(f"Webhook signature verification failed from IP {client_ip}: {str(e)}")
-        return HttpResponse(status=400, content='Webhook signature verification failed.'.encode('utf-8'))
+        return HttpResponse(status=400, content="Webhook signature verification failed.".encode("utf-8"))
     except ValueError as e:
         PaymentAuditLogger.log_security_event(
-            'webhook_invalid_payload',
-            client_ip,
-            details=f"Invalid JSON payload: {str(e)}"
+            "webhook_invalid_payload", client_ip, details=f"Invalid JSON payload: {str(e)}"
         )
         logger.error(f"Webhook payload parsing failed from IP {client_ip}: {str(e)}")
-        return HttpResponse(status=400, content='Invalid webhook payload format.'.encode('utf-8'))
+        return HttpResponse(status=400, content="Invalid webhook payload format.".encode("utf-8"))
     except Exception as e:
         PaymentAuditLogger.log_security_event(
-            'webhook_processing_error',
-            client_ip,
-            details=f"Unexpected error: {str(e)}"
+            "webhook_processing_error", client_ip, details=f"Unexpected error: {str(e)}"
         )
         logger.error(f"Unexpected webhook verification error from IP {client_ip}: {str(e)}")
-        return HttpResponse(status=500, content='Webhook processing error.'.encode('utf-8'))
-    
+        return HttpResponse(status=500, content="Webhook processing error.".encode("utf-8"))
+
     logger.info(f"🔔 Received Stripe event: {event.type}")
     # Handle checkout.session.completed event (for embedded checkout)
-    if event.type == 'checkout.session.completed':
+    if event.type == "checkout.session.completed":
         checkout_session = event.data.object
         logger.info(f"🔔 Checkout session completed: {getattr(checkout_session, 'id', 'unknown')}")
 
-        # Try to get metadata from checkout session
-        metadata = getattr(checkout_session, 'metadata', {})
-        logger.info(f"🔔 Checkout session metadata: {metadata}")
-        
-        if metadata and metadata.get('user_id'):
+        # Try to get metadata from checkout session (do not log full payload)
+        metadata = getattr(checkout_session, "metadata", {})
+        try:
+            meta_keys = list(metadata.keys()) if hasattr(metadata, "keys") else []
+        except Exception:
+            meta_keys = []
+        logger.info(f"🔔 Checkout session metadata keys: {meta_keys}")
+
+        if metadata and metadata.get("user_id"):
             logger.info(f"🔔 Found user_id in checkout session metadata: {metadata.get('user_id')}")
-            
+
             # Pass the entire checkout session to handle_sucessfull_checkout
             handle_sucessfull_checkout(checkout_session)
-            return HttpResponse(status=200, content='checkout.session.completed event successfully processed'.encode('utf-8'))
+            return HttpResponse(
+                status=200, content="checkout.session.completed event successfully processed".encode("utf-8")
+            )
         else:
             logger.warning("⚠️ No user_id found in checkout session metadata")
             logger.warning(f"⚠️ Available metadata keys: {list(metadata.keys()) if metadata else 'None'}")
-            
+
             # Try to retrieve the full session from Stripe as fallback
             try:
-                session_id = getattr(checkout_session, 'id')
+                session_id = checkout_session.id
                 if session_id:
                     logger.info(f"🔍 Attempting to retrieve full session: {session_id}")
                     full_session = stripe.checkout.Session.retrieve(session_id)
-                    full_metadata = getattr(full_session, 'metadata', {})
-                    logger.info(f"🔍 Full session metadata: {full_metadata}")
-                    
-                    if full_metadata and full_metadata.get('user_id'):
+                    full_metadata = getattr(full_session, "metadata", {})
+                    try:
+                        full_meta_keys = list(full_metadata.keys()) if hasattr(full_metadata, "keys") else []
+                    except Exception:
+                        full_meta_keys = []
+                    logger.info(f"🔍 Full session metadata keys: {full_meta_keys}")
+
+                    if full_metadata and full_metadata.get("user_id"):
                         logger.info(f"  Found user_id in retrieved session: {full_metadata.get('user_id')}")
                         handle_sucessfull_checkout(full_session)
-                        return HttpResponse(status=200, content='Webhook processed with retrieved session'.encode('utf-8'))
+                        return HttpResponse(
+                            status=200, content="Webhook processed with retrieved session".encode("utf-8")
+                        )
             except Exception as e:
                 logger.error(f" Error retrieving full session: {e}")
-            
-            return HttpResponse(
-                status=400, 
-                content='No user_id found in checkout session metadata'.encode('utf-8')
-            )
-    
+
+            return HttpResponse(status=400, content="No user_id found in checkout session metadata".encode("utf-8"))
+
     # Handle refund.updated event (for order cancellations)
-    elif event.type == 'refund.updated':
+    elif event.type == "refund.updated":
         refund_object = event.data.object
         logger.info(f"🔔 Refund updated event received for refund_id: {getattr(refund_object, 'id', 'unknown')}")
-        
+
         # Extract refund details with comprehensive error handling
         try:
-            refund_id = getattr(refund_object, 'id', '')
-            refund_status = getattr(refund_object, 'status', '')
-            refund_amount = getattr(refund_object, 'amount', 0) / 100  # Convert from cents
-            refund_metadata = getattr(refund_object, 'metadata', {})
-            
+            refund_id = getattr(refund_object, "id", "")
+            refund_status = getattr(refund_object, "status", "")
+            refund_amount = getattr(refund_object, "amount", 0) / 100  # Convert from cents
+            refund_metadata = getattr(refund_object, "metadata", {})
             logger.info(f"🔔 Processing refund: {refund_id}, status: {refund_status}, amount: ${refund_amount}")
-            logger.info(f"🔔 Refund metadata: {refund_metadata}")
-            
+            # Do not log full metadata; only keys and selected whitelisted fields
+            try:
+                refund_meta_keys = list(refund_metadata.keys()) if hasattr(refund_metadata, "keys") else []
+            except Exception:
+                refund_meta_keys = []
+            logger.info(f"🔔 Refund metadata keys: {refund_meta_keys}")
+
             # Handle refund status
-            failure_balance_transaction = getattr(refund_object, 'failure_balance_transaction', None)
-            failure_code = getattr(refund_object, 'failure_code', None)
-            failure_reason = getattr(refund_object, 'failure_reason', None)
-            
-            logger.info(f"🔔 Refund failure details - balance_transaction: {failure_balance_transaction}, code: {failure_code}, reason: {failure_reason}")
-            
+            failure_balance_transaction = getattr(refund_object, "failure_balance_transaction", None)
+            failure_code = getattr(refund_object, "failure_code", None)
+            failure_reason = getattr(refund_object, "failure_reason", None)
+
+            logger.info(
+                f"🔔 Refund failure details - balance_transaction: {failure_balance_transaction}, code: {failure_code}, reason: {failure_reason}"
+            )
+
         except Exception as e:
             logger.error(f"⚠️ Error extracting refund details: {str(e)}")
-            return HttpResponse(f"Error processing refund object: {str(e)}".encode('utf-8'), status=400)
-        
-        if refund_status == 'succeeded' and failure_balance_transaction is None:
-            logger.info(f"🔔 Refund succeeded")
+            return HttpResponse(f"Error processing refund object: {str(e)}".encode("utf-8"), status=400)
+
+        if refund_status == "succeeded" and failure_balance_transaction is None:
+            logger.info("🔔 Refund succeeded")
             # Try to get order ID from refund metadata first
-            order_id = refund_metadata.get('order_id')
-            
+            order_id = refund_metadata.get("order_id")
+
             if order_id:
                 logger.info(f"🔔 Found order_id in refund metadata: {order_id}")
                 try:
                     # Get order directly from metadata
                     from marketplace.models import Order
+
                     order = Order.objects.get(id=order_id)
-                    
-                    with atomic_with_isolation('READ COMMITTED'):
+
+                    with atomic_with_isolation("READ COMMITTED"):
                         # Update order status to refunded
-                        order.status = 'refunded'
-                        order.payment_status = 'refunded'
-                        order.save(update_fields=['status', 'payment_status'])
-                        
+                        order.status = "refunded"
+                        order.payment_status = "refunded"
+                        order.save(update_fields=["status", "payment_status"])
+
                         # Restore stock for cancelled items
                         for item in order.items.all():
                             product = item.product
                             product.stock_quantity += item.quantity
-                            product.save(update_fields=['stock_quantity'])
+                            product.save(update_fields=["stock_quantity"])
                             logger.info(f"  Restored {item.quantity} units to product {product.name}")
-                        
+
                         logger.info(f"  Order {order.id} marked as cancelled due to refund")
-                        
+
                         # Update PaymentTransaction status from 'waiting_refund' to 'refunded'
-                        payment_transactions = PaymentTransaction.objects.filter(
-                            order=order,
-                            status='waiting_refund'
-                        )
+                        payment_transactions = PaymentTransaction.objects.filter(order=order, status="waiting_refund")
                         for transaction in payment_transactions:
-                            transaction.status = 'refunded'
-                            transaction.notes = f"{transaction.notes}\nRefund succeeded via webhook: {refund_id}" if transaction.notes else f"Refund succeeded via webhook: {refund_id}"
-                            transaction.save(update_fields=['status', 'notes', 'updated_at'])
+                            transaction.status = "refunded"
+                            transaction.notes = (
+                                f"{transaction.notes}\nRefund succeeded via webhook: {refund_id}"
+                                if transaction.notes
+                                else f"Refund succeeded via webhook: {refund_id}"
+                            )
+                            transaction.save(update_fields=["status", "notes", "updated_at"])
                             logger.info(f"  Updated PaymentTransaction {transaction.id} status to 'refunded'")
-                        
+
                         # Create or update success refund tracker
                         try:
                             # Check if tracker already exists for this refund
-                            existing_tracker = PaymentTracker.objects.filter(
-                                stripe_refund_id=refund_id
-                            ).first()
-                            
+                            existing_tracker = PaymentTracker.objects.filter(stripe_refund_id=refund_id).first()
+
                             if existing_tracker:
                                 # Update existing tracker to success status
-                                existing_tracker.status = 'success_refund'
+                                existing_tracker.status = "success_refund"
                                 existing_tracker.notes = f"{existing_tracker.notes}\nRefund succeeded: {refund_metadata.get('reason', 'Order cancelled')}"
-                                existing_tracker.save(update_fields=['status', 'notes', 'updated_at'])
+                                existing_tracker.save(update_fields=["status", "notes", "updated_at"])
                                 logger.info(f"  Updated existing tracker to success_refund for refund {refund_id}")
                             else:
                                 # Create new tracker
@@ -257,26 +270,24 @@ def stripe_webhook(request):
                                     stripe_refund_id=refund_id,
                                     order=order,
                                     user=order.buyer,
-                                    transaction_type='refund',
-                                    status='success_refund',
+                                    transaction_type="refund",
+                                    status="success_refund",
                                     amount=refund_amount,
-                                    currency='USD',
-                                    notes=f'Refund succeeded: {refund_metadata.get("reason", "Order cancelled")}'
+                                    currency="USD",
+                                    notes=f'Refund succeeded: {refund_metadata.get("reason", "Order cancelled")}',
                                 )
                                 logger.info(f"  Created new success_refund tracker for refund {refund_id}")
                         except Exception as tracker_error:
                             logger.error(f" Failed to create/update refund tracker: {str(tracker_error)}")
-                        
+
                         # Send cancellation confirmation email to customer
                         try:
                             # Get cancellation details from metadata
-                            cancelled_by_id = refund_metadata.get('cancelled_by')
-                            cancellation_reason = refund_metadata.get('reason', 'Order cancelled')
-                            
+                            _cancelled_by_id = refund_metadata.get("cancelled_by")
+                            cancellation_reason = refund_metadata.get("reason", "Order cancelled")
+
                             email_sent, email_message = send_order_cancellation_receipt_email(
-                                order, 
-                                cancellation_reason, 
-                                refund_amount
+                                order, cancellation_reason, refund_amount
                             )
                             if email_sent:
                                 logger.info(f"📧 Cancellation email sent to {order.buyer.email}")
@@ -285,69 +296,75 @@ def stripe_webhook(request):
                         except Exception as email_error:
                             logger.error(f" Error sending cancellation email: {str(email_error)}")
                             # Don't fail the refund processing if email fails
-                        
+
                 except Order.DoesNotExist:
                     logger.error(f" Order {order_id} not found")
                 except Exception as e:
                     logger.error(f" Error processing refund for order {order_id}: {e}")
         else:
             logger.info(f"ℹ️ Refund status is '{refund_status}' - will be handled by appropriate webhook event")
-        
-        return HttpResponse(status=200, content='refund.updated event successfully processed'.encode('utf-8'))
-    
+
+        return HttpResponse(status=200, content="refund.updated event successfully processed".encode("utf-8"))
+
     # Handle refund.failed event (for failed refund processing)
-    elif event.type == 'refund.failed':
+    elif event.type == "refund.failed":
         refund_object = event.data.object
         logger.info(f"🔔 Refund failed event received for refund_id: {getattr(refund_object, 'id', 'unknown')}")
-        logger.debug(f"Full refund object: {json.dumps(dict(refund_object), indent=2, default=str)}")
-        
+        # Do not log full refund payload to avoid sensitive data exposure
+        logger.debug("Refund object received (payload omitted)")
+
         # Extract refund details
-        refund_id = getattr(refund_object, 'id', '')
-        failure_reason = getattr(refund_object, 'failure_reason', 'Unknown')
-        refund_amount = getattr(refund_object, 'amount', 0) / 100  # Convert from cents
-        refund_metadata = getattr(refund_object, 'metadata', {})
-        
+        refund_id = getattr(refund_object, "id", "")
+        failure_reason = getattr(refund_object, "failure_reason", "Unknown")
+        refund_amount = getattr(refund_object, "amount", 0) / 100  # Convert from cents
+        refund_metadata = getattr(refund_object, "metadata", {})
+
         logger.info(f"🔔 Processing failed refund: {refund_id}, reason: {failure_reason}, amount: ${refund_amount}")
-        logger.info(f"🔔 Refund metadata: {refund_metadata}")
-        
+        # Avoid logging full metadata; log only keys
+        try:
+            _refund_meta_keys = list(refund_metadata.keys()) if hasattr(refund_metadata, "keys") else []
+        except Exception:
+            _refund_meta_keys = []
+        logger.info(f"🔔 Refund metadata keys: {_refund_meta_keys}")
+
         # Try to find order and handle failed refund
-        order_id = refund_metadata.get('order_id')
+        order_id = refund_metadata.get("order_id")
         if order_id:
             logger.info(f"🔔 Found order_id in refund metadata: {order_id}")
             try:
                 from marketplace.models import Order
+
                 order = Order.objects.get(id=order_id)
-                
-                with atomic_with_isolation('READ COMMITTED'):
+
+                with atomic_with_isolation("READ COMMITTED"):
                     # Update order status to cancelled and payment_status to failed_refund
-                    order.status = 'cancelled'
-                    order.payment_status = 'failed_refund'
-                    order.save(update_fields=['status', 'payment_status'])
+                    order.status = "cancelled"
+                    order.payment_status = "failed_refund"
+                    order.save(update_fields=["status", "payment_status"])
                     logger.info(f"  Order {order.id} status set to 'cancelled' and payment_status to 'failed_refund'")
-                    
+
                     # Update PaymentTransaction status from 'waiting_refund' to 'failed_refund'
-                    payment_transactions = PaymentTransaction.objects.filter(
-                        order=order,
-                        status='waiting_refund'
-                    )
+                    payment_transactions = PaymentTransaction.objects.filter(order=order, status="waiting_refund")
                     for transaction in payment_transactions:
-                        transaction.status = 'failed_refund'
-                        transaction.notes = f"{transaction.notes}\nRefund failed via webhook: {refund_id} - {failure_reason}" if transaction.notes else f"Refund failed via webhook: {refund_id} - {failure_reason}"
-                        transaction.save(update_fields=['status', 'notes', 'updated_at'])
+                        transaction.status = "failed_refund"
+                        transaction.notes = (
+                            f"{transaction.notes}\nRefund failed via webhook: {refund_id} - {failure_reason}"
+                            if transaction.notes
+                            else f"Refund failed via webhook: {refund_id} - {failure_reason}"
+                        )
+                        transaction.save(update_fields=["status", "notes", "updated_at"])
                         logger.info(f"  Updated PaymentTransaction {transaction.id} status to 'failed_refund'")
-                
+
                 # Create or update failed refund tracker
                 try:
                     # Check if tracker already exists for this refund
-                    existing_tracker = PaymentTracker.objects.filter(
-                        stripe_refund_id=refund_id
-                    ).first()
-                    
+                    existing_tracker = PaymentTracker.objects.filter(stripe_refund_id=refund_id).first()
+
                     if existing_tracker:
                         # Update existing tracker to failed status
-                        existing_tracker.status = 'failed_refund'
+                        existing_tracker.status = "failed_refund"
                         existing_tracker.notes = f"{existing_tracker.notes}\nRefund failed: {failure_reason}"
-                        existing_tracker.save(update_fields=['status', 'notes', 'updated_at'])
+                        existing_tracker.save(update_fields=["status", "notes", "updated_at"])
                         logger.info(f"  Updated existing tracker to failed_refund for refund {refund_id}")
                     else:
                         # Create new tracker
@@ -355,425 +372,489 @@ def stripe_webhook(request):
                             stripe_refund_id=refund_id,
                             order=order,
                             user=order.buyer,
-                            transaction_type='refund',
-                            status='failed_refund',
+                            transaction_type="refund",
+                            status="failed_refund",
                             amount=refund_amount,
-                            currency='USD',
-                            notes=f'Refund failed: {failure_reason}'
+                            currency="USD",
+                            notes=f"Refund failed: {failure_reason}",
                         )
                         logger.info(f"  Created new failed_refund tracker for refund {refund_id}")
                 except Exception as tracker_error:
                     logger.error(f" Failed to create/update failed refund tracker: {str(tracker_error)}")
-                
+
                 # Send failed refund notification email to customer
                 try:
                     email_sent, email_message = send_failed_refund_notification_email(
-                        order, 
-                        failure_reason, 
-                        refund_amount
+                        order, failure_reason, refund_amount
                     )
                     if email_sent:
-                         logger.info(f"📧 Failed refund notification email sent to {order.buyer.email}")
+                        logger.info(f"📧 Failed refund notification email sent to {order.buyer.email}")
                     else:
-                         logger.warning(f"⚠️ Failed to send failed refund notification email: {email_message}")
+                        logger.warning(f"⚠️ Failed to send failed refund notification email: {email_message}")
                 except Exception as email_error:
                     logger.error(f" Error sending failed refund notification email: {str(email_error)}")
                     # Don't fail the webhook processing if email fails
-                    
+
             except Order.DoesNotExist:
                 logger.error(f" Order {order_id} not found for failed refund")
             except Exception as e:
                 logger.error(f" Error processing failed refund for order {order_id}: {e}")
         else:
             # Fallback: try to find order by existing refund tracker or payment tracker
-            print("🔍 No order_id in metadata, searching by payment tracker")
+            logger.info("🔍 No order_id in metadata, searching by payment tracker")
             try:
-                payment_tracker = PaymentTracker.objects.filter(
-                    stripe_refund_id=refund_id
-                ).first()
-                
+                payment_tracker = PaymentTracker.objects.filter(stripe_refund_id=refund_id).first()
+
                 if payment_tracker:
                     # Update order and PaymentTransaction if we have them
                     if payment_tracker.order:
                         order = payment_tracker.order
-                        with atomic_with_isolation('READ COMMITTED'):
+                        with atomic_with_isolation("READ COMMITTED"):
                             # Update order status to cancelled and payment_status to failed_refund
-                            order.status = 'cancelled'
-                            order.payment_status = 'failed_refund'
-                            order.save(update_fields=['status', 'payment_status'])
-                            print(f"  Order {order.id} status set to 'cancelled' and payment_status to 'failed_refund' (fallback)")
-                            
+                            order.status = "cancelled"
+                            order.payment_status = "failed_refund"
+                            order.save(update_fields=["status", "payment_status"])
+                            logger.info(
+                                f"  Order {order.id} status set to 'cancelled' and payment_status to 'failed_refund' (fallback)"
+                            )
+
                             # Update PaymentTransaction status from 'waiting_refund' to 'failed_refund'
                             payment_transactions = PaymentTransaction.objects.filter(
-                                order=order,
-                                status='waiting_refund'
+                                order=order, status="waiting_refund"
                             )
                             for transaction in payment_transactions:
-                                transaction.status = 'failed_refund'
-                                transaction.notes = f"{transaction.notes}\nRefund failed via webhook (fallback): {refund_id} - {failure_reason}" if transaction.notes else f"Refund failed via webhook (fallback): {refund_id} - {failure_reason}"
-                                transaction.save(update_fields=['status', 'notes', 'updated_at'])
-                                print(f"  Updated PaymentTransaction {transaction.id} status to 'failed_refund' (fallback)")
-                    
-                    payment_tracker.status = 'failed_refund'
+                                transaction.status = "failed_refund"
+                                transaction.notes = (
+                                    f"{transaction.notes}\nRefund failed via webhook (fallback): {refund_id} - {failure_reason}"
+                                    if transaction.notes
+                                    else f"Refund failed via webhook (fallback): {refund_id} - {failure_reason}"
+                                )
+                                transaction.save(update_fields=["status", "notes", "updated_at"])
+                                logger.info(
+                                    f"  Updated PaymentTransaction {transaction.id} status to 'failed_refund' (fallback)"
+                                )
+
+                    payment_tracker.status = "failed_refund"
                     payment_tracker.notes = f"{payment_tracker.notes}\nRefund failed: {failure_reason}"
-                    payment_tracker.save(update_fields=['status', 'notes', 'updated_at'])
-                    print(f"  Updated existing tracker to failed_refund status")
-                    
+                    payment_tracker.save(update_fields=["status", "notes", "updated_at"])
+                    logger.info("  Updated existing tracker to failed_refund status")
+
                     # Send failed refund notification email if we have an order (fallback path)
                     if payment_tracker.order:
                         try:
                             email_sent, email_message = send_failed_refund_notification_email(
-                                payment_tracker.order, 
-                                failure_reason, 
-                                refund_amount
+                                payment_tracker.order, failure_reason, refund_amount
                             )
                             if email_sent:
-                                print(f"📧 Failed refund notification email sent to {payment_tracker.order.buyer.email} (fallback)")
+                                logger.info(
+                                    f"📧 Failed refund notification email sent to {payment_tracker.order.buyer.email} (fallback)"
+                                )
                             else:
-                                print(f"⚠️ Failed to send failed refund notification email (fallback): {email_message}")
+                                logger.warning(
+                                    f"⚠️ Failed to send failed refund notification email (fallback): {email_message}"
+                                )
                         except Exception as email_error:
-                            print(f" Error sending failed refund notification email (fallback): {str(email_error)}")
+                            logger.error(
+                                f" Error sending failed refund notification email (fallback): {str(email_error)}"
+                            )
                             # Don't fail the webhook processing if email fails
                 else:
                     # Try to find any payment tracker with the same payment intent to get order info
-                    print(f"🔍 No refund tracker found, searching for related payment tracker")
+                    logger.info("🔍 No refund tracker found, searching for related payment tracker")
                     payment_intent_id = None
                     try:
                         # Try to get payment intent from Stripe refund data
-                        payment_intent_id = getattr(refund_object, 'payment_intent', None)
-                        
+                        payment_intent_id = getattr(refund_object, "payment_intent", None)
+
                         if payment_intent_id:
                             related_tracker = PaymentTracker.objects.filter(
-                                stripe_payment_intent_id=payment_intent_id,
-                                transaction_type='payment'
+                                stripe_payment_intent_id=payment_intent_id, transaction_type="payment"
                             ).first()
-                            
+
                             if related_tracker and related_tracker.order:
                                 order = related_tracker.order
-                                
-                                with atomic_with_isolation('READ COMMITTED'):
+
+                                with atomic_with_isolation("READ COMMITTED"):
                                     # Update order status to cancelled and payment_status to failed_refund
-                                    order.status = 'cancelled'
-                                    order.payment_status = 'failed_refund'
-                                    order.save(update_fields=['status', 'payment_status'])
-                                    print(f"  Order {order.id} status set to 'cancelled' and payment_status to 'failed_refund' (via payment intent)")
-                                    
+                                    order.status = "cancelled"
+                                    order.payment_status = "failed_refund"
+                                    order.save(update_fields=["status", "payment_status"])
+                                    print(
+                                        f"  Order {order.id} status set to 'cancelled' and payment_status to 'failed_refund' (via payment intent)"
+                                    )
+
                                     # Update PaymentTransaction status from 'waiting_refund' to 'failed_refund'
                                     payment_transactions = PaymentTransaction.objects.filter(
-                                        order=order,
-                                        status='waiting_refund'
+                                        order=order, status="waiting_refund"
                                     )
                                     for transaction in payment_transactions:
-                                        transaction.status = 'failed_refund'
-                                        transaction.notes = f"{transaction.notes}\nRefund failed via webhook (via payment intent): {refund_id} - {failure_reason}" if transaction.notes else f"Refund failed via webhook (via payment intent): {refund_id} - {failure_reason}"
-                                        transaction.save(update_fields=['status', 'notes', 'updated_at'])
-                                        print(f"  Updated PaymentTransaction {transaction.id} status to 'failed_refund' (via payment intent)")
-                                
+                                        transaction.status = "failed_refund"
+                                        transaction.notes = (
+                                            f"{transaction.notes}\nRefund failed via webhook (via payment intent): {refund_id} - {failure_reason}"
+                                            if transaction.notes
+                                            else f"Refund failed via webhook (via payment intent): {refund_id} - {failure_reason}"
+                                        )
+                                        transaction.save(update_fields=["status", "notes", "updated_at"])
+                                        print(
+                                            f"  Updated PaymentTransaction {transaction.id} status to 'failed_refund' (via payment intent)"
+                                        )
+
                                 # Create failed refund tracker based on related payment tracker
                                 PaymentTracker.objects.create(
                                     stripe_refund_id=refund_id,
                                     order=related_tracker.order,
                                     user=related_tracker.user,
-                                    transaction_type='refund',
-                                    status='failed_refund',
+                                    transaction_type="refund",
+                                    status="failed_refund",
                                     amount=refund_amount,
-                                    currency='USD',
-                                    notes=f'Refund failed for payment intent {payment_intent_id}: {failure_reason}'
+                                    currency="USD",
+                                    notes=f"Refund failed for payment intent {payment_intent_id}: {failure_reason}",
                                 )
-                                print(f"  Created failed_refund tracker from related payment tracker")
-                                
+                                print("  Created failed_refund tracker from related payment tracker")
+
                                 # Send failed refund notification email (via payment intent path)
                                 try:
                                     email_sent, email_message = send_failed_refund_notification_email(
-                                        order, 
-                                        failure_reason, 
-                                        refund_amount
+                                        order, failure_reason, refund_amount
                                     )
                                     if email_sent:
-                                        print(f"📧 Failed refund notification email sent to {order.buyer.email} (via payment intent)")
+                                        logger.info(
+                                            f"📧 Failed refund notification email sent to {order.buyer.email} (via payment intent)"
+                                        )
                                     else:
-                                        print(f"⚠️ Failed to send failed refund notification email (via payment intent): {email_message}")
+                                        logger.warning(
+                                            f"⚠️ Failed to send failed refund notification email (via payment intent): {email_message}"
+                                        )
                                 except Exception as email_error:
-                                    print(f" Error sending failed refund notification email (via payment intent): {str(email_error)}")
+                                    logger.error(
+                                        f" Error sending failed refund notification email (via payment intent): {str(email_error)}"
+                                    )
                                     # Don't fail the webhook processing if email fails
                             else:
-                                print(f"⚠️ No related payment tracker found for payment intent {payment_intent_id}")
+                                logger.warning(
+                                    f"⚠️ No related payment tracker found for payment intent {payment_intent_id}"
+                                )
                         else:
-                            print(f"⚠️ No payment intent found in refund object")
+                            logger.warning("⚠️ No payment intent found in refund object")
                     except Exception as related_error:
-                        print(f"⚠️ Could not find related payment info: {related_error}")
-                    
+                        logger.warning(f"⚠️ Could not find related payment info: {related_error}")
+
                     if not payment_intent_id:
-                        print(f"⚠️ No payment tracker found for failed refund {refund_id} and no fallback available")
-                    
+                        logger.warning(
+                            f"⚠️ No payment tracker found for failed refund {refund_id} and no fallback available"
+                        )
+
             except Exception as e:
-                print(f" Error updating failed refund tracker: {e}")
-        
-        return HttpResponse(status=200, content='refund.failed event successfully processed'.encode('utf-8'))
-    
+                logger.error(f" Error updating failed refund tracker: {e}")
+
+        return HttpResponse(status=200, content="refund.failed event successfully processed".encode("utf-8"))
+
     # Handle account.updated event (for Stripe Connect seller account updates)
-    elif event.type == 'account.updated':
+    elif event.type == "account.updated":
         account_object = event.data.object
-        account_id = getattr(account_object, 'id', '')
-        print(f"🔔 Account updated event received for account: {account_id}")
-        
+        account_id = getattr(account_object, "id", "")
+        logger.info(f"🔔 Account updated event received for account: {account_id}")
+
         try:
             # Import the service here to avoid circular imports
             from .stripe_service import StripeConnectService
-            
+
             # Process the account update
-            result = StripeConnectService.handle_account_updated_webhook(
-                account_id, 
-                account_object
-            )
-            
-            if result['success']:
-                print(f"  Successfully processed account update for account: {account_id}")
-                print(f"  Updated user ID: {result.get('user_id', 'unknown')}")
+            result = StripeConnectService.handle_account_updated_webhook(account_id, account_object)
+
+            if result["success"]:
+                logger.info(f"  Successfully processed account update for account: {account_id}")
+                logger.info(f"  Updated user ID: {result.get('user_id', 'unknown')}")
             else:
-                print(f"⚠️ Failed to process account update: {result['errors']}")
-                
+                logger.warning(f"⚠️ Failed to process account update: {result['errors']}")
+
         except Exception as e:
-            print(f" Error processing account.updated webhook: {e}")
+            logger.error(f" Error processing account.updated webhook: {e}")
             # Don't fail the webhook for account update errors
-        
-        return HttpResponse(status=200, content='account.updated event successfully processed'.encode('utf-8'))
-    
+
+        return HttpResponse(status=200, content="account.updated event successfully processed".encode("utf-8"))
+
     # Handle transfer.created events for payment verification
-    elif event.type == 'transfer.created':
+    elif event.type == "transfer.created":
         transfer_object = event.data.object
 
-        print(f"🔔 Event Type: {event.type}")
+        logger.info(f"🔔 Event Type: {event.type}")
         # Extract transfer data based on the actual Stripe structure
-        transfer_id = getattr(transfer_object, 'id', '')  # e.g., "tr_1RwA18CEfT6kDqKIZfcknZlv"
-        amount = getattr(transfer_object, 'amount', 0)    # e.g., 205106 (in cents)
-        currency = getattr(transfer_object, 'currency', '') # e.g., "eur"
-        destination = getattr(transfer_object, 'destination', '') # e.g., "acct_1Rw2CuFhtX16wVcQ"
-        metadata = getattr(transfer_object, 'metadata', {})
-        reversed = getattr(transfer_object, 'reversed', False)
-        
+        transfer_id = getattr(transfer_object, "id", "")  # e.g., "tr_1RwA18CEfT6kDqKIZfcknZlv"
+        amount = getattr(transfer_object, "amount", 0)  # e.g., 205106 (in cents)
+        currency = getattr(transfer_object, "currency", "")  # e.g., "eur"
+        destination = getattr(transfer_object, "destination", "")  # e.g., "acct_1Rw2CuFhtX16wVcQ"
+        metadata = getattr(transfer_object, "metadata", {})
+        reversed = getattr(transfer_object, "reversed", False)
+
         # Log the transfer details
         logger.info(f"[WEBHOOK] Transfer created: {transfer_id}")
         logger.info(f"[WEBHOOK] Transfer amount: {amount} {currency}")
         logger.info(f"[WEBHOOK] Transfer destination: {destination}")
         logger.info(f"[WEBHOOK] Transfer reversed: {reversed}")
-        logger.info(f"[WEBHOOK] Transfer metadata: {metadata}")
-        
+        try:
+            _transfer_meta_keys = list(metadata.keys()) if hasattr(metadata, "keys") else []
+        except Exception:
+            _transfer_meta_keys = []
+        logger.info(f"[WEBHOOK] Transfer metadata keys: {_transfer_meta_keys}")
+
         try:
             # Extract transaction_id from metadata (from your example)
-            transaction_id = metadata.get('transaction_id')  # "19220fe2-3c3b-45dc-8995-a750ba8e3982"
-            order_id = metadata.get('order_id')             # "b6df43cd-4d40-49fb-bb33-adb7a390fa65"
-            seller_id = metadata.get('seller_id')           # "1"
-            buyer_id = metadata.get('buyer_id')             # "1"
-            
-            print(f"🔍 Extracted from metadata:")
-            print(f"   Transaction ID: {transaction_id}")
-            print(f"   Order ID: {order_id}")
-            print(f"   Seller ID: {seller_id}")
-            print(f"   Buyer ID: {buyer_id}")
-            
+            transaction_id = metadata.get("transaction_id")  # "19220fe2-3c3b-45dc-8995-a750ba8e3982"
+            order_id = metadata.get("order_id")  # "b6df43cd-4d40-49fb-bb33-adb7a390fa65"
+            seller_id = metadata.get("seller_id")  # "1"
+            buyer_id = metadata.get("buyer_id")  # "1"
+
+            logger.info("🔍 Extracted from metadata:")
+            logger.info(f"   Transaction ID: {transaction_id}")
+            logger.info(f"   Order ID: {order_id}")
+            logger.info(f"   Seller ID: {seller_id}")
+            logger.info(f"   Buyer ID: {buyer_id}")
+
             if transaction_id:
                 # Define deadlock-safe operation for transfer success processing
                 @retry_on_deadlock(max_retries=3, delay=0.01, backoff=2.0)  # 10ms deadlock retry
                 def process_transfer_success():
                     """Fetch the PaymentTransaction safely for a transfer.created event (with retries)."""
                     return PaymentTransaction.objects.get(id=transaction_id)
-                
+
                 try:
                     payment_transaction = process_transfer_success()
                     logger.info(f"[WEBHOOK] Found payment transaction {transaction_id}")
-                    print(f"  Found PaymentTransaction: {payment_transaction.id}")
-                    print(f"   Current status: {payment_transaction.status}")
-                    print(f"   Current transfer_id: {payment_transaction.transfer_id}")
+                    logger.info(f"  Found PaymentTransaction: {payment_transaction.id}")
+                    logger.info(f"   Current status: {payment_transaction.status}")
+                    logger.info(f"   Current transfer_id: {payment_transaction.transfer_id}")
 
                     # Create a PaymentTracker entry for the transfer
                     try:
                         from marketplace.models import Order
+
                         order = Order.objects.get(id=order_id)
                         seller = User.objects.get(id=seller_id)
                         PaymentTracker.objects.create(
                             stripe_transfer_id=transfer_id,
                             order=order,
                             user=seller,
-                            transaction_type='transfer',
-                            status='succeeded',
+                            transaction_type="transfer",
+                            status="succeeded",
                             amount=Decimal(amount) / 100,
                             currency=currency.upper(),
-                            notes=f"Transfer to seller {seller.username} for order {order.id} created successfully."
+                            notes=f"Transfer to seller {seller.username} for order {order.id} created successfully.",
                         )
                         logger.info(f"Created PaymentTracker for transfer {transfer_id}")
-                        print(f"  Created PaymentTracker for transfer {transfer_id}")
+                        logger.info(f"  Created PaymentTracker for transfer {transfer_id}")
                     except Order.DoesNotExist:
                         logger.error(f"Order with id {order_id} not found for transfer {transfer_id}")
-                        print(f" Order with id {order_id} not found for transfer {transfer_id}")
+                        logger.error(f" Order with id {order_id} not found for transfer {transfer_id}")
                     except User.DoesNotExist:
                         logger.error(f"Seller with id {seller_id} not found for transfer {transfer_id}")
-                        print(f" Seller with id {seller_id} not found for transfer {transfer_id}")
+                        logger.error(f" Seller with id {seller_id} not found for transfer {transfer_id}")
                     except Exception as e:
                         logger.error(f"Failed to create PaymentTracker for transfer {transfer_id}: {e}")
-                        print(f" Failed to create PaymentTracker for transfer {transfer_id}: {e}")
-                    
+                        logger.error(f" Failed to create PaymentTracker for transfer {transfer_id}: {e}")
+
                     # Since this is transfer.created, the transfer was successfully created
                     # This means the payment is now successfully released to the seller
                     if not reversed:
                         # Use READ COMMITTED transaction with proper model ordering for transfer success
-                        with atomic_with_isolation('READ COMMITTED'):
+                        with atomic_with_isolation("READ COMMITTED"):
                             # Model Ordering: PaymentTransaction -> PaymentTracker (both inside same isolation)
-                            transaction_for_update = PaymentTransaction.objects.select_for_update().get(id=transaction_id)
-                            
+                            transaction_for_update = PaymentTransaction.objects.select_for_update().get(
+                                id=transaction_id
+                            )
+
                             # Update status to "released" indicating successful transfer to seller
                             old_status = transaction_for_update.status
-                            if transaction_for_update.status == 'processing':
-                                transaction_for_update.status = 'released'  # Success status - money released to seller
+                            if transaction_for_update.status == "processing":
+                                transaction_for_update.status = "released"  # Success status - money released to seller
                                 transaction_for_update.actual_release_date = timezone.now()
                                 transaction_for_update.transfer_id = transfer_id
                                 transaction_for_update.notes = f"{transaction_for_update.notes}\nTransfer succeeded via webhook: {transfer_id} (amount: {amount/100:.2f} {currency.upper()})"
-                                transaction_for_update.save(update_fields=[
-                                    'status', 'actual_release_date', 'transfer_id', 'notes', 'updated_at'
-                                ])
-                                
-                                logger.info(f"[SUCCESS] Payment transaction {transaction_id} status updated: {old_status} -> released")
-                                print(f"  Transfer {transfer_id} SUCCESS - payment released to seller")
-                                print(f"   Amount: {amount/100:.2f} {currency.upper()}")
-                                print(f"   Status: {old_status} -> released (SUCCESS)")
-                                
+                                transaction_for_update.save(
+                                    update_fields=[
+                                        "status",
+                                        "actual_release_date",
+                                        "transfer_id",
+                                        "notes",
+                                        "updated_at",
+                                    ]
+                                )
+
+                                logger.info(
+                                    f"[SUCCESS] Payment transaction {transaction_id} status updated: {old_status} -> released"
+                                )
+                                logger.info(f"  Transfer {transfer_id} SUCCESS - payment released to seller")
+                                logger.info(f"   Amount: {amount/100:.2f} {currency.upper()}")
+                                logger.info(f"   Status: {old_status} -> released (SUCCESS)")
+
                                 # Then update PaymentTracker status (PaymentTracker model - second in same isolation)
-                                existing_tracker = PaymentTracker.objects.filter(stripe_transfer_id=transfer_id).select_for_update().first()
+                                existing_tracker = (
+                                    PaymentTracker.objects.filter(stripe_transfer_id=transfer_id)
+                                    .select_for_update()
+                                    .first()
+                                )
                                 if existing_tracker:
-                                    existing_tracker.status = 'succeeded'  # Mark tracker as succeeded
-                                    existing_tracker.save(update_fields=['status', 'updated_at'])
-                                    print(f"  PaymentTracker status updated to succeeded (inside same transaction)")
+                                    existing_tracker.status = "succeeded"  # Mark tracker as succeeded
+                                    existing_tracker.save(update_fields=["status", "updated_at"])
+                                    logger.info(
+                                        "  PaymentTracker status updated to succeeded (inside same transaction)"
+                                    )
                                 else:
-                                    print(f"⚠️ No existing PaymentTracker found for transfer {transfer_id}")
-                                
+                                    logger.warning(f"⚠️ No existing PaymentTracker found for transfer {transfer_id}")
+
                             else:
-                                logger.warning(f"[WARNING] Transaction {transaction_id} not in processing status (current: {transaction_for_update.status})")
-                                print(f"⚠️ Transaction not in processing status: {transaction_for_update.status}")
-                                
+                                logger.warning(
+                                    f"[WARNING] Transaction {transaction_id} not in processing status (current: {transaction_for_update.status})"
+                                )
+                                logger.warning(
+                                    f"⚠️ Transaction not in processing status: {transaction_for_update.status}"
+                                )
+
                     else:
                         # Transfer was reversed - this would be unusual for a .created event
                         logger.warning(f"[REVERSED] Transfer {transfer_id} was reversed")
-                        print(f"⚠️ Transfer {transfer_id} was reversed - unusual for created event")
-                        
+                        logger.warning(f"⚠️ Transfer {transfer_id} was reversed - unusual for created event")
+
                     # Update metadata with webhook information (outside main transaction to avoid conflicts)
                     try:
-                        if hasattr(payment_transaction, 'metadata') and payment_transaction.metadata:
-                            with atomic_with_isolation('READ COMMITTED'):
+                        if hasattr(payment_transaction, "metadata") and payment_transaction.metadata:
+                            with atomic_with_isolation("READ COMMITTED"):
                                 # Refresh the transaction to get latest data
-                                transaction_for_metadata = PaymentTransaction.objects.select_for_update().get(id=transaction_id)
-                                transaction_for_metadata.metadata.update({
-                                    'webhook_transfer_id': transfer_id,
-                                    'webhook_received': timezone.now().isoformat(),
-                                    'webhook_amount': amount,
-                                    'webhook_currency': currency,
-                                    'webhook_destination': destination,
-                                    'webhook_event_type': 'transfer.created',
-                                    'transfer_success_status': 'released'
-                                })
-                                transaction_for_metadata.save(update_fields=['metadata', 'updated_at'])
-                                print(f"📝 Updated transaction metadata with webhook success info")
+                                transaction_for_metadata = PaymentTransaction.objects.select_for_update().get(
+                                    id=transaction_id
+                                )
+                                transaction_for_metadata.metadata.update(
+                                    {
+                                        "webhook_transfer_id": transfer_id,
+                                        "webhook_received": timezone.now().isoformat(),
+                                        "webhook_amount": amount,
+                                        "webhook_currency": currency,
+                                        "webhook_destination": destination,
+                                        "webhook_event_type": "transfer.created",
+                                        "transfer_success_status": "released",
+                                    }
+                                )
+                                transaction_for_metadata.save(update_fields=["metadata", "updated_at"])
+                                logger.info("📝 Updated transaction metadata with webhook success info")
                     except Exception as metadata_error:
                         logger.warning(f"Failed to update metadata: {metadata_error}")
-                        print(f"⚠️ Failed to update metadata: {metadata_error}")
-                        
+                        logger.warning(f"⚠️ Failed to update metadata: {metadata_error}")
+
                 except PaymentTransaction.DoesNotExist:
                     logger.error(f"[ERROR] Payment transaction {transaction_id} not found")
-                    print(f" PaymentTransaction {transaction_id} not found in database")
-                    
+                    logger.error(f" PaymentTransaction {transaction_id} not found in database")
+
             else:
-                logger.warning(f"[WARNING] No transaction_id found in transfer metadata")
-                print(f"⚠️ No transaction_id found in transfer metadata")
-                print(f"   Available metadata keys: {list(metadata.keys())}")
-                
+                logger.warning("[WARNING] No transaction_id found in transfer metadata")
+                logger.warning("⚠️ No transaction_id found in transfer metadata")
+                logger.info(f"   Available metadata keys: {list(metadata.keys())}")
+
         except Exception as e:
             logger.error(f"[ERROR] Error processing transfer.created webhook: {e}")
-            print(f" Error processing transfer webhook: {e}")
+            logger.error(f" Error processing transfer webhook: {e}")
             import traceback
+
             traceback.print_exc()
             # Don't fail the webhook for transfer processing errors
-        
-        return HttpResponse(status=200, content='transfer.created event successfully processed'.encode('utf-8'))
+
+        return HttpResponse(status=200, content="transfer.created event successfully processed".encode("utf-8"))
 
     # Handle payout payment events from the checkout since the checkout never realy says paid or not
-    elif event.type == 'payment_intent.succeeded':
+    elif event.type == "payment_intent.succeeded":
         payment_intent = event.data.object
 
-        print(f"🔔 ==================== PAYMENT INTENT SUCCEEDED ====================")
+        print("🔔 ==================== PAYMENT INTENT SUCCEEDED ====================")
         print(f"🔔 Event Type: {event.type}")
         print(f"🔔 Event ID: {getattr(event, 'id', 'unknown')}")
         print(f"🔔 Payment Intent ID: {getattr(payment_intent, 'id', 'unknown')}")
         print(f"🔔 Amount: {getattr(payment_intent, 'amount', 0)}")
         print(f"🔔 Currency: {getattr(payment_intent, 'currency', 'unknown')}")
         print(f"🔔 Status: {getattr(payment_intent, 'status', 'unknown')}")
-        
+
         try:
             # Process payment intent succeeded event using transaction utilities
             result = handle_payment_intent_succeeded(payment_intent)
-            if result['success']:
-                print(f"  Payment intent succeeded processing completed")
+            if result["success"]:
+                print("  Payment intent succeeded processing completed")
                 print(f"  Updated trackers: {result.get('trackers_updated', 0)}")
                 print(f"  Updated transactions: {result.get('transactions_updated', 0)}")
                 print(f"  Updated orders: {result.get('orders_updated', 0)}")
-                return HttpResponse(status=200, content='Payment intent succeeded processed successfully.'.encode('utf-8'))
+                return HttpResponse(
+                    status=200, content="Payment intent succeeded processed successfully.".encode("utf-8")
+                )
             else:
                 print(f"⚠️ Payment intent succeeded processing had issues: {result.get('errors', [])}")
-                return HttpResponse(status=200, content='payment_intent.succeeded event processed with issues'.encode('utf-8'))
+                return HttpResponse(
+                    status=200, content="payment_intent.succeeded event processed with issues".encode("utf-8")
+                )
         except Exception as e:
             print(f" Error processing payment_intent.succeeded: {e}")
             logger.error(f"Error processing payment_intent.succeeded: {e}")
-            return HttpResponse(status=200, content='payment_intent.succeeded event processed with errors'.encode('utf-8'))
-        
-        print(f"🔔 ================================================================")
-        return HttpResponse(status=200, content='payment_intent.succeeded event successfully processed'.encode('utf-8'))
-        
+            return HttpResponse(
+                status=200, content="payment_intent.succeeded event processed with errors".encode("utf-8")
+            )
+
+        print("🔔 ================================================================")
+        return HttpResponse(
+            status=200, content="payment_intent.succeeded event successfully processed".encode("utf-8")
+        )
+
     # Handle payment intent failures
-    elif event.type == 'payment_intent.payment_failed':
+    elif event.type == "payment_intent.payment_failed":
         payment_intent = event.data.object
 
-        print(f"🔔 ==================== PAYMENT INTENT FAILED ====================")
+        print("🔔 ==================== PAYMENT INTENT FAILED ====================")
         print(f"🔔 Event Type: {event.type}")
         print(f"🔔 Event ID: {getattr(event, 'id', 'unknown')}")
         print(f"🔔 Payment Intent ID: {getattr(payment_intent, 'id', 'unknown')}")
         print(f"🔔 Amount: {getattr(payment_intent, 'amount', 0)}")
         print(f"🔔 Currency: {getattr(payment_intent, 'currency', 'unknown')}")
         print(f"🔔 Status: {getattr(payment_intent, 'status', 'unknown')}")
-        
+
         # Log error details
-        error_data = getattr(payment_intent, 'last_payment_error', None)
+        error_data = getattr(payment_intent, "last_payment_error", None)
         if error_data:
             print(f"🔔 Failure Code: {error_data.get('code', 'unknown')}")
             print(f"🔔 Failure Message: {error_data.get('message', 'unknown')}")
-        
+
         try:
             # Process payment intent failed event using transaction utilities
             result = handle_payment_intent_failed(payment_intent)
-            if result['success']:
-                print(f"  Payment intent failure processing completed")
+            if result["success"]:
+                print("  Payment intent failure processing completed")
                 print(f"  Updated trackers: {result.get('trackers_updated', 0)}")
                 print(f"  Updated transactions: {result.get('transactions_updated', 0)}")
                 print(f"  Orders updated: {result.get('orders_updated', 0)}")
-                return HttpResponse(status=200, content='Payment intent failure processed successfully'.encode('utf-8'))
+                return HttpResponse(
+                    status=200, content="Payment intent failure processed successfully".encode("utf-8")
+                )
             else:
                 print(f"⚠️ Payment intent failure processing had issues: {result.get('errors', [])}")
-                return HttpResponse(status=200, content='payment_intent.payment_failed event processed with issues'.encode('utf-8'))
+                return HttpResponse(
+                    status=200, content="payment_intent.payment_failed event processed with issues".encode("utf-8")
+                )
         except Exception as e:
             print(f" Error processing payment_intent.payment_failed: {e}")
             logger.error(f"Error processing payment_intent.payment_failed: {e}")
-            return HttpResponse(status=200, content='payment_intent.payment_failed event processed with errors'.encode('utf-8'))
-        
-        print(f"🔔 ================================================================")
-        return HttpResponse(status=200, content='payment_intent.payment_failed event successfully processed'.encode('utf-8'))
-        
+            return HttpResponse(
+                status=200, content="payment_intent.payment_failed event processed with errors".encode("utf-8")
+            )
+
+        print("🔔 ================================================================")
+        return HttpResponse(
+            status=200, content="payment_intent.payment_failed event successfully processed".encode("utf-8")
+        )
+
     else:
         print(f"ℹ️ Unhandled event type: {event.type}")
-        return HttpResponse(status=200, content=f'{event.type} event received but not processed'.encode('utf-8'))
-    
+        return HttpResponse(status=200, content=f"{event.type} event received but not processed".encode("utf-8"))
+
     print("🔵 ==================== END OF WEBHOOK EVENT ====================")
     # Fallback return (should not be reached with explicit returns above)
-    return HttpResponse(status=200, content='Webhook event successfully processed'.encode('utf-8'))
+    return HttpResponse(status=200, content="Webhook event successfully processed".encode("utf-8"))
 
 
-def update_payment_trackers_for_payout(payout, event_type):
+def update_payment_trackers_for_payout(payout, event_type):  # noqa: C901
     """Update PaymentTracker records for a payout webhook.
 
     This function normalizes tracker status for transactions included in the payout,
@@ -781,57 +862,60 @@ def update_payment_trackers_for_payout(payout, event_type):
     READ COMMITTED isolation to keep updates consistent under concurrency.
     """
     try:
-        from .models import PaymentTracker, PayoutItem, PaymentTransaction
-        
+        from .models import PaymentTracker, PayoutItem
+
         # Determine the new tracker status based on event and payout status
-        if event_type == 'payout.paid' or payout.status == 'paid':
-            new_status = 'payout_success'
+        if event_type == "payout.paid" or payout.status == "paid":
+            new_status = "payout_success"
             success_msg = f"  PaymentTracker updated to payout_success for payout {payout.id}"
-        elif event_type == 'payout.failed' or payout.status == 'failed':
-            new_status = 'payout_failed'
+        elif event_type == "payout.failed" or payout.status == "failed":
+            new_status = "payout_failed"
             success_msg = f" PaymentTracker updated to payout_failed for payout {payout.id}"
-        elif payout.status == 'pending':
-            new_status = 'pending'
+        elif payout.status == "pending":
+            new_status = "pending"
             success_msg = f"⏳ PaymentTracker updated to pending for payout {payout.id}"
         else:
             # For other statuses (in_transit, canceled, etc.), mark as pending
-            new_status = 'pending'
+            new_status = "pending"
             success_msg = f"📊 PaymentTracker updated to pending for payout {payout.id} (status: {payout.status})"
-        
-        with atomic_with_isolation('READ COMMITTED'):
+
+        with atomic_with_isolation("READ COMMITTED"):
             # Find PaymentTransactions associated with this payout through PayoutItems
-            payout_items = PayoutItem.objects.filter(payout=payout).select_related('payment_transfer')
-            
+            payout_items = PayoutItem.objects.filter(payout=payout).select_related("payment_transfer")
+
             created_count = 0
             updated_count = 0
-            
+
             # Process each transaction in this payout
             for payout_item in payout_items:
                 transaction_obj = payout_item.payment_transfer
-                
+
                 if transaction_obj:
                     # Find existing PaymentTracker records for this transaction and seller
-                    stripe_intent_id = transaction_obj.stripe_payment_intent_id or f'payout_{transaction_obj.id}'
+                    stripe_intent_id = transaction_obj.stripe_payment_intent_id or f"payout_{transaction_obj.id}"
                     existing_trackers = PaymentTracker.objects.filter(
-                        stripe_payment_intent_id=stripe_intent_id,
-                        user=payout.seller,
-                        transaction_type='payout'
+                        stripe_payment_intent_id=stripe_intent_id, user=payout.seller, transaction_type="payout"
                     )
-                    
+
                     if existing_trackers.exists():
                         # Update all existing trackers for this transaction
-                        update_count = existing_trackers.update(
-                            status=new_status,
-                            updated_at=timezone.now()
-                        )
+                        update_count = existing_trackers.update(status=new_status, updated_at=timezone.now())
                         updated_count += update_count
-                        print(f"  Updated {update_count} PaymentTracker(s) for transaction {transaction_obj.id} (status: {new_status})")
-                        logger.info(f"Updated {update_count} PaymentTracker records to {new_status} for payout {payout.id} transaction {transaction_obj.id}")
-                        
+                        print(
+                            f"  Updated {update_count} PaymentTracker(s) for transaction {transaction_obj.id} (status: {new_status})"
+                        )
+                        logger.info(
+                            f"Updated {update_count} PaymentTracker records to {new_status} for payout {payout.id} transaction {transaction_obj.id}"
+                        )
+
                         # Update notes on each tracker individually (bulk update doesn't support notes concatenation)
                         for tracker in existing_trackers:
-                            tracker.notes = f"{tracker.notes}\nPayout {event_type}: {payout.stripe_payout_id}" if tracker.notes else f"Payout {event_type}: {payout.stripe_payout_id}"
-                            tracker.save(update_fields=['notes'])
+                            tracker.notes = (
+                                f"{tracker.notes}\nPayout {event_type}: {payout.stripe_payout_id}"
+                                if tracker.notes
+                                else f"Payout {event_type}: {payout.stripe_payout_id}"
+                            )
+                            tracker.save(update_fields=["notes"])
                     else:
                         # Create new PaymentTracker if none exist
                         tracker = PaymentTracker.objects.create(
@@ -841,47 +925,55 @@ def update_payment_trackers_for_payout(payout, event_type):
                             amount=transaction_obj.gross_amount,
                             currency=transaction_obj.currency,
                             order=transaction_obj.order,
-                            transaction_type='payout',
+                            transaction_type="payout",
                             notes=f"Payout {event_type}: {payout.stripe_payout_id}",
                             created_at=timezone.now(),
                         )
                         created_count += 1
-                        print(f"  Created PaymentTracker {tracker.id} for transaction {transaction_obj.id} (status: {new_status})")
-                        logger.info(f"Created PaymentTracker {tracker.id} for payout {payout.id} transaction {transaction_obj.id}")
+                        print(
+                            f"  Created PaymentTracker {tracker.id} for transaction {transaction_obj.id} (status: {new_status})"
+                        )
+                        logger.info(
+                            f"Created PaymentTracker {tracker.id} for payout {payout.id} transaction {transaction_obj.id}"
+                        )
                 else:
                     print(f"⚠️ PayoutItem {payout_item.id} has no associated payment_transfer")
                     logger.warning(f"PayoutItem {payout_item.id} in payout {payout.id} has no payment_transfer")
-            
+
             # Fallback: if no PayoutItems found, try to find related transactions by seller
             if not payout_items.exists():
                 print(f"⚠️ No PayoutItems found for payout {payout.id}, trying fallback approach")
                 logger.warning(f"No PayoutItems found for payout {payout.id}, attempting fallback tracker search")
-                
+
                 # Find existing trackers by seller that might be related to this payout
                 related_trackers = PaymentTracker.objects.filter(
-                    user=payout.seller,
-                    status__in=['payout_processing', 'pending'],
-                    transaction_type='payout'
+                    user=payout.seller, status__in=["payout_processing", "pending"], transaction_type="payout"
                 ).select_for_update()
-                
+
                 for tracker in related_trackers:
                     # Basic validation: currency match
                     if tracker.currency == payout.currency:
                         tracker.status = new_status
-                        tracker.notes = f"{tracker.notes}\nPayout {event_type}: {payout.stripe_payout_id}" if tracker.notes else f"Payout {event_type}: {payout.stripe_payout_id}"
-                        tracker.save(update_fields=['status', 'notes', 'updated_at'])
+                        tracker.notes = (
+                            f"{tracker.notes}\nPayout {event_type}: {payout.stripe_payout_id}"
+                            if tracker.notes
+                            else f"Payout {event_type}: {payout.stripe_payout_id}"
+                        )
+                        tracker.save(update_fields=["status", "notes", "updated_at"])
                         updated_count += 1
                         print(f"  Updated PaymentTracker {tracker.id} via fallback method (status: {new_status})")
                         logger.info(f"Updated PaymentTracker {tracker.id} via fallback for payout {payout.id}")
-            
+
             total_processed = created_count + updated_count
             if total_processed > 0:
                 print(success_msg + f" ({created_count} created, {updated_count} updated)")
-                logger.info(f"Processed {total_processed} PaymentTracker records for payout {payout.id}: {created_count} created, {updated_count} updated")
+                logger.info(
+                    f"Processed {total_processed} PaymentTracker records for payout {payout.id}: {created_count} created, {updated_count} updated"
+                )
             else:
                 print(f"ℹ️ No PaymentTracker records processed for payout {payout.id}")
                 logger.info(f"No PaymentTracker records found or created for payout {payout.id}")
-                
+
     except Exception as e:
         logger.error(f"Error updating PaymentTracker records for payout {payout.id}: {str(e)}")
         print(f" Error updating PaymentTracker records: {str(e)}")
@@ -897,27 +989,29 @@ def create_payout_from_webhook(stripe_payout_id, payout_object, event_type):
     """
     try:
         # Extract payout data from Stripe object
-        payout_amount = getattr(payout_object, 'amount', 0)
-        payout_currency = getattr(payout_object, 'currency', 'EUR').upper()
-        payout_status = getattr(payout_object, 'status', 'pending')
-        payout_created = getattr(payout_object, 'created', None)
-        payout_arrival_date = getattr(payout_object, 'arrival_date', None)
-        payout_description = getattr(payout_object, 'description', '')
-        payout_metadata = getattr(payout_object, 'metadata', {})
-        
+        payout_amount = getattr(payout_object, "amount", 0)
+        payout_currency = getattr(payout_object, "currency", "EUR").upper()
+        payout_status = getattr(payout_object, "status", "pending")
+        payout_created = getattr(payout_object, "created", None)
+        payout_arrival_date = getattr(payout_object, "arrival_date", None)
+        payout_description = getattr(payout_object, "description", "")
+        payout_metadata = getattr(payout_object, "metadata", {})
+
         # Try to determine seller from metadata or description
-        seller_id = payout_metadata.get('seller_id') or payout_metadata.get('user_id')
-        
+        seller_id = payout_metadata.get("seller_id") or payout_metadata.get("user_id")
+
         if not seller_id:
             # Try to extract from description or find from existing PaymentTransactions
             logger.warning(f"No seller_id found in payout metadata for {stripe_payout_id}")
             print(f"⚠️ No seller_id in payout metadata for {stripe_payout_id}")
-            
+
             # Try to find seller from existing PaymentTransactions that might be included
             from django.contrib.auth import get_user_model
+
             from .models import PaymentTransaction
+
             User = get_user_model()
-            
+
             # Look for PaymentTransactions that match this payout amount and currency
             # This is a fallback approach when seller info is missing
             try:
@@ -925,13 +1019,13 @@ def create_payout_from_webhook(stripe_payout_id, payout_object, event_type):
                     gross_amount=Decimal(payout_amount) / 100,  # Convert from cents
                     currency=payout_currency,
                     payed_out=False,
-                    status__in=['completed', 'released']
-                ).select_related('seller')
+                    status__in=["completed", "released"],
+                ).select_related("seller")
             except Exception as tx_error:
                 logger.error(f"Error querying PaymentTransactions for fallback seller: {tx_error}")
                 print(f" Error finding fallback seller: {tx_error}")
                 potential_transactions = PaymentTransaction.objects.none()
-            
+
             if potential_transactions.exists():
                 # Use the seller from the first matching transaction
                 seller = potential_transactions.first().seller
@@ -944,6 +1038,7 @@ def create_payout_from_webhook(stripe_payout_id, payout_object, event_type):
         else:
             # Get seller from metadata
             from django.contrib.auth import get_user_model
+
             User = get_user_model()
             try:
                 seller = User.objects.get(id=seller_id)
@@ -953,75 +1048,85 @@ def create_payout_from_webhook(stripe_payout_id, payout_object, event_type):
                 logger.error(f"Seller {seller_id} not found for payout {stripe_payout_id}")
                 print(f" Seller {seller_id} not found for payout {stripe_payout_id}")
                 return None
-        
+
         # Import Payout model
         from .models import Payout
-        
+
         # Create the payout record using READ COMMITTED isolation
-        with atomic_with_isolation('READ COMMITTED'):
+        with atomic_with_isolation("READ COMMITTED"):
             payout_record = Payout.objects.create(
                 stripe_payout_id=stripe_payout_id,
                 seller=seller,
                 status=payout_status,
-                payout_type='standard',  # Default type for webhook-created payouts
+                payout_type="standard",  # Default type for webhook-created payouts
                 amount_cents=payout_amount,
                 currency=payout_currency,
-                stripe_created_at=timezone.datetime.fromtimestamp(payout_created, tz=timezone.get_current_timezone()) if payout_created else timezone.now(),
-                arrival_date=timezone.datetime.fromtimestamp(payout_arrival_date, tz=timezone.get_current_timezone()) if payout_arrival_date else None,
+                stripe_created_at=(
+                    timezone.datetime.fromtimestamp(payout_created, tz=timezone.get_current_timezone())
+                    if payout_created
+                    else timezone.now()
+                ),
+                arrival_date=(
+                    timezone.datetime.fromtimestamp(payout_arrival_date, tz=timezone.get_current_timezone())
+                    if payout_arrival_date
+                    else None
+                ),
                 description=payout_description or f"Webhook-created payout for seller {seller.username}",
                 metadata={
-                    'created_via_webhook': True,
-                    'webhook_event_type': event_type,
-                    'original_stripe_metadata': dict(payout_metadata),
-                    'seller_id': str(seller.id),
-                    'webhook_created_at': timezone.now().isoformat(),
-                }
+                    "created_via_webhook": True,
+                    "webhook_event_type": event_type,
+                    "original_stripe_metadata": dict(payout_metadata),
+                    "seller_id": str(seller.id),
+                    "webhook_created_at": timezone.now().isoformat(),
+                },
             )
-            
+
             logger.info(f"Successfully created payout {payout_record.id} from webhook for seller {seller.id}")
             print(f"  Created payout record: {payout_record.id}")
             print(f"   Stripe Payout ID: {stripe_payout_id}")
             print(f"   Seller: {seller.username}")
             print(f"   Amount: {payout_record.amount_formatted}")
             print(f"   Status: {payout_status}")
-            
+
             # Update PaymentTracker records for this new payout
             update_payment_trackers_for_payout(payout_record, event_type)
-            
+
             return payout_record
-            
+
     except Exception as e:
         logger.error(f"Failed to create payout from webhook {stripe_payout_id}: {str(e)}")
         print(f" Failed to create payout from webhook: {str(e)}")
         return None
 
 
-def update_payout_from_webhook(event, payout_object):
+def update_payout_from_webhook(event, payout_object):  # noqa: C901
     """Update a Payout from Stripe webhook events.
 
     This function locks and updates the Payout, sets status (paid/failed/etc.), updates
     arrival dates, resets related transaction flags on failure, and uses transaction
     helpers with deadlock retries to maintain consistency.
     """
-    stripe_payout_id = getattr(payout_object, 'id', None)
-    payout_status = getattr(payout_object, 'status', None)
-    payout_arrival_date = getattr(payout_object, 'arrival_date', None)
-    
+    stripe_payout_id = getattr(payout_object, "id", None)
+    payout_status = getattr(payout_object, "status", None)
+    payout_arrival_date = getattr(payout_object, "arrival_date", None)
+
     # Log current isolation level for debugging
     current_isolation = get_current_isolation_level()
     print(f"🔐 Webhook isolation level: {current_isolation}")
-    logger.info(f"Webhook payout update started for payout {stripe_payout_id} with isolation level: {current_isolation}")
-    
+    logger.info(
+        f"Webhook payout update started for payout {stripe_payout_id} with isolation level: {current_isolation}"
+    )
+
     if not stripe_payout_id:
-        logger.warning(f"[WARNING] No stripe_payout_id found in payout object")
-        print(f"⚠️ No stripe_payout_id found in payout object")
+        logger.warning("[WARNING] No stripe_payout_id found in payout object")
+        print("⚠️ No stripe_payout_id found in payout object")
         return None
-    
+
     # Define a deadlock-safe operation for complete payout update in a single SERIALIZABLE transaction
     @retry_on_deadlock(max_retries=3, delay=0.01, backoff=2.0)  # 10ms initial delay
-    def update_payout_safe():
+    def update_payout_safe():  # noqa: C901
         """Perform the complete payout update inside one transaction with deadlock retries."""
-        with atomic_with_isolation('READ COMMITTED'):
+        with atomic_with_isolation("READ COMMITTED"):
             with rollback_safe_operation("Complete Payout Webhook Update"):
                 try:
                     # Step 1: Retrieve payout with row-level locking for consistency
@@ -1031,158 +1136,168 @@ def update_payout_from_webhook(event, payout_object):
                     print(f"   Current status: {payout.status}")
                     print(f"   Amount: {payout.amount_formatted}")
                     print(f"   Seller: {payout.seller.username}")
-                    
+
                     # Step 2: Handle specific payout events according to requirements
-                    if event.type in ['payout.paid']:
+                    if event.type in ["payout.paid"]:
                         # For payout updated and paid events, set status to 'paid' as requested
-                        payout.status = 'paid'
+                        payout.status = "paid"
                         print(f"🎯 Setting payout status to 'paid' for event type: {event.type}")
                         logger.info(f"[WEBHOOK] Setting payout {payout.id} status to 'paid' for event {event.type}")
                     else:
                         # For other events, use the actual Stripe status
                         payout.status = payout_status
                         print(f"📊 Setting payout status to '{payout_status}' for event type: {event.type}")
-                    
+
                     # Step 3: Update arrival date if provided
                     if payout_arrival_date:
                         payout.arrival_date = timezone.datetime.fromtimestamp(
                             payout_arrival_date, tz=timezone.get_current_timezone()
                         )
-                    
+
                     # Step 4: Handle failure information and transaction resets
-                    if event.type == 'payout.failed':
-                        failure_code = getattr(payout_object, 'failure_code', None)
-                        failure_message = getattr(payout_object, 'failure_message', None)
-                        
-                        payout.failure_code = failure_code or 'unknown'
-                        payout.failure_message = failure_message or 'Payout failed'
-                        
+                    if event.type == "payout.failed":
+                        failure_code = getattr(payout_object, "failure_code", None)
+                        failure_message = getattr(payout_object, "failure_message", None)
+
+                        payout.failure_code = failure_code or "unknown"
+                        payout.failure_message = failure_message or "Payout failed"
+
                         logger.error(f"[WEBHOOK] Payout {payout.id} failed: {failure_code} - {failure_message}")
                         print(f" Payout failed: {failure_code} - {failure_message}")
-                        
+
                         # Log failure for monitoring
                         print(f" Payout {payout.id} failed: {failure_code} - {failure_message}")
-                        
+
                         # Step 5: Reset payed_out flag for all transactions in this failed payout atomically
                         # Query payout items with row-level locking within the same transaction
-                        payout_items = PayoutItem.objects.select_for_update().filter(
-                            payout=payout
-                        ).select_related('payment_transfer')
-                        
+                        payout_items = (
+                            PayoutItem.objects.select_for_update()
+                            .filter(payout=payout)
+                            .select_related("payment_transfer")
+                        )
+
                         transaction_ids = []
                         for payout_item in payout_items:
                             if payout_item.payment_transfer and payout_item.payment_transfer.payed_out:
                                 transaction_ids.append(payout_item.payment_transfer.id)
-                        
+
                         # Bulk reset transactions within the same SERIALIZABLE transaction
                         if transaction_ids:
                             reset_count = PaymentTransaction.objects.filter(
-                                id__in=transaction_ids,
-                                payed_out=True
+                                id__in=transaction_ids, payed_out=True
                             ).update(payed_out=False, actual_release_date=None)
-                            
-                            logger.info(f"[PAYOUT_FAILED] Reset {reset_count} transaction flags for payout {payout.id} (PayoutItems preserved for audit)")
-                            print(f"🔄 Reset {reset_count} transaction flags for failed payout (PayoutItems kept for audit trail)")
-                        
+
+                            logger.info(
+                                f"[PAYOUT_FAILED] Reset {reset_count} transaction flags for payout {payout.id} (PayoutItems preserved for audit)"
+                            )
+                            print(
+                                f"🔄 Reset {reset_count} transaction flags for failed payout (PayoutItems kept for audit trail)"
+                            )
+
                         # Update payout with failure information
-                        payout.save(update_fields=[
-                            'status', 'failure_code', 'failure_message', 
-                            'arrival_date', 'updated_at'
-                        ])
+                        payout.save(
+                            update_fields=["status", "failure_code", "failure_message", "arrival_date", "updated_at"]
+                        )
                     else:
                         # Step 6: Update payout status for successful events
-                        payout.save(update_fields=[
-                            'status', 'arrival_date', 'updated_at'
-                        ])
-                    
+                        payout.save(update_fields=["status", "arrival_date", "updated_at"])
+
                     # Step 7: Update metadata with webhook information atomically
-                    if hasattr(payout, 'metadata') and payout.metadata:
-                        payout.metadata.update({
-                            'webhook_event_type': event.type,
-                            'webhook_received': timezone.now().isoformat(),
-                            'webhook_status': payout.status,
-                            'webhook_arrival_date': payout_arrival_date,
-                            'last_webhook_event_id': getattr(event, 'id', 'unknown')
-                        })
-                        payout.save(update_fields=['metadata', 'updated_at'])
-                        print(f"📝 Updated payout metadata with webhook info")
-                    
+                    if hasattr(payout, "metadata") and payout.metadata:
+                        payout.metadata.update(
+                            {
+                                "webhook_event_type": event.type,
+                                "webhook_received": timezone.now().isoformat(),
+                                "webhook_status": payout.status,
+                                "webhook_arrival_date": payout_arrival_date,
+                                "last_webhook_event_id": getattr(event, "id", "unknown"),
+                            }
+                        )
+                        payout.save(update_fields=["metadata", "updated_at"])
+                        print("📝 Updated payout metadata with webhook info")
+
                     # Step 8: Mark related transfers as paid out when payout is successful
-                    if event.type in ['payout.paid'] and payout.status == 'paid':
-                        print(f"🎯 Payout marked as paid, updating related transfers...")
-                        
-                        if event.type == 'payout.updated' and payout.status != 'paid':
-                            print(f"⚠️ Payout updated but not marked as paid, skipping transfer updates")
+                    if event.type in ["payout.paid"] and payout.status == "paid":
+                        print("🎯 Payout marked as paid, updating related transfers...")
+
+                        if event.type == "payout.updated" and payout.status != "paid":
+                            print("⚠️ Payout updated but not marked as paid, skipping transfer updates")
                             return payout
-                        
+
                         # Query payout items with row-level locking within the same transaction
-                        payout_items = payout.payout_items.select_for_update().select_related('payment_transfer')
+                        payout_items = payout.payout_items.select_for_update().select_related("payment_transfer")
                         transfers_updated = 0
-                        
+
                         for payout_item in payout_items:
                             payment_transfer = payout_item.payment_transfer
                             if payment_transfer and not payment_transfer.payed_out:
                                 payment_transfer.payed_out = True
-                                payment_transfer.save(update_fields=['payed_out', 'updated_at'])
+                                payment_transfer.save(update_fields=["payed_out", "updated_at"])
                                 transfers_updated += 1
                                 print(f"💰 Marked transfer {payment_transfer.id} as paid out")
-                        
-                        logger.info(f"[SUCCESS] Marked {transfers_updated} transfers as paid out for payout {payout.id}")
+
+                        logger.info(
+                            f"[SUCCESS] Marked {transfers_updated} transfers as paid out for payout {payout.id}"
+                        )
                         print(f"  Updated {transfers_updated} payment transfers to payed_out=True")
-                    
+
                     logger.info(f"[SUCCESS] Payout {payout.id} updated with status: {payout.status}")
                     print(f"  Payout status updated to: {payout.status}")
-                    
+
                     # Update PaymentTracker records based on payout status
                     update_payment_trackers_for_payout(payout, event.type)
-                    
+
                     return payout
-                    
+
                 except Payout.DoesNotExist:
-                    logger.warning(f"[CREATE] Payout with stripe_payout_id {stripe_payout_id} not found, creating new one")
+                    logger.warning(
+                        f"[CREATE] Payout with stripe_payout_id {stripe_payout_id} not found, creating new one"
+                    )
                     print(f"🔄 Payout {stripe_payout_id} not found in database, creating new payout...")
-                    
+
                     # Create new payout from webhook data
                     new_payout = create_payout_from_webhook(stripe_payout_id, payout_object, event.type)
-                    
+
                     if new_payout:
                         logger.info(f"[SUCCESS] Created new payout {new_payout.id} from webhook")
                         print(f"  Successfully created new payout: {new_payout.id}")
                         return new_payout
                     else:
                         logger.error(f"[ERROR] Failed to create payout from webhook for {stripe_payout_id}")
-                        print(f" Failed to create payout from webhook")
-                        raise TransactionError(f"Failed to create payout for stripe_payout_id {stripe_payout_id}")
+                        print(" Failed to create payout from webhook")
+                        raise TransactionError(
+                            f"Failed to create payout for stripe_payout_id {stripe_payout_id}"
+                        ) from None
                 except Exception as e:
                     logger.error(f"[ERROR] Unexpected error updating payout {stripe_payout_id}: {str(e)}")
                     print(f" Error updating payout: {str(e)}")
                     # Re-raise as TransactionError to trigger rollback
-                    raise TransactionError(f"Failed to update payout {stripe_payout_id}: {str(e)}")
-    
+                    raise TransactionError(f"Failed to update payout {stripe_payout_id}: {str(e)}") from e
+
     # Execute the complete payout update with deadlock protection
     try:
         updated_payout = update_payout_safe()
         return updated_payout
-        
+
     except DeadlockError as e:
         logger.error(f"Deadlock error in update_payout_from_webhook after retries: {e}")
         # Return None to indicate failure - caller should handle gracefully
         print(f" Webhook payout update failed due to deadlock: {e}")
         return None
-        
+
     except TransactionError as e:
         logger.error(f"Transaction error in update_payout_from_webhook: {e}")
-        # Return None to indicate failure - caller should handle gracefully  
+        # Return None to indicate failure - caller should handle gracefully
         print(f" Webhook payout update failed due to transaction error: {e}")
         return None
-    
+
     except Exception as e:
         logger.error(f"Unexpected error in update_payout_from_webhook: {str(e)}", exc_info=True)
         print(f" Unexpected webhook error: {str(e)}")
         return None
 
 
-def stripe_webhook_connect(request):
+def stripe_webhook_connect(request):  # noqa: C901
     """Handle Stripe Connect webhooks for seller accounts and payouts.
 
     This function verifies the Connect signature, routes payout-related events to the
@@ -1190,68 +1305,63 @@ def stripe_webhook_connect(request):
     """
     payload = request.body
     endpoint_secret = settings.STRIPE_WEBHOOK_CONNECT_SECRET
-    sig_header = request.headers.get('stripe-signature')
+    sig_header = request.headers.get("stripe-signature")
 
     if not endpoint_secret:
-        print('⚠️  No endpoint secret configured. Skipping webhook verification.')
+        print("⚠️  No endpoint secret configured. Skipping webhook verification.")
         # If no endpoint secret is configured, we won't verify the signature
         # and will just deserialize the event from JSON
-    
+
     event = None
-    
+
     try:
-        event = stripe.Event.construct_from(
-            json.loads(payload), stripe.api_key
-        )
+        event = stripe.Event.construct_from(json.loads(payload), stripe.api_key)
         print(f"🔔 Event constructed successfully: {event.type}")
     except ValueError as e:
         print(f" Error constructing event: {e}")
-        return HttpResponse(status=400, content=''.encode('utf-8'))
+        return HttpResponse(status=400, content="".encode("utf-8"))
 
     # Only verify the event if you've defined an endpoint secret
     # Otherwise, use the basic event deserialized with JSON
     try:
-        event = stripe.Webhook.construct_event(
-            payload, sig_header, endpoint_secret
-        )
+        event = stripe.Webhook.construct_event(payload, sig_header, endpoint_secret)
     except stripe.error.SignatureVerificationError as e:
-        print('⚠️  Webhook signature verification failed.' + str(e))
-        return HttpResponse(status=400, content='Webhook signature verification failed.'.encode('utf-8'))
+        print("⚠️  Webhook signature verification failed." + str(e))
+        return HttpResponse(status=400, content="Webhook signature verification failed.".encode("utf-8"))
     except Exception as e:
-        print(' Error parsing webhook payload: ' + str(e))
-        return HttpResponse(status=400, content='Webhook payload parsing failed.'.encode('utf-8'))
+        print(" Error parsing webhook payload: " + str(e))
+        return HttpResponse(status=400, content="Webhook payload parsing failed.".encode("utf-8"))
 
     print(f"🔔 Received Stripe event: {event.type}")
-    if event.type in ['payout.paid', 'payout.failed', 'payout.updated', 'payout.canceled']:
+    if event.type in ["payout.paid", "payout.failed", "payout.updated", "payout.canceled"]:
         payout_object = event.data.object
-        
-
 
         print(f"🔔 Processing payout webhook: {event.type} for payout {getattr(payout_object, 'id', 'unknown')}")
-        
+
         try:
             # Extract basic payout info for logging
-            stripe_payout_id = getattr(payout_object, 'id', None)
-            payout_status = getattr(payout_object, 'status', None)
-            payout_arrival_date = getattr(payout_object, 'arrival_date', None)
-            
-            print(f"📊 Payout Details:")
+            stripe_payout_id = getattr(payout_object, "id", None)
+            payout_status = getattr(payout_object, "status", None)
+            _payout_arrival_date = getattr(payout_object, "arrival_date", None)
+
+            print("📊 Payout Details:")
             print(f"   Stripe Payout ID: {stripe_payout_id}")
             print(f"   Status: {payout_status}")
-            
+
             # Use transaction-wrapped function to handle payout updates
             # CRITICAL: Each webhook event processed with proper model ordering
             def process_webhook_event():
                 """Process one payout webhook using READ COMMITTED and proper model ordering."""
+
                 @retry_on_deadlock(max_retries=3, delay=0.01, backoff=2.0)  # 10ms initial delay
                 def isolated_webhook_update():
                     """Run the payout update in a transaction with rollback safety and deadlock retry."""
-                    with atomic_with_isolation('READ COMMITTED'):
+                    with atomic_with_isolation("READ COMMITTED"):
                         with rollback_safe_operation("Payout Webhook Processing"):
                             return update_payout_from_webhook(event, payout_object)
-                
+
                 return isolated_webhook_update()
-            
+
             try:
                 updated_payout = process_webhook_event()
             except Exception as webhook_error:
@@ -1260,22 +1370,24 @@ def stripe_webhook_connect(request):
                 print(f" Error processing payout webhook: {webhook_error}")
                 # Continue processing - each event is independent
                 updated_payout = None
-            
+
             if updated_payout:
                 logger.info(f"[SUCCESS] Payout {updated_payout.id} processed successfully via transaction")
             else:
-                logger.warning(f"[WARNING] Payout processing returned None - may not exist in database")
-                
+                logger.warning("[WARNING] Payout processing returned None - may not exist in database")
+
         except Exception as e:
             logger.error(f"[ERROR] Error processing {event.type} webhook: {e}")
             print(f" Error processing payout webhook: {e}")
             import traceback
+
             traceback.print_exc()
             # Don't fail the webhook for payout processing errors
-    else :
+    else:
         print(f"ℹ️ Unhandled payout event type: {event.type}")
 
-    return HttpResponse(status=200, content=f'{event.type} connect webhook successfully processed'.encode('utf-8'))
+    return HttpResponse(status=200, content=f"{event.type} connect webhook successfully processed".encode("utf-8"))
+
 
 # Create PaymentTransaction records for each seller in the order
 def create_payment_transactions(order, session):
@@ -1287,48 +1399,45 @@ def create_payment_transactions(order, session):
     """
     from collections import defaultdict
     from decimal import Decimal
-    
-    with atomic_with_isolation('READ COMMITTED'):
+
+    with atomic_with_isolation("READ COMMITTED"):
         with rollback_safe_operation("Create Payment Transactions"):
             try:
                 print(f"🔄 Creating payment transactions for order {order.id}")
-                
+
                 # Get Stripe session info
-                stripe_payment_intent_id = session.get('payment_intent', '')
-                stripe_checkout_session_id = session.get('id', '')
-                total_amount = Decimal(session['amount_total']) / 100  # Convert from cents
-                
+                stripe_payment_intent_id = session.get("payment_intent", "")
+                stripe_checkout_session_id = session.get("id", "")
+                _total_amount = Decimal(session["amount_total"]) / 100  # Convert from cents
+
                 # Group order items by seller
-                sellers_data = defaultdict(lambda: {
-                    'items': [],
-                    'total_amount': Decimal('0.00'),
-                    'item_count': 0,
-                    'item_names': []
-                })
-                
+                sellers_data = defaultdict(
+                    lambda: {"items": [], "total_amount": Decimal("0.00"), "item_count": 0, "item_names": []}
+                )
+
                 for order_item in order.items.all():
                     seller = order_item.seller
-                    sellers_data[seller]['items'].append(order_item)
-                    sellers_data[seller]['total_amount'] += order_item.total_price
-                    sellers_data[seller]['item_count'] += order_item.quantity
-                    sellers_data[seller]['item_names'].append(order_item.product_name)
-                
+                    sellers_data[seller]["items"].append(order_item)
+                    sellers_data[seller]["total_amount"] += order_item.total_price
+                    sellers_data[seller]["item_count"] += order_item.quantity
+                    sellers_data[seller]["item_names"].append(order_item.product_name)
+
                 print(f"📊 Found {len(sellers_data)} sellers in order")
-                
+
                 # Create PaymentTransaction for each seller
                 for seller, seller_data in sellers_data.items():
                     print(f"💰 Creating payment transaction for seller: {seller.username}")
-                    
+
                     # Calculate fees (you can adjust these percentages)
-                    gross_amount = seller_data['total_amount']
-                    platform_fee_rate = Decimal('0.05')  # 5% platform fee
-                    stripe_fee_rate = Decimal('0.029')   # 2.9% Stripe fee + $0.30
-                    stripe_fixed_fee = Decimal('0.30')
-                    
+                    gross_amount = seller_data["total_amount"]
+                    platform_fee_rate = Decimal("0.05")  # 5% platform fee
+                    stripe_fee_rate = Decimal("0.029")  # 2.9% Stripe fee + $0.30
+                    stripe_fixed_fee = Decimal("0.30")
+
                     platform_fee = gross_amount * platform_fee_rate
                     stripe_fee = (gross_amount * stripe_fee_rate) + stripe_fixed_fee
                     net_amount = gross_amount - platform_fee - stripe_fee
-                    
+
                     # Create PaymentTransaction with integrated hold system
                     payment_transaction = PaymentTransaction.objects.create(
                         stripe_payment_intent_id=stripe_payment_intent_id,
@@ -1336,40 +1445,43 @@ def create_payment_transactions(order, session):
                         order=order,
                         seller=seller,
                         buyer=order.buyer,
-                        status='pending',  # Start with pending status (waiting payment processing)
+                        status="pending",  # Start with pending status (waiting payment processing)
                         gross_amount=gross_amount,
                         platform_fee=platform_fee,
                         stripe_fee=stripe_fee,
                         net_amount=net_amount,
-                        currency='USD',
-                        item_count=seller_data['item_count'],
-                        item_names=', '.join(seller_data['item_names']),
+                        currency="USD",
+                        item_count=seller_data["item_count"],
+                        item_names=", ".join(seller_data["item_names"]),
                         payment_received_date=timezone.now(),
                         # Integrated hold fields - all payments held for 30 days
-                        hold_reason='standard',
+                        hold_reason="standard",
                         days_to_hold=30,  # Standard 30-day hold
                         hold_start_date=timezone.now(),
-                        hold_notes=f"Standard 30-day hold period for marketplace transactions",
+                        hold_notes="Standard 30-day hold period for marketplace transactions",
                         metadata={
-                            'order_id': str(order.id),
-                            'stripe_session_id': stripe_checkout_session_id,
-                            'seller_id': str(seller.id),
-                            'buyer_id': str(order.buyer.id)
-                        }
+                            "order_id": str(order.id),
+                            "stripe_session_id": stripe_checkout_session_id,
+                            "seller_id": str(seller.id),
+                            "buyer_id": str(order.buyer.id),
+                        },
                     )
-                
-                    print(f"  Created payment transaction {payment_transaction.id} for ${net_amount} with pending status (waiting payment processing)")
-                    
+
+                    print(
+                        f"  Created payment transaction {payment_transaction.id} for ${net_amount} with pending status (waiting payment processing)"
+                    )
+
                 print(f"  Successfully created payment tracking for order {order.id}")
-            
+
             except Exception as e:
                 print(f" Error creating payment transactions: {str(e)}")
                 raise
         raise
 
+
 # Handle successful payment by updating existing order status this is for Stripe Webhook handling
 @financial_transaction
-def handle_sucessfull_checkout(session):
+def handle_sucessfull_checkout(session):  # noqa: C901
     """Finalize a successful checkout for an existing order.
 
     This function attaches shipping/billing details to the order, ensures a succeeded
@@ -1379,21 +1491,21 @@ def handle_sucessfull_checkout(session):
     print("🔔 Handling sucessfull checkout...")
     print(f"Session ID: {session.get('id', 'Unknown')}")
     print(f"Session data keys: {list(session.keys()) if isinstance(session, dict) else 'Not a dict'}")
-    
+
     try:
-        with atomic_with_isolation('READ COMMITTED'):
+        with atomic_with_isolation("READ COMMITTED"):
             # Extract user_id and order_id from metadata
-            user_id = session['metadata'].get('user_id')
-            order_id = session['metadata'].get('order_id')
-            
+            user_id = session["metadata"].get("user_id")
+            order_id = session["metadata"].get("order_id")
+
             if not user_id:
-                print(f" Missing user_id in session metadata")
+                print(" Missing user_id in session metadata")
                 return False
-                
+
             if not order_id:
-                print(f" Missing order_id in session metadata")
+                print(" Missing order_id in session metadata")
                 return False
-                
+
             # Get user and verify they exist
             User = get_user_model()
             try:
@@ -1401,72 +1513,72 @@ def handle_sucessfull_checkout(session):
             except User.DoesNotExist as e:
                 print(f" User not found: {e}")
                 return False
-                
+
             # Get the existing order and verify ownership
             try:
                 order = Order.objects.select_for_update().get(id=order_id)
-                
+
                 # Verify the user owns this order
                 if order.buyer != user:
                     print(f" Order {order_id} does not belong to user {user_id}")
                     return False
-                    
+
             except Order.DoesNotExist:
                 print(f" Order {order_id} not found")
                 return False
-                
+
             # Get shipping and billing address from session
-            shipping_details = session.get('shipping_details', {})
-            customer_details = session.get('customer_details', {})
-            
+            shipping_details = session.get("shipping_details", {})
+            customer_details = session.get("customer_details", {})
+
             # Prepare shipping address
             shipping_address = {}
-            if shipping_details and shipping_details.get('address'):
+            if shipping_details and shipping_details.get("address"):
                 shipping_address = {
-                    'name': shipping_details.get('name', ''),
-                    'line1': shipping_details['address'].get('line1', ''),
-                    'line2': shipping_details['address'].get('line2', ''),
-                    'city': shipping_details['address'].get('city', ''),
-                    'state': shipping_details['address'].get('state', ''),
-                    'postal_code': shipping_details['address'].get('postal_code', ''),
-                    'country': shipping_details['address'].get('country', ''),
+                    "name": shipping_details.get("name", ""),
+                    "line1": shipping_details["address"].get("line1", ""),
+                    "line2": shipping_details["address"].get("line2", ""),
+                    "city": shipping_details["address"].get("city", ""),
+                    "state": shipping_details["address"].get("state", ""),
+                    "postal_code": shipping_details["address"].get("postal_code", ""),
+                    "country": shipping_details["address"].get("country", ""),
                 }
-            elif customer_details and customer_details.get('address'):
+            elif customer_details and customer_details.get("address"):
                 # Fallback to billing address if shipping not available
                 shipping_address = {
-                    'name': customer_details.get('name', ''),
-                    'line1': customer_details['address'].get('line1', ''),
-                    'line2': customer_details['address'].get('line2', ''),
-                    'city': customer_details['address'].get('city', ''),
-                    'state': customer_details['address'].get('state', ''),
-                    'postal_code': customer_details['address'].get('postal_code', ''),
-                    'country': customer_details['address'].get('country', ''),
+                    "name": customer_details.get("name", ""),
+                    "line1": customer_details["address"].get("line1", ""),
+                    "line2": customer_details["address"].get("line2", ""),
+                    "city": customer_details["address"].get("city", ""),
+                    "state": customer_details["address"].get("state", ""),
+                    "postal_code": customer_details["address"].get("postal_code", ""),
+                    "country": customer_details["address"].get("country", ""),
                 }
-                
+
             # Update the existing order with shipping address
             order.shipping_address = shipping_address
-            order.save(update_fields=['shipping_address'])
-            
+            order.save(update_fields=["shipping_address"])
+
             print(f"📦 Order {order.id} shipping address updated.")
-            
+
             # Create PaymentTracker now that we have the completed checkout session
             # Get payment_intent from the completed session
-            payment_intent_id = session.get('payment_intent', '')
-            session_id = session.get('id', '')
-            
+            payment_intent_id = session.get("payment_intent", "")
+            session_id = session.get("id", "")
+
             # Check if PaymentTracker already exists for this payment_intent_id
             if payment_intent_id:
                 existing_trackers = PaymentTracker.objects.filter(
                     stripe_payment_intent_id=payment_intent_id
                 ).select_for_update()
-                
+
                 if existing_trackers.exists():
                     # Update existing tracker to succeeded status
                     for tracker in existing_trackers:
-                        if tracker.status != 'succeeded':
-                            tracker.status = 'succeeded'
+                        if tracker.status != "succeeded":
+                            tracker.status = "succeeded"
                             tracker.notes = f"{tracker.notes}\nUpdated to succeeded via checkout session {session_id}"
-                            tracker.save(update_fields=['status', 'notes', 'updated_at'])
+                            tracker.save(update_fields=["status", "notes", "updated_at"])
                             logger.info(f"Updated existing PaymentTracker {tracker.id} to succeeded status")
                             print(f"📊 Updated existing PaymentTracker: {tracker.id}")
                         else:
@@ -1479,44 +1591,61 @@ def handle_sucessfull_checkout(session):
                             stripe_payment_intent_id=payment_intent_id,
                             order=order,
                             user=user,
-                            transaction_type='payment',
-                            status='succeeded',  # Checkout session complete means payment succeeded
+                            transaction_type="payment",
+                            status="succeeded",  # Checkout session complete means payment succeeded
                             amount=order.total_amount,
-                            currency='USD',
-                            notes=f'Payment completed via checkout session {session_id} for order {order.id} with {order.items.count()} items'
+                            currency="USD",
+                            notes=f"Payment completed via checkout session {session_id} for order {order.id} with {order.items.count()} items",
                         )
-                        
-                        logger.info(f"PaymentTracker {payment_tracker.id} created for completed checkout session {session_id}")
-                        print(f"📊 PaymentTracker created: {payment_tracker.id} with payment_intent: {payment_intent_id}")
-                        
+
+                        logger.info(
+                            f"PaymentTracker {payment_tracker.id} created for completed checkout session {session_id}"
+                        )
+                        print(
+                            f"📊 PaymentTracker created: {payment_tracker.id} with payment_intent: {payment_intent_id}"
+                        )
+
                     except Exception as tracker_error:
-                        logger.error(f"Error creating PaymentTracker for completed session {session_id}: {str(tracker_error)}")
+                        logger.error(
+                            f"Error creating PaymentTracker for completed session {session_id}: {str(tracker_error)}"
+                        )
                         print(f" Failed to create PaymentTracker: {str(tracker_error)}")
                         # Don't fail the checkout completion if tracking fails
             else:
                 logger.warning(f"No payment_intent_id found in completed checkout session {session_id}")
                 print(f"⚠️ Warning: No payment_intent_id in session {session_id}")
-            
-            # Handle PaymentTransaction records - create if not exist, update if exist  
+
+            # Handle PaymentTransaction records - create if not exist, update if exist
             if payment_intent_id:
                 existing_transactions = PaymentTransaction.objects.filter(
                     stripe_payment_intent_id=payment_intent_id
                 ).select_for_update()
-                
+
                 if existing_transactions.exists():
                     # Update existing PaymentTransaction records to held status
                     for transaction in existing_transactions:
-                        if transaction.status != 'held':
-                            transaction.status = 'held'
+                        if transaction.status != "held":
+                            transaction.status = "held"
                             transaction.payment_received_date = timezone.now()
                             transaction.hold_start_date = timezone.now()
                             transaction.planned_release_date = timezone.now() + timezone.timedelta(days=30)
                             transaction.hold_notes = f"Payment succeeded via checkout session {session_id}. Standard 30-day hold period started."
-                            transaction.notes = f"{transaction.notes}\nPayment succeeded and moved to held status" if transaction.notes else "Payment succeeded and moved to held status"
-                            transaction.save(update_fields=[
-                                'status', 'payment_received_date', 'hold_start_date', 
-                                'planned_release_date', 'hold_notes', 'notes', 'updated_at'
-                            ])
+                            transaction.notes = (
+                                f"{transaction.notes}\nPayment succeeded and moved to held status"
+                                if transaction.notes
+                                else "Payment succeeded and moved to held status"
+                            )
+                            transaction.save(
+                                update_fields=[
+                                    "status",
+                                    "payment_received_date",
+                                    "hold_start_date",
+                                    "planned_release_date",
+                                    "hold_notes",
+                                    "notes",
+                                    "updated_at",
+                                ]
+                            )
                             logger.info(f"Updated PaymentTransaction {transaction.id} to held status")
                             print(f"📊 Updated PaymentTransaction {transaction.id} to held")
                         else:
@@ -1527,78 +1656,88 @@ def handle_sucessfull_checkout(session):
                     try:
                         # Group order items by seller
                         from collections import defaultdict
-                        seller_data = defaultdict(lambda: {'item_count': 0, 'item_names': [], 'gross_amount': Decimal('0.00')})
-                        
+
+                        seller_data = defaultdict(
+                            lambda: {"item_count": 0, "item_names": [], "gross_amount": Decimal("0.00")}
+                        )
+
                         for order_item in order.items.all():
                             seller = order_item.seller
-                            seller_data[seller]['item_count'] += order_item.quantity
-                            seller_data[seller]['item_names'].append(order_item.product_name)
-                            seller_data[seller]['gross_amount'] += order_item.total_price
-                        
+                            seller_data[seller]["item_count"] += order_item.quantity
+                            seller_data[seller]["item_names"].append(order_item.product_name)
+                            seller_data[seller]["gross_amount"] += order_item.total_price
+
                         # Create PaymentTransaction for each seller
                         for seller, data in seller_data.items():
-                            gross_amount = data['gross_amount']
-                            platform_fee = gross_amount * Decimal('0.03')  # 3% platform fee
-                            stripe_fee = (gross_amount * Decimal('0.029')) + Decimal('0.30')  # Stripe fee
+                            gross_amount = data["gross_amount"]
+                            platform_fee = gross_amount * Decimal("0.03")  # 3% platform fee
+                            stripe_fee = (gross_amount * Decimal("0.029")) + Decimal("0.30")  # Stripe fee
                             net_amount = gross_amount - platform_fee - stripe_fee
-                            
+
                             payment_transaction = PaymentTransaction.objects.create(
                                 stripe_payment_intent_id=payment_intent_id,
                                 stripe_checkout_session_id=session_id,
                                 order=order,
                                 seller=seller,
                                 buyer=order.buyer,
-                                status='held',  # Set as held for successful payments
+                                status="held",  # Set as held for successful payments
                                 gross_amount=gross_amount,
                                 platform_fee=platform_fee,
                                 stripe_fee=stripe_fee,
                                 net_amount=net_amount,
-                                currency='USD',
-                                item_count=data['item_count'],
-                                item_names=', '.join(data['item_names']),
+                                currency="USD",
+                                item_count=data["item_count"],
+                                item_names=", ".join(data["item_names"]),
                                 payment_received_date=timezone.now(),
                                 # Integrated hold fields - all payments held for 30 days
-                                hold_reason='standard',
+                                hold_reason="standard",
                                 days_to_hold=30,
                                 hold_start_date=timezone.now(),
-                                hold_notes=f"Standard 30-day hold period for marketplace transactions",
+                                hold_notes="Standard 30-day hold period for marketplace transactions",
                                 notes=f"Payment succeeded via checkout session {session_id} for order {order.id}",
                                 metadata={
-                                    'order_id': str(order.id),
-                                    'payment_intent_id': payment_intent_id,
-                                    'checkout_session_id': session_id,
-                                    'seller_id': str(seller.id),
-                                    'buyer_id': str(order.buyer.id),
-                                    'completed_at': str(timezone.now())
-                                }
+                                    "order_id": str(order.id),
+                                    "payment_intent_id": payment_intent_id,
+                                    "checkout_session_id": session_id,
+                                    "seller_id": str(seller.id),
+                                    "buyer_id": str(order.buyer.id),
+                                    "completed_at": str(timezone.now()),
+                                },
                             )
-                            
-                            logger.info(f"Created PaymentTransaction {payment_transaction.id} for seller {seller.username} with held status")
-                            print(f"📊 Created PaymentTransaction {payment_transaction.id} for seller {seller.username}")
-                            
+
+                            logger.info(
+                                f"Created PaymentTransaction {payment_transaction.id} for seller {seller.username} with held status"
+                            )
+                            print(
+                                f"📊 Created PaymentTransaction {payment_transaction.id} for seller {seller.username}"
+                            )
+
                     except Exception as transaction_error:
-                        logger.error(f"Error creating PaymentTransaction for checkout session {session_id}: {str(transaction_error)}")
+                        logger.error(
+                            f"Error creating PaymentTransaction for checkout session {session_id}: {str(transaction_error)}"
+                        )
                         print(f" Failed to create PaymentTransaction: {str(transaction_error)}")
                         # Don't fail the checkout completion if transaction creation fails
-            
+
             return True
-            
+
     except Exception as e:
         print(f" Error handling sucessfull checkout: {str(e)}")
         return False
 
+
 def get_product_image_url(product):
     """Return the best product image URL, preferring presigned S3 URLs then stored fields."""
     if not product.images.exists():
-        return ''
-    
+        return ""
+
     primary_image = product.images.filter(is_primary=True).first()
     if not primary_image:
         primary_image = product.images.first()
-    
+
     if not primary_image:
-        return ''
-    
+        return ""
+
     # Try to get presigned URL first (best option)
     try:
         presigned_url = primary_image.get_presigned_url(expires_in=3600)
@@ -1607,7 +1746,7 @@ def get_product_image_url(product):
             return presigned_url
     except Exception as e:
         print(f"⚠️ Failed to get presigned URL for product {product.name}: {str(e)}")
-    
+
     # Fallback to image_url property
     try:
         image_url = primary_image.image_url
@@ -1616,7 +1755,7 @@ def get_product_image_url(product):
             return image_url
     except Exception as e:
         print(f"⚠️ Failed to get image_url for product {product.name}: {str(e)}")
-    
+
     # Final fallback to basic URL
     try:
         basic_url = primary_image.image.url
@@ -1624,10 +1763,11 @@ def get_product_image_url(product):
         return basic_url
     except Exception as e:
         print(f" Failed to get any image URL for product {product.name}: {str(e)}")
-        return ''
+        return ""
+
 
 # Create a Stripe Embedded Checkout Session
-@api_view(['POST'])
+@api_view(["POST"])
 @permission_classes([IsAuthenticated])
 @financial_transaction
 def create_checkout_session(request):
@@ -1641,87 +1781,92 @@ def create_checkout_session(request):
         # Get the user's cart
         cart = Cart.get_or_create_cart(user=request.user)
         cart_items = cart.items.all()
-        
+
         if not cart_items.exists():
-            return Response({
-                'error': 'EMPTY_CART',
-                'detail': 'Your cart is empty'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
+            return Response(
+                {"error": "EMPTY_CART", "detail": "Your cart is empty"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
         # Prepare line items for Stripe
         line_items = []
         for item in cart_items:
             if item.product.stock_quantity < item.quantity:
-                return Response({
-                    'error': 'INSUFFICIENT_STOCK',
-                    'detail': f'Insufficient stock for product {item.product.name}'
-                }, status=status.HTTP_400_BAD_REQUEST)
+                return Response(
+                    {"error": "INSUFFICIENT_STOCK", "detail": f"Insufficient stock for product {item.product.name}"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             # Prepare line item for each product in the cart
             if item.product.price <= 0:
-                return Response({
-                    'error': 'INVALID_PRICE',
-                    'detail': f'Invalid price for product {item.product.name}'
-                }, status=status.HTTP_400_BAD_REQUEST)
+                return Response(
+                    {"error": "INVALID_PRICE", "detail": f"Invalid price for product {item.product.name}"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             if item.quantity <= 0:
-                return Response({
-                    'error': 'INVALID_QUANTITY',
-                    'detail': f'Invalid quantity for product {item.product.name}'
-                }, status=status.HTTP_400_BAD_REQUEST)
+                return Response(
+                    {"error": "INVALID_QUANTITY", "detail": f"Invalid quantity for product {item.product.name}"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             # Add product line item
-            line_items.append({
-                'price_data': {
-                    'currency': 'usd',
-                    'unit_amount': int(item.product.price * 100),  # Convert to cents
-                    'product_data': {
-                        'name': item.product.name,
-                        'description': item.product.short_description or item.product.description[:100],
-                        'images': [get_product_image_url(item.product)] if get_product_image_url(item.product) else [],
+            line_items.append(
+                {
+                    "price_data": {
+                        "currency": "usd",
+                        "unit_amount": int(item.product.price * 100),  # Convert to cents
+                        "product_data": {
+                            "name": item.product.name,
+                            "description": item.product.short_description or item.product.description[:100],
+                            "images": (
+                                [get_product_image_url(item.product)] if get_product_image_url(item.product) else []
+                            ),
+                        },
+                    },
+                    "quantity": item.quantity,
+                }
+            )
+
+        # Add shipping line item
+        line_items.append(
+            {
+                "price_data": {
+                    "currency": "usd",
+                    "unit_amount": 1999,  # $19.99 shipping
+                    "product_data": {
+                        "name": "Shipping",
+                        "description": "Standard shipping",
                     },
                 },
-                'quantity': item.quantity,
-            })
-        
-        # Add shipping line item
-        line_items.append({
-            'price_data': {
-                'currency': 'usd',
-                'unit_amount': 1999,  # $19.99 shipping
-                'product_data': {
-                    'name': 'Shipping',
-                    'description': 'Standard shipping',
-                },
-            },
-            'quantity': 1,
-        })
-        
+                "quantity": 1,
+            }
+        )
+
         # Create order with pending_payment status before Stripe session
         print(f"🔔 Creating order with pending_payment status for user {request.user.id}")
-        
-        with atomic_with_isolation('READ COMMITTED'):
+
+        with atomic_with_isolation("READ COMMITTED"):
             # Calculate totals from cart
             subtotal = sum(item.total_price for item in cart_items)
-            shipping_cost = Decimal('19.99')  # Fixed shipping for now
+            shipping_cost = Decimal("19.99")  # Fixed shipping for now
             total_amount = subtotal + shipping_cost
-            
+
             # Create the order with pending_payment status
             order = Order.objects.create(
                 buyer=request.user,
-                status='pending_payment',  # Order starts as pending payment
-                payment_status='pending',  # Payment status is pending
+                status="pending_payment",  # Order starts as pending payment
+                payment_status="pending",  # Payment status is pending
                 subtotal=subtotal,
                 shipping_cost=shipping_cost,
-                tax_amount=Decimal('0.00'),  # Will be calculated by Stripe
+                tax_amount=Decimal("0.00"),  # Will be calculated by Stripe
                 total_amount=total_amount,
                 shipping_address={},  # Will be filled by Stripe checkout
                 is_locked=False,  # Order is not locked until payment succeeds
             )
-            
+
             print(f"📦 Order {order.id} created with status 'pending_payment'")
-            
+
             # Create order items from cart items
             for cart_item in cart_items:
                 product = cart_item.product
-                
+
                 # Create order item
                 OrderItem.objects.create(
                     order=order,
@@ -1734,34 +1879,34 @@ def create_checkout_session(request):
                     product_description=product.description,
                     product_image=get_product_image_url(product),
                 )
-                
+
                 # Reserve stock (reduce stock quantity immediately)
                 if product.stock_quantity >= cart_item.quantity:
                     product.stock_quantity -= cart_item.quantity
-                    product.save(update_fields=['stock_quantity'])
+                    product.save(update_fields=["stock_quantity"])
                     print(f"📦 Reserved {cart_item.quantity} units of {product.name}")
                 else:
                     print(f"⚠️ Warning: Insufficient stock for product {product.name}")
                     # In a production system, you might want to handle this differently
-                    
+
             print(f"  Order {order.id} created successfully with {cart_items.count()} items")
-            
+
             # Clear cart after order creation
             cart.clear_items()
             print(f"🛒 Cart cleared for user {request.user.username}")
-        
+
         print(f"🔔 Creating Stripe checkout session for order {order.id}")
         # Create Stripe Embedded Checkout Session with order_id instead of cart_id
         session = stripe.checkout.Session.create(
-            ui_mode='embedded',
-            locale=str(request.user.language) or 'en',
+            ui_mode="embedded",
+            locale=str(request.user.language) or "en",
             line_items=line_items,
             customer_email=request.user.email,  # Pre-fill customer email
-            mode='payment',
-            automatic_tax={'enabled': True},
+            mode="payment",
+            automatic_tax={"enabled": True},
             payment_intent_data={
-                'transfer_group': f'ORDER{order.id}',  # Group transfers by order ID
-                'metadata': {   # 👈 put custom fields here
+                "transfer_group": f"ORDER{order.id}",  # Group transfers by order ID
+                "metadata": {  # 👈 put custom fields here
                     "user_id": str(request.user.id),
                     "order_id": str(order.id),
                 },
@@ -1771,125 +1916,124 @@ def create_checkout_session(request):
                 "user_id": str(request.user.id),
                 "order_id": str(order.id),
             },
-            billing_address_collection='required',
+            billing_address_collection="required",
         )
 
-        
         print(f"  Checkout session created: {session.id}")
         print(f"  Session metadata: {session.metadata}")
         print(f"  Session client_secret: {session.client_secret[:20]}...")
-        
+
         # PaymentTracker will be created in checkout session complete webhook
         # when we have the actual payment_intent ID
         logger.info(f"Checkout session {session.id} created for order {order.id}")
-        print(f"📊 Checkout session created - PaymentTracker will be created on completion")
-        
-        return JsonResponse({
-            'clientSecret': session.client_secret
-        })
-        
+        print("📊 Checkout session created - PaymentTracker will be created on completion")
+
+        return JsonResponse({"clientSecret": session.client_secret})
+
     except Exception as e:
         logger.error(f"Error creating checkout session: {str(e)}")
-        return Response({
-            'error': 'CHECKOUT_SESSION_CREATION_FAILED',
-            'detail': str(e)
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response(
+            {"error": "CHECKOUT_SESSION_CREATION_FAILED", "detail": str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
 
-@api_view(['GET'])
+@api_view(["GET"])
 @permission_classes([IsAuthenticated])
-def create_checkout_failed_checkout(request, order_id): 
+def create_checkout_failed_checkout(request, order_id):
     """Create a retry Embedded Checkout Session for a pending order.
 
     This function verifies ownership and 'pending_payment' status, rebuilds Stripe line
     items from the order (with stock checks), creates an embedded checkout session with
     order/user metadata, and returns the clientSecret for the frontend to resume.
     """
-    if request.method != 'GET':
-        return Response({
-            'error': 'METHOD_NOT_ALLOWED',
-            'detail': 'This endpoint only supports GET requests'
-        }, status=status.HTTP_405_METHOD_NOT_ALLOWED)
-    
+    if request.method != "GET":
+        return Response(
+            {"error": "METHOD_NOT_ALLOWED", "detail": "This endpoint only supports GET requests"},
+            status=status.HTTP_405_METHOD_NOT_ALLOWED,
+        )
+
     order = Order.objects.filter(id=order_id, buyer=request.user).first()
     if order is None:
-        return Response({
-            'error': 'ORDER_NOT_FOUND',
-            'detail': 'Order not found'
-        }, status=status.HTTP_404_NOT_FOUND)
-    if order.status != 'pending_payment':
-        return Response({
-            'error': 'ORDER_NOT_PENDING',
-            'detail': 'Order is not in pending payment status'
-        }, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"error": "ORDER_NOT_FOUND", "detail": "Order not found"}, status=status.HTTP_404_NOT_FOUND)
+    if order.status != "pending_payment":
+        return Response(
+            {"error": "ORDER_NOT_PENDING", "detail": "Order is not in pending payment status"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
     # If the order is found and in pending payment status, redirect to the checkout page
 
     try:
         # Get the user's order items
         order_items = order.items.all()
         if not order_items.exists():
-            return Response({
-                'error': 'EMPTY_ORDER',
-                'detail': 'Your order is empty'
-            }, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"error": "EMPTY_ORDER", "detail": "Your order is empty"}, status=status.HTTP_400_BAD_REQUEST
+            )
         # Prepare line items for Stripe
         line_items = []
         for item in order_items:
             if item.product.stock_quantity < item.quantity:
-                return Response({
-                    'error': 'INSUFFICIENT_STOCK',
-                    'detail': f'Insufficient stock for product {item.product.name}'
-                }, status=status.HTTP_400_BAD_REQUEST)
+                return Response(
+                    {"error": "INSUFFICIENT_STOCK", "detail": f"Insufficient stock for product {item.product.name}"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             # Prepare line item for each product in the order
             if item.product.price <= 0:
-                return Response({
-                    'error': 'INVALID_PRICE',
-                    'detail': f'Invalid price for product {item.product.name}'
-                }, status=status.HTTP_400_BAD_REQUEST)
-            if item.quantity <= 0:  
-                return Response({
-                    'error': 'INVALID_QUANTITY',
-                    'detail': f'Invalid quantity for product {item.product.name}'
-                }, status=status.HTTP_400_BAD_REQUEST)
+                return Response(
+                    {"error": "INVALID_PRICE", "detail": f"Invalid price for product {item.product.name}"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if item.quantity <= 0:
+                return Response(
+                    {"error": "INVALID_QUANTITY", "detail": f"Invalid quantity for product {item.product.name}"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             # Add product line item
-            line_items.append({
-                'price_data': {
-                    'currency': 'usd',
-                    'unit_amount': int(item.product.price * 100),  # Convert to cents
-                    'product_data': {
-                        'name': item.product.name,
-                        'description': item.product.short_description or item.product.description[:100],
-                        'images': [get_product_image_url(item.product)] if get_product_image_url(item.product) else [],
+            line_items.append(
+                {
+                    "price_data": {
+                        "currency": "usd",
+                        "unit_amount": int(item.product.price * 100),  # Convert to cents
+                        "product_data": {
+                            "name": item.product.name,
+                            "description": item.product.short_description or item.product.description[:100],
+                            "images": (
+                                [get_product_image_url(item.product)] if get_product_image_url(item.product) else []
+                            ),
+                        },
+                    },
+                    "quantity": item.quantity,
+                }
+            )
+        # Add shipping line item
+        line_items.append(
+            {
+                "price_data": {
+                    "currency": "usd",
+                    "unit_amount": 1999,  # $19.99 shipping
+                    "product_data": {
+                        "name": "Shipping",
+                        "description": "Standard shipping",
                     },
                 },
-                'quantity': item.quantity,
-            })
-        # Add shipping line item
-        line_items.append({
-            'price_data': {
-                'currency': 'usd',
-                'unit_amount': 1999,  # $19.99 shipping
-                'product_data': {
-                    'name': 'Shipping',
-                    'description': 'Standard shipping',
-                },
-            },
-            'quantity': 1,
-        })
+                "quantity": 1,
+            }
+        )
 
         # Create order with pending_payment status before Stripe session
         print(f"🔔 Creating Stripe checkout session for order {order.id}")
         # Create Stripe Embedded Checkout Session with order_id instead of cart_id
         session = stripe.checkout.Session.create(
-            ui_mode='embedded',
-            locale=str(request.user.language) or 'en',
+            ui_mode="embedded",
+            locale=str(request.user.language) or "en",
             line_items=line_items,
             customer_email=request.user.email,  # Pre-fill customer email
-            mode='payment',
-            automatic_tax={'enabled': True},
+            mode="payment",
+            automatic_tax={"enabled": True},
             payment_intent_data={
-                'transfer_group': f'ORDER{order.id}',  # Group transfers by order ID
-                'metadata': {   # 👈 put custom fields here
+                "transfer_group": f"ORDER{order.id}",  # Group transfers by order ID
+                "metadata": {  # 👈 put custom fields here
                     "user_id": str(request.user.id),
                     "order_id": str(order.id),
                 },
@@ -1899,36 +2043,32 @@ def create_checkout_failed_checkout(request, order_id):
                 "user_id": str(request.user.id),
                 "order_id": str(order.id),
             },
-            billing_address_collection='required',
+            billing_address_collection="required",
         )
 
-        
         print(f"  Checkout session created: {session.id}")
         print(f"  Session metadata: {session.metadata}")
         print(f"  Session client_secret: {session.client_secret[:20]}...")
-        
+
         # PaymentTracker will be created in checkout session complete webhook
-        # when we have the actual payment_intent ID  
+        # when we have the actual payment_intent ID
         logger.info(f"Retry checkout session {session.id} created for order {order.id}")
-        print(f"📊 Retry checkout session created - PaymentTracker will be created on completion")
-        
-        return JsonResponse({
-            'clientSecret': session.client_secret
-        })
-        
+        print("📊 Retry checkout session created - PaymentTracker will be created on completion")
+
+        return JsonResponse({"clientSecret": session.client_secret})
+
     except Exception as e:
         logger.error(f"Error creating checkout session: {str(e)}")
-        return Response({
-            'error': 'CHECKOUT_SESSION_CREATION_FAILED',
-            'detail': str(e)
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
+        return Response(
+            {"error": "CHECKOUT_SESSION_CREATION_FAILED", "detail": str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
 
 # Cancel an order and process Stripe refund if payment was made
-@api_view(['POST'])
+@api_view(["POST"])
 @permission_classes([IsAuthenticated])
-def cancel_order(request, order_id):
+def cancel_order(request, order_id):  # noqa: C901
     """Cancel an order with refund handling and stock restoration.
 
     This function cancels orders that are 'pending_payment' by restoring reserved stock,
@@ -1938,15 +2078,14 @@ def cancel_order(request, order_id):
     states (shipped, delivered, cancelled, refunded) are rejected.
     """
     try:
-        with atomic_with_isolation('READ COMMITTED'):
+        with atomic_with_isolation("READ COMMITTED"):
             # Get the order
             try:
                 order = Order.objects.get(id=order_id)
             except Order.DoesNotExist:
-                return Response({
-                    'error': 'ORDER_NOT_FOUND',
-                    'detail': 'Order not found'
-                }, status=status.HTTP_404_NOT_FOUND)
+                return Response(
+                    {"error": "ORDER_NOT_FOUND", "detail": "Order not found"}, status=status.HTTP_404_NOT_FOUND
+                )
 
             # Verify user permissions
             user_owns_items = order.items.filter(seller=request.user).exists()
@@ -1954,22 +2093,28 @@ def cancel_order(request, order_id):
             is_staff = request.user.is_staff
 
             if not (user_owns_items or is_buyer or is_staff):
-                return Response({
-                    'error': 'PERMISSION_DENIED',
-                    'detail': 'You must be the seller of at least one item or the buyer to cancel this order'
-                }, status=status.HTTP_403_FORBIDDEN)
+                return Response(
+                    {
+                        "error": "PERMISSION_DENIED",
+                        "detail": "You must be the seller of at least one item or the buyer to cancel this order",
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
 
             # Check if order can be cancelled
-            if order.status in ['shipped', 'delivered', 'cancelled', 'refunded']:
-                return Response({
-                    'error': 'CANNOT_CANCEL',
-                    'detail': f'Order cannot be cancelled. Current status: {order.status}. Orders can only be cancelled before shipping.'
-                }, status=status.HTTP_400_BAD_REQUEST)
+            if order.status in ["shipped", "delivered", "cancelled", "refunded"]:
+                return Response(
+                    {
+                        "error": "CANNOT_CANCEL",
+                        "detail": f"Order cannot be cancelled. Current status: {order.status}. Orders can only be cancelled before shipping.",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
             # Fast-path: pending payment orders are cancelled immediately and stock is restored
-            if order.status == 'pending_payment':
+            if order.status == "pending_payment":
                 # Persist cancellation metadata
-                order.cancellation_reason = request.data.get('cancellation_reason', '')
+                order.cancellation_reason = request.data.get("cancellation_reason", "")
                 order.cancelled_by = request.user
                 order.cancelled_at = timezone.now()
 
@@ -1979,55 +2124,59 @@ def cancel_order(request, order_id):
                         product = item.product
                         if product:
                             product.stock_quantity += item.quantity
-                            product.save(update_fields=['stock_quantity'])
+                            product.save(update_fields=["stock_quantity"])
                 except Exception as stock_err:
                     logger.error(f"Error restoring stock for order {order.id}: {stock_err}")
 
                 # Cancel order and set payment status
-                order.status = 'cancelled'
-                order.payment_status = 'failed'
-                order.save(update_fields=['status', 'payment_status', 'cancellation_reason', 'cancelled_by', 'cancelled_at'])
+                order.status = "cancelled"
+                order.payment_status = "failed"
+                order.save(
+                    update_fields=["status", "payment_status", "cancellation_reason", "cancelled_by", "cancelled_at"]
+                )
 
-                return Response({
-                    'success': True,
-                    'message': 'Order cancelled successfully.',
-                    'refund_requested': False,
-                    'refund_amount': None,
-                    'stripe_refund_id': None,
-                    'order': {
-                        'id': str(order.id),
-                        'status': order.status,
-                        'payment_status': order.payment_status,
-                        'cancelled_at': order.cancelled_at.isoformat() if order.cancelled_at else None,
-                        'cancellation_reason': order.cancellation_reason,
-                        'cancelled_by': {
-                            'id': order.cancelled_by.id,
-                            'username': order.cancelled_by.username
-                        } if order.cancelled_by else None
-                    }
-                }, status=status.HTTP_200_OK)
+                return Response(
+                    {
+                        "success": True,
+                        "message": "Order cancelled successfully.",
+                        "refund_requested": False,
+                        "refund_amount": None,
+                        "stripe_refund_id": None,
+                        "order": {
+                            "id": str(order.id),
+                            "status": order.status,
+                            "payment_status": order.payment_status,
+                            "cancelled_at": order.cancelled_at.isoformat() if order.cancelled_at else None,
+                            "cancellation_reason": order.cancellation_reason,
+                            "cancelled_by": (
+                                {"id": order.cancelled_by.id, "username": order.cancelled_by.username}
+                                if order.cancelled_by
+                                else None
+                            ),
+                        },
+                    },
+                    status=status.HTTP_200_OK,
+                )
 
             # Get cancellation reason from request
-            cancellation_reason = request.data.get('cancellation_reason', '')
+            cancellation_reason = request.data.get("cancellation_reason", "")
             if not cancellation_reason:
-                return Response({
-                    'error': 'MISSING_REASON',
-                    'detail': 'Cancellation reason is required'
-                }, status=status.HTTP_400_BAD_REQUEST)
+                return Response(
+                    {"error": "MISSING_REASON", "detail": "Cancellation reason is required"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
             # Check if payment needs to be refunded
             refund_processed = False
-            refund_amount = Decimal('0.00')
+            refund_amount = Decimal("0.00")
             stripe_refund_id = None
 
             # Only process refund if payment was completed
-            if order.payment_status == 'paid':
+            if order.payment_status == "paid":
                 try:
                     # Try to find payment tracker in our system first
                     payment_tracker = PaymentTracker.objects.filter(
-                        order=order, 
-                        transaction_type='payment', 
-                        status='succeeded'
+                        order=order, transaction_type="payment", status="succeeded"
                     ).first()
 
                     # If we have a payment tracker, use it for refund
@@ -2038,14 +2187,14 @@ def cancel_order(request, order_id):
                         stripe_refund = stripe.Refund.create(
                             payment_intent=payment_tracker.stripe_payment_intent_id,
                             amount=int(refund_amount * 100),  # Convert to cents
-                            reason='requested_by_customer',
+                            reason="requested_by_customer",
                             metadata={
-                                'order_id': str(order.id),
-                                'cancelled_by': str(request.user.id),
-                                'reason': cancellation_reason,
-                            }
+                                "order_id": str(order.id),
+                                "cancelled_by": str(request.user.id),
+                                "reason": cancellation_reason,
+                            },
                         )
-                        
+
                         stripe_refund_id = stripe_refund.id
 
                         # Create refund tracker
@@ -2054,11 +2203,11 @@ def cancel_order(request, order_id):
                                 stripe_refund_id=stripe_refund_id,
                                 order=order,
                                 user=request.user,
-                                transaction_type='refund',
-                                status='succeeded',
+                                transaction_type="refund",
+                                status="succeeded",
                                 amount=refund_amount,
-                                currency='USD',
-                                notes=f'Order cancelled: {cancellation_reason}'
+                                currency="USD",
+                                notes=f"Order cancelled: {cancellation_reason}",
                             )
                             logger.info(f"Created refund tracker for order {order.id}, refund {stripe_refund_id}")
                             print(f"  Created refund tracker for order {order.id}")
@@ -2069,19 +2218,21 @@ def cancel_order(request, order_id):
 
                         payment_transactions = PaymentTransaction.objects.filter(
                             order=order,
-                            status='held',  # Only refund held transactions
+                            status="held",  # Only refund held transactions
                         )
 
                         for transaction in payment_transactions:
-                            transaction.status = 'waiting_refund'
+                            transaction.status = "waiting_refund"
                             # Add refund information to existing notes field
-                            refund_note = f'Refund initiated due to order cancellation: {cancellation_reason} (Amount: ${refund_amount})'
-                            transaction.notes = f"{transaction.notes}\n{refund_note}" if transaction.notes else refund_note
-                            transaction.save(update_fields=['status', 'notes'])
+                            refund_note = f"Refund initiated due to order cancellation: {cancellation_reason} (Amount: ${refund_amount})"
+                            transaction.notes = (
+                                f"{transaction.notes}\n{refund_note}" if transaction.notes else refund_note
+                            )
+                            transaction.save(update_fields=["status", "notes"])
 
                         # Update order status to waiting_refund initially
-                        order.status = 'waiting_refund'
-                        order.save(update_fields=['status'])
+                        order.status = "waiting_refund"
+                        order.save(update_fields=["status"])
                         print(f"  Order {order.id} status set to 'waiting_refund'")
 
                         refund_processed = True
@@ -2089,64 +2240,77 @@ def cancel_order(request, order_id):
 
                 except stripe.error.StripeError as stripe_error:
                     logger.error(f"Stripe refund failed: {str(stripe_error)}")
-                    return Response({
-                        'error': 'REFUND_FAILED',
-                        'detail': f'Failed to process refund: {str(stripe_error)}',
-                        'stripe_error': str(stripe_error)
-                    }, status=status.HTTP_400_BAD_REQUEST)
+                    return Response(
+                        {
+                            "error": "REFUND_FAILED",
+                            "detail": f"Failed to process refund: {str(stripe_error)}",
+                            "stripe_error": str(stripe_error),
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
 
                 except Exception as refund_error:
                     logger.error(f"Refund processing failed: {str(refund_error)}")
-                    return Response({
-                        'error': 'REFUND_ERROR',
-                        'detail': f'Error processing refund: {str(refund_error)}'
-                    }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                    return Response(
+                        {"error": "REFUND_ERROR", "detail": f"Error processing refund: {str(refund_error)}"},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    )
 
             # Store cancellation request data but don't update order status yet
             # Order status will be updated by webhook when refund is confirmed
             order.cancellation_reason = cancellation_reason
             order.cancelled_by = request.user
             order.cancelled_at = timezone.now()
-            order.save(update_fields=['cancellation_reason', 'cancelled_by', 'cancelled_at'])
+            order.save(update_fields=["cancellation_reason", "cancelled_by", "cancelled_at"])
 
             # Log the cancellation request
-            logger.info(f"Cancellation requested for order {order.id} by user {request.user.username}. Refund initiated: {refund_processed}")
+            logger.info(
+                f"Cancellation requested for order {order.id} by user {request.user.username}. Refund initiated: {refund_processed}"
+            )
 
-            return Response({
-            'success': True,
-            'message': 'Cancellation request submitted. Order status will be updated when refund is processed.' if refund_processed else 'Order cancelled successfully.',
-            'refund_requested': refund_processed,
-            'refund_amount': str(refund_amount) if refund_processed else None,
-            'stripe_refund_id': stripe_refund_id,
-            'order': {
-                'id': str(order.id),
-                'status': order.status,  # Keep current status
-                'payment_status': order.payment_status,  # Keep current payment status
-                'cancelled_at': order.cancelled_at.isoformat() if order.cancelled_at else None,
-                'cancellation_reason': order.cancellation_reason,
-                'cancelled_by': {
-                    'id': order.cancelled_by.id,
-                    'username': order.cancelled_by.username
-                } if order.cancelled_by else None
-            }
-        }, status=status.HTTP_200_OK)
+            return Response(
+                {
+                    "success": True,
+                    "message": (
+                        "Cancellation request submitted. Order status will be updated when refund is processed."
+                        if refund_processed
+                        else "Order cancelled successfully."
+                    ),
+                    "refund_requested": refund_processed,
+                    "refund_amount": str(refund_amount) if refund_processed else None,
+                    "stripe_refund_id": stripe_refund_id,
+                    "order": {
+                        "id": str(order.id),
+                        "status": order.status,  # Keep current status
+                        "payment_status": order.payment_status,  # Keep current payment status
+                        "cancelled_at": order.cancelled_at.isoformat() if order.cancelled_at else None,
+                        "cancellation_reason": order.cancellation_reason,
+                        "cancelled_by": (
+                            {"id": order.cancelled_by.id, "username": order.cancelled_by.username}
+                            if order.cancelled_by
+                            else None
+                        ),
+                    },
+                },
+                status=status.HTTP_200_OK,
+            )
 
     except Exception as e:
         logger.error(f"Error cancelling order {order_id}: {str(e)}")
-        return Response({
-            'error': 'ORDER_CANCELLATION_FAILED',
-            'detail': str(e)
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response(
+            {"error": "ORDER_CANCELLATION_FAILED", "detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
 
 
 # Stripe Connect Views for Seller Account Management
 
-from .stripe_service import StripeConnectService
+from .stripe_service import StripeConnectService  # noqa: E402
 
-@api_view(['GET', 'POST'])
+
+@api_view(["GET", "POST"])
 @permission_classes([IsAuthenticated])
 @financial_transaction
-def stripe_account(request):
+def stripe_account(request):  # noqa: C901
     """Unified endpoint for Stripe Connect account management.
 
     This function returns existing account status on GET, or creates a new account on
@@ -2155,122 +2319,138 @@ def stripe_account(request):
     """
     try:
         user = request.user
-        
-        if request.method == 'GET':
+
+        if request.method == "GET":
             print(f"🔍 GET /stripe/account for user: {user.email}")
-            
+
             # Check if user already has a Stripe account
             if user.stripe_account_id:
                 print(f"  User has existing account: {user.stripe_account_id}")
-                
+
                 # Get account status using the service
                 result = StripeConnectService.get_account_status(user)
-                
-                if result['success']:
-                    return Response({
-                        'has_account': True,
-                        'account_id': result['account_id'],
-                        'status': result['status'],
-                        'details_submitted': result['details_submitted'],
-                        'charges_enabled': result['charges_enabled'],
-                        'payouts_enabled': result['payouts_enabled'],
-                        'requirements': result['requirements'],
-                        'message': 'Account exists and details retrieved successfully.'
-                    }, status=status.HTTP_200_OK)
+
+                if result["success"]:
+                    return Response(
+                        {
+                            "has_account": True,
+                            "account_id": result["account_id"],
+                            "status": result["status"],
+                            "details_submitted": result["details_submitted"],
+                            "charges_enabled": result["charges_enabled"],
+                            "payouts_enabled": result["payouts_enabled"],
+                            "requirements": result["requirements"],
+                            "message": "Account exists and details retrieved successfully.",
+                        },
+                        status=status.HTTP_200_OK,
+                    )
                 else:
-                    return Response({
-                        'error': 'Failed to get account status.',
-                        'details': result['errors']
-                    }, status=status.HTTP_400_BAD_REQUEST)
+                    return Response(
+                        {"error": "Failed to get account status.", "details": result["errors"]},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
             else:
                 print("ℹ️ User doesn't have account, checking eligibility...")
-                
+
                 # Check eligibility for account creation
                 validation = StripeConnectService.validate_seller_requirements(user)
-                
-                return Response({
-                    'has_account': False,
-                    'eligible_for_creation': validation['valid'],
-                    'eligibility_errors': validation['errors'],
-                    'requirements': {
-                        'is_authenticated': True,
-                        'is_oauth_user': user.is_oauth_only_user(),
-                        'has_password': user.has_usable_password(),
-                        'two_factor_enabled': getattr(user, 'two_factor_enabled', False),
+
+                return Response(
+                    {
+                        "has_account": False,
+                        "eligible_for_creation": validation["valid"],
+                        "eligibility_errors": validation["errors"],
+                        "requirements": {
+                            "is_authenticated": True,
+                            "is_oauth_user": user.is_oauth_only_user(),
+                            "has_password": user.has_usable_password(),
+                            "two_factor_enabled": getattr(user, "two_factor_enabled", False),
+                        },
+                        "message": "No account exists. Check eligibility for creation.",
                     },
-                    'message': 'No account exists. Check eligibility for creation.'
-                }, status=status.HTTP_200_OK)
-        
-        elif request.method == 'POST':
+                    status=status.HTTP_200_OK,
+                )
+
+        elif request.method == "POST":
             print(f"🔄 POST /stripe/account for user: {user.email}")
-            
+
             # Check if user already has account
             if user.stripe_account_id:
                 print(f"ℹ️ User already has account: {user.stripe_account_id}, returning account info")
-                
+
                 # Return existing account info instead of creating new one
                 result = StripeConnectService.get_account_status(user)
-                
-                if result['success']:
-                    return Response({
-                        'account_exists': True,
-                        'account_id': result['account_id'],
-                        'status': result['status'],
-                        'details_submitted': result['details_submitted'],
-                        'charges_enabled': result['charges_enabled'],
-                        'payouts_enabled': result['payouts_enabled'],
-                        'requirements': result['requirements'],
-                        'message': 'Account already exists. Returning existing account information.'
-                    }, status=status.HTTP_200_OK)
+
+                if result["success"]:
+                    return Response(
+                        {
+                            "account_exists": True,
+                            "account_id": result["account_id"],
+                            "status": result["status"],
+                            "details_submitted": result["details_submitted"],
+                            "charges_enabled": result["charges_enabled"],
+                            "payouts_enabled": result["payouts_enabled"],
+                            "requirements": result["requirements"],
+                            "message": "Account already exists. Returning existing account information.",
+                        },
+                        status=status.HTTP_200_OK,
+                    )
                 else:
-                    return Response({
-                        'error': 'Failed to get existing account status.',
-                        'details': result['errors']
-                    }, status=status.HTTP_400_BAD_REQUEST)
+                    return Response(
+                        {"error": "Failed to get existing account status.", "details": result["errors"]},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
             else:
                 print("🚀 Creating new Stripe account...")
-                
+
                 # Get optional parameters for account creation
-                country = request.data.get('country', 'US')
-                business_type = request.data.get('business_type', 'individual')
-                
+                country = request.data.get("country", "US")
+                business_type = request.data.get("business_type", "individual")
+
                 # Validate country code
                 if len(country) != 2:
-                    return Response({
-                        'error': 'Invalid country code. Please provide a 2-letter ISO country code.'
-                    }, status=status.HTTP_400_BAD_REQUEST)
-                
+                    return Response(
+                        {"error": "Invalid country code. Please provide a 2-letter ISO country code."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
                 # Validate business type
-                if business_type not in ['individual', 'company']:
-                    return Response({
-                        'error': 'Invalid business type. Must be "individual" or "company".'
-                    }, status=status.HTTP_400_BAD_REQUEST)
-                
+                if business_type not in ["individual", "company"]:
+                    return Response(
+                        {"error": 'Invalid business type. Must be "individual" or "company".'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
                 # Create Stripe account using the service
                 result = StripeConnectService.create_stripe_account(user, country, business_type)
-                
-                if result['success']:
-                    return Response({
-                        'account_created': True,
-                        'account_id': result['account_id'],
-                        'status': 'incomplete',  # New accounts are always incomplete
-                        'message': 'Stripe account created successfully.',
-                        'next_step': 'Complete account setup using the account session.'
-                    }, status=status.HTTP_201_CREATED)
+
+                if result["success"]:
+                    return Response(
+                        {
+                            "account_created": True,
+                            "account_id": result["account_id"],
+                            "status": "incomplete",  # New accounts are always incomplete
+                            "message": "Stripe account created successfully.",
+                            "next_step": "Complete account setup using the account session.",
+                        },
+                        status=status.HTTP_201_CREATED,
+                    )
                 else:
-                    return Response({
-                        'error': 'Failed to create Stripe account.',
-                        'details': result['errors']
-                    }, status=status.HTTP_400_BAD_REQUEST)
-            
+                    return Response(
+                        {"error": "Failed to create Stripe account.", "details": result["errors"]},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
     except Exception as e:
         logger.error(f"Unexpected error in stripe_account: {str(e)}")
-        return Response({
-            'error': 'Service may be unavailable. Please try again later.'
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response(
+            {"error": "Service may be unavailable. Please try again later."},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
 
 # This creates a Stripe Account Session for seller onboarding AKA get seller info to pay or edit the info
-@api_view(['POST'])
+@api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def create_stripe_account_session(request):
     """Create a Stripe Account Session for seller onboarding or updates.
@@ -2280,75 +2460,79 @@ def create_stripe_account_session(request):
     """
     try:
         user = request.user
-        
+
         # Create account session using the service
         result = StripeConnectService.create_account_session(user)
-        
-        if result['success']:
-            return Response({
-                'message': 'Account session created successfully.',
-                'client_secret': result['client_secret'],
-                'account_id': result['account_id']
-            }, status=status.HTTP_200_OK)
+
+        if result["success"]:
+            return Response(
+                {
+                    "message": "Account session created successfully.",
+                    "client_secret": result["client_secret"],
+                    "account_id": result["account_id"],
+                },
+                status=status.HTTP_200_OK,
+            )
         else:
-            return Response({
-                'error': 'Failed to create account session.',
-                'details': result['errors']
-            }, status=status.HTTP_400_BAD_REQUEST)
-            
+            return Response(
+                {"error": "Failed to create account session.", "details": result["errors"]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
     except Exception as e:
         logger.error(f"Unexpected error in create_stripe_account_session: {str(e)}")
-        return Response({
-            'error': 'Service may be unavailable. Please try again later.'
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response(
+            {"error": "Service may be unavailable. Please try again later."},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
 
 # Get the Stripe account status for the authenticated user
-@api_view(['GET'])
+@api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def get_stripe_account_status(request):
     """Return the Stripe Connect account status for the authenticated user."""
     try:
         user = request.user
-        
+
         # Get account status using the service
         result = StripeConnectService.get_account_status(user)
-        
-        if result['success']:
-            response_data = {
-                'has_stripe_account': result['has_account'],
-                'status': result['status']
-            }
-            
+
+        if result["success"]:
+            response_data = {"has_stripe_account": result["has_account"], "status": result["status"]}
+
             # Add detailed information if account exists
-            if result['has_account']:
-                response_data.update({
-                    'account_id': result['account_id'],
-                    'details_submitted': result['details_submitted'],
-                    'charges_enabled': result['charges_enabled'],
-                    'payouts_enabled': result['payouts_enabled'],
-                    'requirements': result['requirements']
-                })
-            
+            if result["has_account"]:
+                response_data.update(
+                    {
+                        "account_id": result["account_id"],
+                        "details_submitted": result["details_submitted"],
+                        "charges_enabled": result["charges_enabled"],
+                        "payouts_enabled": result["payouts_enabled"],
+                        "requirements": result["requirements"],
+                    }
+                )
+
             return Response(response_data, status=status.HTTP_200_OK)
         else:
-            return Response({
-                'error': 'Failed to get account status.',
-                'details': result['errors']
-            }, status=status.HTTP_400_BAD_REQUEST)
-            
+            return Response(
+                {"error": "Failed to get account status.", "details": result["errors"]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
     except Exception as e:
         logger.error(f"Unexpected error in get_stripe_account_status: {str(e)}")
-        return Response({
-            'error': 'Service may be unavailable. Please try again later.'
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response(
+            {"error": "Service may be unavailable. Please try again later."},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
 
-
-# transfer payment to seller's connected account 
-@api_view(['POST'])
+# transfer payment to seller's connected account
+@api_view(["POST"])
 @permission_classes([IsAuthenticated])
 @financial_transaction
-def transfer_payment_to_seller(request):
+def transfer_payment_to_seller(request):  # noqa: C901
     """Transfer held funds to a seller’s connected Stripe account.
 
     This function validates permissions and readiness (held status, delivered order,
@@ -2357,81 +2541,93 @@ def transfer_payment_to_seller(request):
     """
     try:
         from .stripe_service import create_transfer_to_connected_account
-        
+
         # Get request data
-        transaction_id = request.data.get('transaction_id')
-        transfer_group = request.data.get('transfer_group')
-        
+        transaction_id = request.data.get("transaction_id")
+        transfer_group = request.data.get("transfer_group")
+
         if not transaction_id:
-            return Response({
-                'error': 'MISSING_TRANSACTION_ID',
-                'detail': 'Transaction ID is required'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
+            return Response(
+                {"error": "MISSING_TRANSACTION_ID", "detail": "Transaction ID is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         # Get the payment transaction
         try:
-            payment_transaction = PaymentTransaction.objects.select_related(
-                'seller', 'buyer', 'order'
-            ).get(id=transaction_id)
+            payment_transaction = PaymentTransaction.objects.select_related("seller", "buyer", "order").get(
+                id=transaction_id
+            )
         except PaymentTransaction.DoesNotExist:
-            return Response({
-                'error': 'TRANSACTION_NOT_FOUND',
-                'detail': f'Payment transaction {transaction_id} not found'
-            }, status=status.HTTP_404_NOT_FOUND)
-        
+            return Response(
+                {"error": "TRANSACTION_NOT_FOUND", "detail": f"Payment transaction {transaction_id} not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
         # Security check: Only allow admins or the seller to trigger transfer
         if not (request.user.is_staff or request.user == payment_transaction.seller):
-            return Response({
-                'error': 'PERMISSION_DENIED',
-                'detail': 'You do not have permission to transfer this payment'
-            }, status=status.HTTP_403_FORBIDDEN)
-        
+            return Response(
+                {"error": "PERMISSION_DENIED", "detail": "You do not have permission to transfer this payment"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         # SECURITY: Only allow transfers of payments with 'held' status
         if not payment_transaction.can_transfer:
-            return Response({
-                'error': 'PAYMENT_NOT_TRANSFERABLE',
-                'detail': f'Only payments with "held" status can be transferred. Current status: {payment_transaction.status}',
-                'payment_status': payment_transaction.status,
-                'transfer_allowed': False
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
+            return Response(
+                {
+                    "error": "PAYMENT_NOT_TRANSFERABLE",
+                    "detail": f'Only payments with "held" status can be transferred. Current status: {payment_transaction.status}',
+                    "payment_status": payment_transaction.status,
+                    "transfer_allowed": False,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         # Check if seller has a connected Stripe account
         if not payment_transaction.seller.stripe_account_id:
-            return Response({
-                'error': 'NO_CONNECTED_ACCOUNT',
-                'detail': 'Seller does not have a connected Stripe account'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        if payment_transaction.planned_release_date and payment_transaction.planned_release_date > timezone.now():
-            return Response({
-                'error': 'TRANSFER_NOT_READY',
-                'detail': f'Transfer not ready yet. Planned release date: {payment_transaction.planned_release_date.isoformat()}'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        if payment_transaction.status != 'held':
-            return Response({
-                'error': 'INVALID_PAYMENT_STATUS',
-                'detail': f'Payment transaction must be in "held" status to transfer. Current status: {payment_transaction.status}',
-                'payment_status': payment_transaction.status
-            }, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"error": "NO_CONNECTED_ACCOUNT", "detail": "Seller does not have a connected Stripe account"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        if payment_transaction.order.status not in ['delivered']:
-            return Response({
-                'error': 'INVALID_ORDER_STATUS',
-                'detail': f'Order must be in "delivered" status to transfer payment. Current status: {payment_transaction.order.status}',
-                'order_status': payment_transaction.order.status
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
+        if payment_transaction.planned_release_date and payment_transaction.planned_release_date > timezone.now():
+            return Response(
+                {
+                    "error": "TRANSFER_NOT_READY",
+                    "detail": f"Transfer not ready yet. Planned release date: {payment_transaction.planned_release_date.isoformat()}",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if payment_transaction.status != "held":
+            return Response(
+                {
+                    "error": "INVALID_PAYMENT_STATUS",
+                    "detail": f'Payment transaction must be in "held" status to transfer. Current status: {payment_transaction.status}',
+                    "payment_status": payment_transaction.status,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if payment_transaction.order.status not in ["delivered"]:
+            return Response(
+                {
+                    "error": "INVALID_ORDER_STATUS",
+                    "detail": f'Order must be in "delivered" status to transfer payment. Current status: {payment_transaction.order.status}',
+                    "order_status": payment_transaction.order.status,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         # Use transfer group from request or default to order ID
         if not transfer_group:
             transfer_group = f"ORDER{payment_transaction.order.id}"
-        
+
         # Calculate transfer amount in cents
         transfer_amount_cents = int(payment_transaction.net_amount * 100)
-        
+
         # Use currency handler to check balance and find optimal currency
-        from .currency_handler import switch_currency, CurrencyHandler
-        
+        from .currency_handler import CurrencyHandler, switch_currency
+
         # Get current balance information for enhanced response
         try:
             current_balance = CurrencyHandler.get_available_currencies_with_balance()
@@ -2439,613 +2635,660 @@ def transfer_payment_to_seller(request):
         except Exception as balance_error:
             logger.warning(f"Could not retrieve balance info: {balance_error}")
             current_balance = []
-        
+
         # Check exchange rate data freshness
         try:
             rate_freshness = CurrencyHandler.check_exchange_rate_freshness()
-            if not rate_freshness['is_fresh']:
-                logger.warning(f"Exchange rate data is stale (age: {rate_freshness.get('age_hours', 'unknown')} hours)")
+            if not rate_freshness["is_fresh"]:
+                logger.warning(
+                    f"Exchange rate data is stale (age: {rate_freshness.get('age_hours', 'unknown')} hours)"
+                )
         except Exception as freshness_error:
             logger.warning(f"Could not check exchange rate freshness: {freshness_error}")
-            rate_freshness = {'is_fresh': False, 'status': 'unknown'}
-        
+            rate_freshness = {"is_fresh": False, "status": "unknown"}
+
         currency_result = switch_currency(
             preferred_currency=payment_transaction.currency.lower(),
             required_amount_cents=transfer_amount_cents,
-            destination_account_id=payment_transaction.seller.stripe_account_id
+            destination_account_id=payment_transaction.seller.stripe_account_id,
         )
-        
+
         # Handle currency response format
-        if 'success' in currency_result and 'was_converted' in currency_result:
-            if currency_result['was_converted'] == True:
+        if "success" in currency_result and "was_converted" in currency_result:
+            if currency_result["was_converted"]:
                 # Currency conversion was needed
-                logger.info(f"Currency conversion applied: {currency_result['original_currency']} to {currency_result['new_currency'].upper()} (rate: {currency_result['rate']})")
-                
+                logger.info(
+                    f"Currency conversion applied: {currency_result['original_currency']} to {currency_result['new_currency'].upper()} (rate: {currency_result['rate']})"
+                )
+
                 # Create transfer with converted currency and amount
                 transfer_result = create_transfer_to_connected_account(
-                    amount=currency_result['new_amount_cents'],  # Already in cents
-                    currency=currency_result['new_currency'],
+                    amount=currency_result["new_amount_cents"],  # Already in cents
+                    currency=currency_result["new_currency"],
                     destination_account_id=payment_transaction.seller.stripe_account_id,
                     transfer_group=transfer_group,
                     metadata={
-                        'transaction_id': str(payment_transaction.id),
-                        'order_id': str(payment_transaction.order.id),
-                        'seller_id': str(payment_transaction.seller.id),
-                        'buyer_id': str(payment_transaction.buyer.id),
-                        'original_currency': currency_result['original_currency'],
-                        'original_amount_cents': currency_result['original_amount_cents'],
-                        'currency_conversion': True,
-                        'exchange_rate': currency_result['rate'],
-                    }
+                        "transaction_id": str(payment_transaction.id),
+                        "order_id": str(payment_transaction.order.id),
+                        "seller_id": str(payment_transaction.seller.id),
+                        "buyer_id": str(payment_transaction.buyer.id),
+                        "original_currency": currency_result["original_currency"],
+                        "original_amount_cents": currency_result["original_amount_cents"],
+                        "currency_conversion": True,
+                        "exchange_rate": currency_result["rate"],
+                    },
                 )
             else:
                 # No conversion needed - use original values
-                logger.info(f"No currency conversion needed: using {currency_result.get('use_currency_display', payment_transaction.currency.upper())}")
-                
+                logger.info(
+                    f"No currency conversion needed: using {currency_result.get('use_currency_display', payment_transaction.currency.upper())}"
+                )
+
                 # Create transfer with original currency and amount
                 transfer_result = create_transfer_to_connected_account(
-                    amount=currency_result.get('amount_cents', transfer_amount_cents),
-                    currency=currency_result.get('use_currency', payment_transaction.currency.lower()),
+                    amount=currency_result.get("amount_cents", transfer_amount_cents),
+                    currency=currency_result.get("use_currency", payment_transaction.currency.lower()),
                     destination_account_id=payment_transaction.seller.stripe_account_id,
                     transfer_group=transfer_group,
                     metadata={
-                        'transaction_id': str(payment_transaction.id),
-                        'order_id': str(payment_transaction.order.id),
-                        'seller_id': str(payment_transaction.seller.id),
-                        'buyer_id': str(payment_transaction.buyer.id),
-                        'original_currency': payment_transaction.currency.upper(),
-                        'original_amount_cents': transfer_amount_cents,
-                        'currency_conversion': False,
-                        'exchange_rate': 1.0,
-                    }
+                        "transaction_id": str(payment_transaction.id),
+                        "order_id": str(payment_transaction.order.id),
+                        "seller_id": str(payment_transaction.seller.id),
+                        "buyer_id": str(payment_transaction.buyer.id),
+                        "original_currency": payment_transaction.currency.upper(),
+                        "original_amount_cents": transfer_amount_cents,
+                        "currency_conversion": False,
+                        "exchange_rate": 1.0,
+                    },
                 )
-            
-        elif 'success' in currency_result:
+
+        elif "success" in currency_result:
             # Full response format - handle as before
-            if not currency_result['success']:
-                logger.error(f"Currency switch failed for transaction {transaction_id}: {currency_result.get('error')}")
-                
+            if not currency_result["success"]:
+                logger.error(
+                    f"Currency switch failed for transaction {transaction_id}: {currency_result.get('error')}"
+                )
+
                 # Check if it's an exchange rate error
-                if currency_result.get('error_type') == 'EXCHANGE_RATE_UNAVAILABLE':
-                    return Response({
-                        'error': 'EXCHANGE_RATE_UNAVAILABLE',
-                        'detail': currency_result.get('error'),
-                        'message': currency_result.get('message'),
-                        'exchange_rate_status': rate_freshness,
-                        'required_action': 'Update exchange rate data or contact system administrator'
-                    }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+                if currency_result.get("error_type") == "EXCHANGE_RATE_UNAVAILABLE":
+                    return Response(
+                        {
+                            "error": "EXCHANGE_RATE_UNAVAILABLE",
+                            "detail": currency_result.get("error"),
+                            "message": currency_result.get("message"),
+                            "exchange_rate_status": rate_freshness,
+                            "required_action": "Update exchange rate data or contact system administrator",
+                        },
+                        status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    )
                 else:
                     # Handle other currency errors (insufficient balance, etc.)
-                    return Response({
-                        'error': 'INSUFFICIENT_BALANCE',
-                        'detail': f"Insufficient balance for transfer: {currency_result.get('error')}",
-                        'balance_info': currency_result.get('balance_info', {}),
-                        'available_currencies': currency_result.get('available_currencies', current_balance),
-                        'current_balance_summary': {
-                            'total_currencies_available': len(current_balance),
-                            'highest_balance_currency': current_balance[0]['currency'] if current_balance else None,
-                            'currencies_with_balance': [
-                                {
-                                    'currency': curr['currency'],
-                                    'amount_formatted': curr['amount_formatted']
-                                } 
-                                for curr in current_balance[:5]  # Top 5 currencies
-                            ]
+                    return Response(
+                        {
+                            "error": "INSUFFICIENT_BALANCE",
+                            "detail": f"Insufficient balance for transfer: {currency_result.get('error')}",
+                            "balance_info": currency_result.get("balance_info", {}),
+                            "available_currencies": currency_result.get("available_currencies", current_balance),
+                            "current_balance_summary": {
+                                "total_currencies_available": len(current_balance),
+                                "highest_balance_currency": (
+                                    current_balance[0]["currency"] if current_balance else None
+                                ),
+                                "currencies_with_balance": [
+                                    {"currency": curr["currency"], "amount_formatted": curr["amount_formatted"]}
+                                    for curr in current_balance[:5]  # Top 5 currencies
+                                ],
+                            },
+                            "exchange_rate_status": rate_freshness,
                         },
-                        'exchange_rate_status': rate_freshness
-                    }, status=status.HTTP_400_BAD_REQUEST)
-            
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
         else:
             # Unknown response format
             logger.error(f"Unknown currency_result format for transaction {transaction_id}: {currency_result}")
-            return Response({
-                'error': 'CURRENCY_HANDLER_ERROR',
-                'detail': 'Unknown response format from currency handler',
-                'currency_result': currency_result
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
-        if not transfer_result['success']:
+            return Response(
+                {
+                    "error": "CURRENCY_HANDLER_ERROR",
+                    "detail": "Unknown response format from currency handler",
+                    "currency_result": currency_result,
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        if not transfer_result["success"]:
             logger.error(f"Failed to create transfer for transaction {transaction_id}: {transfer_result['errors']}")
-            return Response({
-                'error': 'TRANSFER_FAILED',
-                'detail': 'Failed to create transfer to seller account',
-                'errors': transfer_result['errors']
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
+            return Response(
+                {
+                    "error": "TRANSFER_FAILED",
+                    "detail": "Failed to create transfer to seller account",
+                    "errors": transfer_result["errors"],
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
         # Update payment transaction status to 'processing' and store transfer_id
         transfer_started = payment_transaction.start_transfer(
-            transfer_id=transfer_result['transfer_id'],
-            notes=f"Transfer created by {request.user.username}: {transfer_result['transfer_id']}"
+            transfer_id=transfer_result["transfer_id"],
+            notes=f"Transfer created by {request.user.username}: {transfer_result['transfer_id']}",
         )
-        
+
         if not transfer_started:
             logger.error(f"Failed to update payment transaction status for {transaction_id}")
-            return Response({
-                'error': 'STATUS_UPDATE_FAILED',
-                'detail': 'Transfer created but failed to update transaction status',
-                'transfer_id': transfer_result['transfer_id']
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
-        logger.info(f"Payment transferred successfully: Transaction {transaction_id}, Transfer {transfer_result['transfer_id']}")
-        
+            return Response(
+                {
+                    "error": "STATUS_UPDATE_FAILED",
+                    "detail": "Transfer created but failed to update transaction status",
+                    "transfer_id": transfer_result["transfer_id"],
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        logger.info(
+            f"Payment transferred successfully: Transaction {transaction_id}, Transfer {transfer_result['transfer_id']}"
+        )
+
         # Get updated balance information after transfer
         try:
             post_transfer_balance = CurrencyHandler.get_available_currencies_with_balance()
         except Exception as balance_error:
             logger.warning(f"Could not retrieve post-transfer balance: {balance_error}")
             post_transfer_balance = current_balance
-        
+
         # Build complete response based on currency result format
-        if currency_result.get('was_converted') == True:
+        if currency_result.get("was_converted"):
             # Currency conversion was performed
-            logger.info(f"Building response for currency conversion scenario")
-            
+            logger.info("Building response for currency conversion scenario")
+
             response_data = {
-                'success': True,
-                'message': 'Transfer initiated successfully with currency conversion. Status set to processing - awaiting webhook verification.',
-                'transfer_details': {
-                    'transfer_id': transfer_result['transfer_id'],
-                    'amount_cents': transfer_result['amount'],
-                    'amount_dollars': transfer_result['amount'] / 100,
-                    'currency': transfer_result['currency'],
-                    'destination_account': transfer_result['destination'],
-                    'transfer_group': transfer_result['transfer_group'],
-                    'created_at': transfer_result['created']
+                "success": True,
+                "message": "Transfer initiated successfully with currency conversion. Status set to processing - awaiting webhook verification.",
+                "transfer_details": {
+                    "transfer_id": transfer_result["transfer_id"],
+                    "amount_cents": transfer_result["amount"],
+                    "amount_dollars": transfer_result["amount"] / 100,
+                    "currency": transfer_result["currency"],
+                    "destination_account": transfer_result["destination"],
+                    "transfer_group": transfer_result["transfer_group"],
+                    "created_at": transfer_result["created"],
                 },
-                'currency_info': {
-                    'original_currency': currency_result['original_currency'],
-                    'final_currency': currency_result['new_currency'].upper(),
-                    'conversion_needed': True,
-                    'exchange_rate': currency_result['rate'],
-                    'original_amount_cents': currency_result['original_amount_cents'],
-                    'original_amount_decimal': float(currency_result['original_amount_decimal']),
-                    'final_amount_cents': currency_result['new_amount_cents'],
-                    'final_amount_decimal': float(currency_result['new_amount_decimal']),
-                    'conversion_summary': f"Converted {currency_result['original_amount_decimal']} {currency_result['original_currency']} to {currency_result['new_amount_decimal']} {currency_result['new_currency'].upper()} at rate {currency_result['rate']}",
-                    'balance_used': {
-                        'currency': currency_result['new_currency'].upper(),
-                        'amount_used_cents': currency_result['new_amount_cents'],
-                        'amount_used_decimal': float(currency_result['new_amount_decimal'])
-                    }
+                "currency_info": {
+                    "original_currency": currency_result["original_currency"],
+                    "final_currency": currency_result["new_currency"].upper(),
+                    "conversion_needed": True,
+                    "exchange_rate": currency_result["rate"],
+                    "original_amount_cents": currency_result["original_amount_cents"],
+                    "original_amount_decimal": float(currency_result["original_amount_decimal"]),
+                    "final_amount_cents": currency_result["new_amount_cents"],
+                    "final_amount_decimal": float(currency_result["new_amount_decimal"]),
+                    "conversion_summary": f"Converted {currency_result['original_amount_decimal']} {currency_result['original_currency']} to {currency_result['new_amount_decimal']} {currency_result['new_currency'].upper()} at rate {currency_result['rate']}",
+                    "balance_used": {
+                        "currency": currency_result["new_currency"].upper(),
+                        "amount_used_cents": currency_result["new_amount_cents"],
+                        "amount_used_decimal": float(currency_result["new_amount_decimal"]),
+                    },
                 },
-                'transaction_details': {
-                    'transaction_id': str(payment_transaction.id),
-                    'status': payment_transaction.status,
-                    'net_amount': float(payment_transaction.net_amount),
-                    'release_date': payment_transaction.actual_release_date.isoformat() if payment_transaction.actual_release_date else None
+                "transaction_details": {
+                    "transaction_id": str(payment_transaction.id),
+                    "status": payment_transaction.status,
+                    "net_amount": float(payment_transaction.net_amount),
+                    "release_date": (
+                        payment_transaction.actual_release_date.isoformat()
+                        if payment_transaction.actual_release_date
+                        else None
+                    ),
                 },
-                'balance_summary': {
-                    'currencies_available_before': len(current_balance),
-                    'currencies_available_after': len(post_transfer_balance),
-                    'top_currencies_remaining': [
+                "balance_summary": {
+                    "currencies_available_before": len(current_balance),
+                    "currencies_available_after": len(post_transfer_balance),
+                    "top_currencies_remaining": [
                         {
-                            'currency': curr['currency'],
-                            'amount_formatted': curr['amount_formatted'],
-                            'amount_cents': curr['amount_cents']
+                            "currency": curr["currency"],
+                            "amount_formatted": curr["amount_formatted"],
+                            "amount_cents": curr["amount_cents"],
                         }
                         for curr in post_transfer_balance[:3]
                     ],
-                    'transfer_impact': {
-                        'currency_used': currency_result['new_currency'].upper(),
-                        'amount_deducted': f"{currency_result['new_amount_decimal']:.2f} {currency_result['new_currency'].upper()}"
-                    }
+                    "transfer_impact": {
+                        "currency_used": currency_result["new_currency"].upper(),
+                        "amount_deducted": f"{currency_result['new_amount_decimal']:.2f} {currency_result['new_currency'].upper()}",
+                    },
                 },
-                'exchange_rate_info': {
-                    'data_freshness': rate_freshness,
-                    'rate_source': 'database_stored',
-                    'conversion_rate': currency_result['rate'],
-                    'rate_timestamp': rate_freshness.get('last_updated')
-                }
+                "exchange_rate_info": {
+                    "data_freshness": rate_freshness,
+                    "rate_source": "database_stored",
+                    "conversion_rate": currency_result["rate"],
+                    "rate_timestamp": rate_freshness.get("last_updated"),
+                },
             }
         else:
             # No currency conversion needed
-            logger.info(f"Building response for no conversion scenario")
-            
+            logger.info("Building response for no conversion scenario")
+
             response_data = {
-                'success': True,
-                'message': 'Transfer initiated successfully. Status set to processing - awaiting webhook verification.',
-                'transfer_details': {
-                    'transfer_id': transfer_result['transfer_id'],
-                    'amount_cents': transfer_result['amount'],
-                    'amount_dollars': transfer_result['amount'] / 100,
-                    'currency': transfer_result['currency'],
-                    'destination_account': transfer_result['destination'],
-                    'transfer_group': transfer_result['transfer_group'],
-                    'created_at': transfer_result['created']
+                "success": True,
+                "message": "Transfer initiated successfully. Status set to processing - awaiting webhook verification.",
+                "transfer_details": {
+                    "transfer_id": transfer_result["transfer_id"],
+                    "amount_cents": transfer_result["amount"],
+                    "amount_dollars": transfer_result["amount"] / 100,
+                    "currency": transfer_result["currency"],
+                    "destination_account": transfer_result["destination"],
+                    "transfer_group": transfer_result["transfer_group"],
+                    "created_at": transfer_result["created"],
                 },
-                'currency_info': {
-                    'original_currency': payment_transaction.currency.upper(),
-                    'final_currency': currency_result.get('use_currency_display', payment_transaction.currency.upper()),
-                    'conversion_needed': False,
-                    'exchange_rate': 1.0,
-                    'original_amount_cents': transfer_amount_cents,
-                    'original_amount_decimal': float(payment_transaction.net_amount),
-                    'final_amount_cents': transfer_amount_cents,
-                    'final_amount_decimal': float(payment_transaction.net_amount),
-                    'recommendation': currency_result.get('recommendation', 'No conversion needed'),
-                    'balance_used': {
-                        'currency': currency_result.get('use_currency_display', payment_transaction.currency.upper()),
-                        'amount_used_cents': transfer_amount_cents,
-                        'amount_used_decimal': float(payment_transaction.net_amount)
-                    }
+                "currency_info": {
+                    "original_currency": payment_transaction.currency.upper(),
+                    "final_currency": currency_result.get(
+                        "use_currency_display", payment_transaction.currency.upper()
+                    ),
+                    "conversion_needed": False,
+                    "exchange_rate": 1.0,
+                    "original_amount_cents": transfer_amount_cents,
+                    "original_amount_decimal": float(payment_transaction.net_amount),
+                    "final_amount_cents": transfer_amount_cents,
+                    "final_amount_decimal": float(payment_transaction.net_amount),
+                    "recommendation": currency_result.get("recommendation", "No conversion needed"),
+                    "balance_used": {
+                        "currency": currency_result.get("use_currency_display", payment_transaction.currency.upper()),
+                        "amount_used_cents": transfer_amount_cents,
+                        "amount_used_decimal": float(payment_transaction.net_amount),
+                    },
                 },
-                'transaction_details': {
-                    'transaction_id': str(payment_transaction.id),
-                    'status': payment_transaction.status,
-                    'net_amount': float(payment_transaction.net_amount),
-                    'release_date': payment_transaction.actual_release_date.isoformat() if payment_transaction.actual_release_date else None
+                "transaction_details": {
+                    "transaction_id": str(payment_transaction.id),
+                    "status": payment_transaction.status,
+                    "net_amount": float(payment_transaction.net_amount),
+                    "release_date": (
+                        payment_transaction.actual_release_date.isoformat()
+                        if payment_transaction.actual_release_date
+                        else None
+                    ),
                 },
-                'balance_summary': {
-                    'currencies_available_before': len(current_balance),
-                    'currencies_available_after': len(post_transfer_balance),
-                    'top_currencies_remaining': [
+                "balance_summary": {
+                    "currencies_available_before": len(current_balance),
+                    "currencies_available_after": len(post_transfer_balance),
+                    "top_currencies_remaining": [
                         {
-                            'currency': curr['currency'],
-                            'amount_formatted': curr['amount_formatted'],
-                            'amount_cents': curr['amount_cents']
+                            "currency": curr["currency"],
+                            "amount_formatted": curr["amount_formatted"],
+                            "amount_cents": curr["amount_cents"],
                         }
                         for curr in post_transfer_balance[:3]
                     ],
-                    'transfer_impact': {
-                        'currency_used': currency_result.get('use_currency_display', payment_transaction.currency.upper()),
-                        'amount_deducted': f"{payment_transaction.net_amount:.2f} {currency_result.get('use_currency_display', payment_transaction.currency.upper())}"
-                    }
+                    "transfer_impact": {
+                        "currency_used": currency_result.get(
+                            "use_currency_display", payment_transaction.currency.upper()
+                        ),
+                        "amount_deducted": f"{payment_transaction.net_amount:.2f} {currency_result.get('use_currency_display', payment_transaction.currency.upper())}",
+                    },
                 },
-                'exchange_rate_info': {
-                    'data_freshness': rate_freshness,
-                    'rate_source': 'database_stored',
-                    'fallback_used': currency_result.get('fallback_rates_used', False)
-                }
+                "exchange_rate_info": {
+                    "data_freshness": rate_freshness,
+                    "rate_source": "database_stored",
+                    "fallback_used": currency_result.get("fallback_rates_used", False),
+                },
             }
-        
+
         return Response(response_data, status=status.HTTP_200_OK)
-        
+
     except Exception as e:
         logger.error(f"Unexpected error in transfer_payment_to_seller: {str(e)}", exc_info=True)
-        return Response({
-            'error': 'TRANSFER_ERROR',
-            'detail': f'An unexpected error occurred: {str(e)}'
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response(
+            {"error": "TRANSFER_ERROR", "detail": f"An unexpected error occurred: {str(e)}"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
 
 # Payment Intent Event Handlers
 @financial_transaction
-def handle_payment_intent_succeeded(payment_intent):
+def handle_payment_intent_succeeded(payment_intent):  # noqa: C901
     """Process payment_intent.succeeded to confirm payment and hold funds.
 
     This function updates the Order to payment_confirmed/paid, ensures a succeeded
     PaymentTracker exists, and creates or updates PaymentTransactions in 'held' status
     per seller, then sends a payment confirmation email to the buyer.
     """
-    payment_intent_id = getattr(payment_intent, 'id', None)
-    
+    payment_intent_id = getattr(payment_intent, "id", None)
+
     # Check if payment intent has metadata with order_id
-    metadata = getattr(payment_intent, 'metadata', {})
-    order_id = metadata.get('order_id') if metadata else None
-    
+    metadata = getattr(payment_intent, "metadata", {})
+    order_id = metadata.get("order_id") if metadata else None
+
     if not order_id:
         logger.info(f"Payment intent {payment_intent_id} has no order_id in metadata - skipping processing")
         return {
-            'success': True,
-            'message': 'Payment intent has no order_id in metadata - not processed',
-            'trackers_updated': 0,
-            'transactions_updated': 0,
-            'orders_updated': 0,
-            'errors': []
+            "success": True,
+            "message": "Payment intent has no order_id in metadata - not processed",
+            "trackers_updated": 0,
+            "transactions_updated": 0,
+            "orders_updated": 0,
+            "errors": [],
         }
-    
+
     logger.info(f"Processing payment intent {payment_intent_id} for order {order_id}")
-    
-    currency = getattr(payment_intent, 'currency', 'USD').upper()
-    
+
+    currency = getattr(payment_intent, "currency", "USD").upper()
+
     # Extract additional payment intent data
     latest_charge_id = ""
     payment_method_id = ""
-    
+
     # Get latest charge info if available
-    charges = getattr(payment_intent, 'charges', {})
-    if charges and hasattr(charges, 'data') and charges.data:
+    charges = getattr(payment_intent, "charges", {})
+    if charges and hasattr(charges, "data") and charges.data:
         latest_charge = charges.data[0]
-        latest_charge_id = getattr(latest_charge, 'id', '')
-        payment_method_info = getattr(latest_charge, 'payment_method', None)
+        latest_charge_id = getattr(latest_charge, "id", "")
+        payment_method_info = getattr(latest_charge, "payment_method", None)
         if payment_method_info:
-            payment_method_id = getattr(payment_method_info, 'id', '')
-    
+            payment_method_id = getattr(payment_method_info, "id", "")
+
     results = {
-        'success': True,
-        'trackers_updated': 0,
-        'transactions_updated': 0,
-        'orders_updated': 0,
-        'email_sent': False,
-        'email_message': '',
-        'errors': []
+        "success": True,
+        "trackers_updated": 0,
+        "transactions_updated": 0,
+        "orders_updated": 0,
+        "email_sent": False,
+        "email_message": "",
+        "errors": [],
     }
-    
+
     try:
         # Use READ COMMITTED isolation level as requested for consistency
-        with atomic_with_isolation('READ COMMITTED'):
+        with atomic_with_isolation("READ COMMITTED"):
             # STEP 1: Get and update Order model first (follows required ordering)
             from marketplace.models import Order
+
             try:
                 order = Order.objects.select_for_update().get(id=order_id)
             except Order.DoesNotExist:
                 logger.error(f"Order {order_id} not found for payment intent {payment_intent_id}")
                 return {
-                    'success': False,
-                    'error': f'Order {order_id} not found',
-                    'trackers_updated': 0,
-                    'transactions_updated': 0,
-                    'orders_updated': 0,
-                    'errors': [f'Order {order_id} not found']
+                    "success": False,
+                    "error": f"Order {order_id} not found",
+                    "trackers_updated": 0,
+                    "transactions_updated": 0,
+                    "orders_updated": 0,
+                    "errors": [f"Order {order_id} not found"],
                 }
-            
+
             # Only process if order is in pending_payment status
-            if order.status != 'pending_payment':
+            if order.status != "pending_payment":
                 logger.info(f"Order {order_id} status is {order.status}, not pending_payment - skipping")
                 return {
-                    'success': True,
-                    'message': f'Order {order_id} status is {order.status}, not pending_payment - skipping',
-                    'trackers_updated': 0,
-                    'transactions_updated': 0,
-                    'orders_updated': 0,
-                    'errors': []
+                    "success": True,
+                    "message": f"Order {order_id} status is {order.status}, not pending_payment - skipping",
+                    "trackers_updated": 0,
+                    "transactions_updated": 0,
+                    "orders_updated": 0,
+                    "errors": [],
                 }
 
             # Update order payment status to 'paid' and status to 'payment_confirmed'
             from django.utils import timezone
-            order.status = 'payment_confirmed'
+
+            order.status = "payment_confirmed"
             order.processed_at = timezone.now()
-            order.admin_notes = f"{order.admin_notes}\nPayment confirmed via payment intent {payment_intent_id}" if order.admin_notes else f"Payment confirmed via payment intent {payment_intent_id}"
-            order.payment_status = 'paid'
+            order.admin_notes = (
+                f"{order.admin_notes}\nPayment confirmed via payment intent {payment_intent_id}"
+                if order.admin_notes
+                else f"Payment confirmed via payment intent {payment_intent_id}"
+            )
+            order.payment_status = "paid"
             order.is_locked = True
-            order.save(update_fields=['status','processed_at', 'admin_notes','payment_status', 'is_locked', 'updated_at'])
-            results['orders_updated'] += 1
+            order.save(
+                update_fields=["status", "processed_at", "admin_notes", "payment_status", "is_locked", "updated_at"]
+            )
+            results["orders_updated"] += 1
             logger.info(f"Updated Order {order.id} payment_status to 'paid'")
-            
+
             # STEP 2: Update PaymentTracker records (follows required ordering)
-            trackers = PaymentTracker.objects.filter(
-                stripe_payment_intent_id=payment_intent_id
-            ).select_for_update()
-            
+            trackers = PaymentTracker.objects.filter(stripe_payment_intent_id=payment_intent_id).select_for_update()
+
             for tracker in trackers:
                 # Update tracker status and add payment intent details
-                tracker.status = 'succeeded'
+                tracker.status = "succeeded"
                 tracker.latest_charge_id = latest_charge_id
                 tracker.payment_method_id = payment_method_id
-                
+
                 # Clear any previous failure data
-                tracker.failure_code = ''
-                tracker.failure_reason = ''
+                tracker.failure_code = ""
+                tracker.failure_reason = ""
                 tracker.stripe_error_data = None
-                
-                tracker.save(update_fields=[
-                    'status', 'latest_charge_id', 'payment_method_id',
-                    'failure_code', 'failure_reason', 'stripe_error_data', 'updated_at'
-                ])
-                results['trackers_updated'] += 1
-                
+
+                tracker.save(
+                    update_fields=[
+                        "status",
+                        "latest_charge_id",
+                        "payment_method_id",
+                        "failure_code",
+                        "failure_reason",
+                        "stripe_error_data",
+                        "updated_at",
+                    ]
+                )
+                results["trackers_updated"] += 1
+
                 logger.info(f"Updated PaymentTracker {tracker.id} to succeeded status")
 
             # STEP 3: Update PaymentTransaction records for this order - set to 'held' (follows required ordering)
             payment_transactions = PaymentTransaction.objects.filter(
-                order=order,
-                status='pending' # Only update pending transactions
+                order=order, status="pending"  # Only update pending transactions
             ).select_for_update()
 
             for txn in payment_transactions:
                 # Set status to held and reset the hold period to start from now
-                txn.status = 'held'
+                txn.status = "held"
                 txn.payment_received_date = timezone.now()
                 txn.hold_start_date = timezone.now()
                 # Recalculate planned release date based on the new hold start date
                 txn.planned_release_date = txn.hold_start_date + timezone.timedelta(days=txn.days_to_hold)
-                
-                txn.save(update_fields=[
-                    'status', 
-                    'payment_received_date', 
-                    'hold_start_date', 
-                    'planned_release_date', 
-                    'updated_at'
-                ])
-                results['transactions_updated'] += 1
+
+                txn.save(
+                    update_fields=[
+                        "status",
+                        "payment_received_date",
+                        "hold_start_date",
+                        "planned_release_date",
+                        "updated_at",
+                    ]
+                )
+                results["transactions_updated"] += 1
                 logger.info(f"Updated PaymentTransaction {txn.id} to 'held' status for order {order_id}")
-            
 
             if not payment_transactions:
                 # Create PaymentTransaction records for this successful payment
                 # Only create transactions when payment actually succeeds
                 from collections import defaultdict
                 from decimal import Decimal
-                
+
                 # Group order items by seller to create separate transactions for each seller
-                sellers_data = defaultdict(lambda: {
-                    'total_amount': Decimal('0.00'),
-                    'item_count': 0,
-                    'item_names': []
-                })
-                
+                sellers_data = defaultdict(
+                    lambda: {"total_amount": Decimal("0.00"), "item_count": 0, "item_names": []}
+                )
+
                 # Process order items to group by seller
                 for order_item in order.items.all():
                     seller = order_item.seller
                     item_total = order_item.unit_price * order_item.quantity
-                    
-                    sellers_data[seller]['total_amount'] += item_total
-                    sellers_data[seller]['item_count'] += order_item.quantity
-                    sellers_data[seller]['item_names'].append(order_item.product_name)
-                
+
+                    sellers_data[seller]["total_amount"] += item_total
+                    sellers_data[seller]["item_count"] += order_item.quantity
+                    sellers_data[seller]["item_names"].append(order_item.product_name)
+
                 logger.info(f"Creating payment transactions for {len(sellers_data)} sellers")
-                
+
                 # Create PaymentTransaction for each seller
                 for seller, seller_data in sellers_data.items():
                     logger.info(f"Creating payment transaction for seller: {seller.username}")
-                    
+
                     # Calculate fees
-                    gross_amount = seller_data['total_amount']
-                    platform_fee_rate = Decimal('0.05')  # 5% platform fee
-                    stripe_fee_rate = Decimal('0.029')   # 2.9% Stripe fee + $0.30
-                    stripe_fixed_fee = Decimal('0.30')
-                    
+                    gross_amount = seller_data["total_amount"]
+                    platform_fee_rate = Decimal("0.05")  # 5% platform fee
+                    stripe_fee_rate = Decimal("0.029")  # 2.9% Stripe fee + $0.30
+                    stripe_fixed_fee = Decimal("0.30")
+
                     platform_fee = gross_amount * platform_fee_rate
                     stripe_fee = (gross_amount * stripe_fee_rate) + stripe_fixed_fee
                     net_amount = gross_amount - platform_fee - stripe_fee
-                    
+
                     # Create PaymentTransaction with held status (payment succeeded)
                     payment_transaction = PaymentTransaction.objects.create(
                         stripe_payment_intent_id=payment_intent_id,
                         order=order,
                         seller=seller,
                         buyer=order.buyer,
-                        status='held',  # Start with held status since payment succeeded
+                        status="held",  # Start with held status since payment succeeded
                         gross_amount=gross_amount,
                         platform_fee=platform_fee,
                         stripe_fee=stripe_fee,
                         net_amount=net_amount,
                         currency=currency.lower(),
-                        item_count=seller_data['item_count'],
-                        item_names=', '.join(seller_data['item_names']),
+                        item_count=seller_data["item_count"],
+                        item_names=", ".join(seller_data["item_names"]),
                         payment_received_date=timezone.now(),
                         # Integrated hold fields - all payments held for 30 days
-                        hold_reason='standard',
+                        hold_reason="standard",
                         days_to_hold=30,
                         hold_start_date=timezone.now(),
-                        hold_notes=f"Standard 30-day hold period for marketplace transactions",
+                        hold_notes="Standard 30-day hold period for marketplace transactions",
                         metadata={
-                            'order_id': str(order.id),
-                            'payment_intent_id': payment_intent_id,
-                            'seller_id': str(seller.id),
-                            'buyer_id': str(order.buyer.id)
-                        }
+                            "order_id": str(order.id),
+                            "payment_intent_id": payment_intent_id,
+                            "seller_id": str(seller.id),
+                            "buyer_id": str(order.buyer.id),
+                        },
                     )
-                    
-                    results['transactions_updated'] += 1
-                    logger.info(f"Created PaymentTransaction {payment_transaction.id} for seller {seller.username} with held status")
-            
+
+                    results["transactions_updated"] += 1
+                    logger.info(
+                        f"Created PaymentTransaction {payment_transaction.id} for seller {seller.username} with held status"
+                    )
+
             logger.info(f"Updated Order {order.id} status to payment_confirmed and payment_status to paid")
-            
+
             # Send payment success email to buyer
             try:
                 email_sent, email_message = send_order_receipt_email(order)
                 if email_sent:
                     logger.info(f"Payment success email sent to {order.buyer.email} for order {order.id}")
-                    results['email_sent'] = True
-                    results['email_message'] = 'Payment confirmation email sent successfully'
+                    results["email_sent"] = True
+                    results["email_message"] = "Payment confirmation email sent successfully"
                 else:
                     logger.warning(f"Failed to send payment success email to {order.buyer.email}: {email_message}")
-                    results['email_sent'] = False
-                    results['email_message'] = f'Failed to send email: {email_message}'
+                    results["email_sent"] = False
+                    results["email_message"] = f"Failed to send email: {email_message}"
             except Exception as email_error:
                 logger.error(f"Error sending payment success email for order {order.id}: {str(email_error)}")
-                results['email_sent'] = False
-                results['email_message'] = f'Email error: {str(email_error)}'
+                results["email_sent"] = False
+                results["email_message"] = f"Email error: {str(email_error)}"
                 # Don't fail the payment processing if email fails
 
     except Exception as e:
-        results['success'] = False
-        results['errors'].append(f"Error updating payment intent succeeded: {str(e)}")
+        results["success"] = False
+        results["errors"].append(f"Error updating payment intent succeeded: {str(e)}")
         logger.error(f"Error in handle_payment_intent_succeeded: {e}")
         raise
-    
+
     return results
 
 
 @financial_transaction
-def handle_payment_intent_failed(payment_intent):
+def handle_payment_intent_failed(payment_intent):  # noqa: C901
     """Process payment_intent.payment_failed and prepare for retry.
 
     This function records failure on PaymentTrackers/PaymentTransactions, stores error
     metadata, and resets the Order to 'pending_payment' with payment_status 'failed' so
     the buyer can retry checkout.
     """
-    payment_intent_id = getattr(payment_intent, 'id', None)
-    
+    payment_intent_id = getattr(payment_intent, "id", None)
+
     # Check if payment intent has metadata with order_id
-    metadata = getattr(payment_intent, 'metadata', {})
-    order_id = metadata.get('order_id') if metadata else None
-    
+    metadata = getattr(payment_intent, "metadata", {})
+    order_id = metadata.get("order_id") if metadata else None
+
     if not order_id:
         logger.info(f"Payment intent {payment_intent_id} has no order_id in metadata - skipping processing")
         return {
-            'success': True,
-            'message': 'Payment intent has no order_id in metadata - not processed',
-            'trackers_updated': 0,
-            'transactions_updated': 0,
-            'orders_updated': 0,
-            'errors': []
+            "success": True,
+            "message": "Payment intent has no order_id in metadata - not processed",
+            "trackers_updated": 0,
+            "transactions_updated": 0,
+            "orders_updated": 0,
+            "errors": [],
         }
-    
+
     logger.info(f"Processing payment intent failure {payment_intent_id} for order {order_id}")
-    
-    amount = getattr(payment_intent, 'amount', 0)
-    currency = getattr(payment_intent, 'currency', 'USD').upper()
-    status_field = getattr(payment_intent, 'status', 'unknown')
-    
+
+    amount = getattr(payment_intent, "amount", 0)
+    currency = getattr(payment_intent, "currency", "USD").upper()
+    _status_field = getattr(payment_intent, "status", "unknown")
+
     # Extract error information
-    error_data = getattr(payment_intent, 'last_payment_error', None)
+    error_data = getattr(payment_intent, "last_payment_error", None)
     failure_code = ""
     failure_message = ""
     complete_error_data = {}
-    
+
     if error_data:
-        failure_code = getattr(error_data, 'code', '')
-        failure_message = getattr(error_data, 'message', '')
-        
+        failure_code = getattr(error_data, "code", "")
+        failure_message = getattr(error_data, "message", "")
+
         # Store complete error data for debugging
         complete_error_data = {
-            'code': failure_code,
-            'message': failure_message,
-            'type': getattr(error_data, 'type', ''),
-            'decline_code': getattr(error_data, 'decline_code', ''),
-            'param': getattr(error_data, 'param', ''),
-            'charge_id': getattr(error_data, 'charge', ''),
-            'payment_method_type': getattr(error_data, 'payment_method', {}).get('type', '') if getattr(error_data, 'payment_method', None) else ''
+            "code": failure_code,
+            "message": failure_message,
+            "type": getattr(error_data, "type", ""),
+            "decline_code": getattr(error_data, "decline_code", ""),
+            "param": getattr(error_data, "param", ""),
+            "charge_id": getattr(error_data, "charge", ""),
+            "payment_method_type": (
+                getattr(error_data, "payment_method", {}).get("type", "")
+                if getattr(error_data, "payment_method", None)
+                else ""
+            ),
         }
-    
-    results = {
-        'success': True,
-        'trackers_updated': 0,
-        'transactions_updated': 0,
-        'orders_updated': 0,
-        'errors': []
-    }
-    
+
+    results = {"success": True, "trackers_updated": 0, "transactions_updated": 0, "orders_updated": 0, "errors": []}
+
     try:
         # Use READ COMMITTED isolation level as requested for consistency and proper ordering
-        with atomic_with_isolation('READ COMMITTED'):
+        with atomic_with_isolation("READ COMMITTED"):
             # STEP 1: Get and update Order model first (follows required ordering)
             from marketplace.models import Order
+
             try:
                 order = Order.objects.select_for_update().get(id=order_id)
             except Order.DoesNotExist:
                 logger.error(f"Order {order_id} not found for payment intent {payment_intent_id}")
                 return {
-                    'success': False,
-                    'error': f'Order {order_id} not found',
-                    'trackers_updated': 0,
-                    'transactions_updated': 0,
-                    'orders_updated': 0,
-                    'errors': [f'Order {order_id} not found']
+                    "success": False,
+                    "error": f"Order {order_id} not found",
+                    "trackers_updated": 0,
+                    "transactions_updated": 0,
+                    "orders_updated": 0,
+                    "errors": [f"Order {order_id} not found"],
                 }
 
             # Check if PaymentTracker exists, create if not, update if exists
-            trackers = PaymentTracker.objects.filter(
-                stripe_payment_intent_id=payment_intent_id
-            ).select_for_update()
-            
+            trackers = PaymentTracker.objects.filter(stripe_payment_intent_id=payment_intent_id).select_for_update()
+
             if trackers.exists():
                 # Update existing PaymentTracker records
                 for tracker in trackers:
-                    tracker.status = 'failed'
+                    tracker.status = "failed"
                     tracker.failure_code = failure_code
                     tracker.failure_reason = failure_message
                     tracker.stripe_error_data = complete_error_data
-                    
-                    tracker.save(update_fields=[
-                        'status', 'failure_code', 'failure_reason', 
-                        'stripe_error_data', 'updated_at'
-                    ])
-                    results['trackers_updated'] += 1
-                    
-                    logger.info(f"Updated existing PaymentTracker {tracker.id} to failed status with code: {failure_code}")
+
+                    tracker.save(
+                        update_fields=["status", "failure_code", "failure_reason", "stripe_error_data", "updated_at"]
+                    )
+                    results["trackers_updated"] += 1
+
+                    logger.info(
+                        f"Updated existing PaymentTracker {tracker.id} to failed status with code: {failure_code}"
+                    )
             else:
                 # Create new PaymentTracker for failed payment intent
                 try:
@@ -3053,118 +3296,144 @@ def handle_payment_intent_failed(payment_intent):
                         stripe_payment_intent_id=payment_intent_id,
                         order=order,
                         user=order.buyer,
-                        transaction_type='payment',
-                        status='failed',
+                        transaction_type="payment",
+                        status="failed",
                         amount=Decimal(amount) / 100,  # Convert from cents
                         currency=currency,
                         failure_code=failure_code,
                         failure_reason=failure_message,
                         stripe_error_data=complete_error_data,
-                        notes=f'Payment intent {payment_intent_id} failed for order {order.id}. Error: {failure_message}'
+                        notes=f"Payment intent {payment_intent_id} failed for order {order.id}. Error: {failure_message}",
                     )
-                    
-                    results['trackers_updated'] += 1
-                    logger.info(f"Created new PaymentTracker {payment_tracker.id} for failed payment intent {payment_intent_id}")
-                    
+
+                    results["trackers_updated"] += 1
+                    logger.info(
+                        f"Created new PaymentTracker {payment_tracker.id} for failed payment intent {payment_intent_id}"
+                    )
+
                 except Exception as tracker_error:
-                    logger.error(f"Error creating PaymentTracker for failed payment intent {payment_intent_id}: {str(tracker_error)}")
-                    results['errors'].append(f"Failed to create PaymentTracker: {str(tracker_error)}")
+                    logger.error(
+                        f"Error creating PaymentTracker for failed payment intent {payment_intent_id}: {str(tracker_error)}"
+                    )
+                    results["errors"].append(f"Failed to create PaymentTracker: {str(tracker_error)}")
                     # Continue processing even if tracker creation fails
 
             # Handle PaymentTransaction records - create if not exist, update if exist
             existing_transactions = PaymentTransaction.objects.filter(
                 stripe_payment_intent_id=payment_intent_id
             ).select_for_update()
-            
+
             if existing_transactions.exists():
                 # Update existing PaymentTransaction records to failed status
                 for transaction in existing_transactions:
-                    transaction.status = 'failed'
+                    transaction.status = "failed"
                     transaction.payment_failure_code = failure_code
                     transaction.payment_failure_reason = failure_message
-                    transaction.notes = f"{transaction.notes}\nPayment failed: {failure_message}" if transaction.notes else f"Payment failed: {failure_message}"
-                    transaction.save(update_fields=[
-                        'status', 'payment_failure_code', 'payment_failure_reason', 
-                        'notes', 'updated_at'
-                    ])
-                    results['transactions_updated'] += 1
+                    transaction.notes = (
+                        f"{transaction.notes}\nPayment failed: {failure_message}"
+                        if transaction.notes
+                        else f"Payment failed: {failure_message}"
+                    )
+                    transaction.save(
+                        update_fields=[
+                            "status",
+                            "payment_failure_code",
+                            "payment_failure_reason",
+                            "notes",
+                            "updated_at",
+                        ]
+                    )
+                    results["transactions_updated"] += 1
                     logger.info(f"Updated PaymentTransaction {transaction.id} to failed status")
             else:
                 # Create PaymentTransaction records for each seller in the order with pending status
                 try:
                     # Group order items by seller
                     from collections import defaultdict
-                    seller_data = defaultdict(lambda: {'item_count': 0, 'item_names': [], 'gross_amount': Decimal('0.00')})
-                    
+
+                    seller_data = defaultdict(
+                        lambda: {"item_count": 0, "item_names": [], "gross_amount": Decimal("0.00")}
+                    )
+
                     for order_item in order.items.all():
                         seller = order_item.seller
-                        seller_data[seller]['item_count'] += order_item.quantity
-                        seller_data[seller]['item_names'].append(order_item.product_name)
-                        seller_data[seller]['gross_amount'] += order_item.total_price
-                    
+                        seller_data[seller]["item_count"] += order_item.quantity
+                        seller_data[seller]["item_names"].append(order_item.product_name)
+                        seller_data[seller]["gross_amount"] += order_item.total_price
+
                     # Create PaymentTransaction for each seller
                     for seller, data in seller_data.items():
-                        gross_amount = data['gross_amount']
-                        platform_fee = gross_amount * Decimal('0.03')  # 3% platform fee
-                        stripe_fee = (gross_amount * Decimal('0.029')) + Decimal('0.30')  # Stripe fee
+                        gross_amount = data["gross_amount"]
+                        platform_fee = gross_amount * Decimal("0.03")  # 3% platform fee
+                        stripe_fee = (gross_amount * Decimal("0.029")) + Decimal("0.30")  # Stripe fee
                         net_amount = gross_amount - platform_fee - stripe_fee
-                        
+
                         payment_transaction = PaymentTransaction.objects.create(
                             stripe_payment_intent_id=payment_intent_id,
-                            stripe_checkout_session_id='',  # Not available in failed payment intent
+                            stripe_checkout_session_id="",  # Not available in failed payment intent
                             order=order,
                             seller=seller,
                             buyer=order.buyer,
-                            status='pending',  # Set as pending for failed payments
+                            status="pending",  # Set as pending for failed payments
                             gross_amount=gross_amount,
                             platform_fee=platform_fee,
                             stripe_fee=stripe_fee,
                             net_amount=net_amount,
                             currency=currency.lower(),
-                            item_count=data['item_count'],
-                            item_names=', '.join(data['item_names']),
+                            item_count=data["item_count"],
+                            item_names=", ".join(data["item_names"]),
                             payment_failure_code=failure_code,
                             payment_failure_reason=failure_message,
                             notes=f"Payment failed for order {order.id}. Status: pending for retry. Error: {failure_message}",
                             metadata={
-                                'order_id': str(order.id),
-                                'payment_intent_id': payment_intent_id,
-                                'seller_id': str(seller.id),
-                                'buyer_id': str(order.buyer.id),
-                                'failed_at': str(timezone.now())
-                            }
+                                "order_id": str(order.id),
+                                "payment_intent_id": payment_intent_id,
+                                "seller_id": str(seller.id),
+                                "buyer_id": str(order.buyer.id),
+                                "failed_at": str(timezone.now()),
+                            },
                         )
-                        
-                        results['transactions_updated'] += 1
-                        logger.info(f"Created PaymentTransaction {payment_transaction.id} for seller {seller.username} with pending status")
-                        
+
+                        results["transactions_updated"] += 1
+                        logger.info(
+                            f"Created PaymentTransaction {payment_transaction.id} for seller {seller.username} with pending status"
+                        )
+
                 except Exception as transaction_error:
-                    logger.error(f"Error creating PaymentTransaction for failed payment intent {payment_intent_id}: {str(transaction_error)}")
-                    results['errors'].append(f"Failed to create PaymentTransaction: {str(transaction_error)}")
+                    logger.error(
+                        f"Error creating PaymentTransaction for failed payment intent {payment_intent_id}: {str(transaction_error)}"
+                    )
+                    results["errors"].append(f"Failed to create PaymentTransaction: {str(transaction_error)}")
                     # Continue processing even if transaction creation fails
 
             # Update the specific order payment status to failed and reset to pending_payment
-            if order.status in ['pending_payment', 'payment_confirmed']:
-                order.status = 'pending_payment'  # Reset to pending_payment to allow retry
-                order.payment_status = 'failed'
-                order.admin_notes = f"{order.admin_notes}\nPayment attempt failed: {failure_message}. Order reset to pending_payment for retry." if order.admin_notes else f"Payment attempt failed: {failure_message}. Order reset to pending_payment for retry."
-                
-                order.save(update_fields=[
-                    'status', 'payment_status', 'admin_notes', 'updated_at'
-                ])
-                results['orders_updated'] += 1
-                
-                logger.info(f"Updated Order {order_id} payment_status to failed and reset status to pending_payment for retry")
-                
+            if order.status in ["pending_payment", "payment_confirmed"]:
+                order.status = "pending_payment"  # Reset to pending_payment to allow retry
+                order.payment_status = "failed"
+                order.admin_notes = (
+                    f"{order.admin_notes}\nPayment attempt failed: {failure_message}. Order reset to pending_payment for retry."
+                    if order.admin_notes
+                    else f"Payment attempt failed: {failure_message}. Order reset to pending_payment for retry."
+                )
+
+                order.save(update_fields=["status", "payment_status", "admin_notes", "updated_at"])
+                results["orders_updated"] += 1
+
+                logger.info(
+                    f"Updated Order {order_id} payment_status to failed and reset status to pending_payment for retry"
+                )
+
                 # TODO: Send email notification to buyer about payment failure with retry option
                 # send_payment_failure_notification_email(order.buyer, order, failure_message)
             else:
-                logger.info(f"Order {order_id} status is {order.status}, not pending_payment - skipping payment status update")
-                
+                logger.info(
+                    f"Order {order_id} status is {order.status}, not pending_payment - skipping payment status update"
+                )
+
     except Exception as e:
-        results['success'] = False
-        results['errors'].append(f"Error updating payment intent failed: {str(e)}")
+        results["success"] = False
+        results["errors"].append(f"Error updating payment intent failed: {str(e)}")
         logger.error(f"Error in handle_payment_intent_failed: {e}")
         raise
-    
+
     return results

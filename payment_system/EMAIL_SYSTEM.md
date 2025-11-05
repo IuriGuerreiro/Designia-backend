@@ -16,7 +16,7 @@ This email system automatically sends receipt emails to customers when they make
 
 - **Rate Limiting**: Prevents email spam using existing authentication rate limiting system
   - Order receipts: 5-minute cooldown
-  - Status updates: 5-minute cooldown  
+  - Status updates: 5-minute cooldown
   - Cancellations: 5-minute cooldown
 - **Error Handling**: Graceful fallbacks that don't break order processing
 - **Development Mode**: Console output for testing (EMAIL_BACKEND=console)

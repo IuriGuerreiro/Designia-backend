@@ -10,11 +10,11 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         token = super().get_token(user)
 
         # Add custom claims
-        token['role'] = user.role
-        token['is_seller'] = user.role == 'seller'
-        token['is_admin'] = user.role == 'admin' or user.is_superuser
-        token['first_name'] = user.first_name
-        token['last_name'] = user.last_name
+        token["role"] = user.role
+        token["is_seller"] = user.role == "seller"
+        token["is_admin"] = user.role == "admin" or user.is_superuser
+        token["first_name"] = user.first_name
+        token["last_name"] = user.last_name
 
         return token
 
@@ -26,11 +26,11 @@ class CustomRefreshToken(RefreshToken):
     def for_user(cls, user):
         """Create refresh token with custom claims"""
         token = cls()
-        token['user_id'] = user.id
-        token['role'] = user.role
-        token['is_seller'] = user.role == 'seller'
-        token['is_admin'] = user.role == 'admin' or user.is_superuser
-        token['first_name'] = user.first_name
-        token['last_name'] = user.last_name
+        token["user_id"] = user.id
+        token["role"] = user.role
+        token["is_seller"] = user.role == "seller"
+        token["is_admin"] = user.role == "admin" or user.is_superuser
+        token["first_name"] = user.first_name
+        token["last_name"] = user.last_name
 
         return token

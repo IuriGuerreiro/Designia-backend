@@ -1,11 +1,11 @@
-import os
 import logging
-from django.template.loader import render_to_string
-from django.utils.html import strip_tags
-from django.conf import settings
-from django.utils import timezone
+import os
 from datetime import timedelta
-from marketplace.models import Order
+
+from django.conf import settings
+from django.template.loader import render_to_string
+from django.utils import timezone
+
 from authentication.models import EmailRequestAttempt
 from authentication.utils import get_client_ip
 from utils.email_utils import send_email
@@ -13,42 +13,35 @@ from utils.email_utils import send_email
 logger = logging.getLogger(__name__)
 
 
-def get_email_rate_limit_status_for_receipts(user, email, request_type='order_receipt'):
+def get_email_rate_limit_status_for_receipts(user, email, request_type="order_receipt"):
     """
     Check rate limit status for order receipt emails
     Returns (can_send, time_remaining_seconds)
     """
     # Check for recent receipt email attempts (within last 5 minutes)
     five_minutes_ago = timezone.now() - timedelta(minutes=5)
-    
+
     recent_attempts = EmailRequestAttempt.objects.filter(
-        user=user,
-        request_type=request_type,
-        created_at__gte=five_minutes_ago
+        user=user, request_type=request_type, created_at__gte=five_minutes_ago
     )
-    
+
     if recent_attempts.exists():
         # Calculate time remaining
-        latest_attempt = recent_attempts.order_by('-created_at').first()
+        latest_attempt = recent_attempts.order_by("-created_at").first()
         time_since_last = timezone.now() - latest_attempt.created_at
         time_remaining = timedelta(minutes=5) - time_since_last
         time_remaining_seconds = int(time_remaining.total_seconds())
-        
+
         return False, max(0, time_remaining_seconds)
-    
+
     return True, 0
 
 
-def record_email_attempt_for_receipts(user, email, request_type='order_receipt', request=None):
+def record_email_attempt_for_receipts(user, email, request_type="order_receipt", request=None):
     """Record an order receipt email attempt for rate limiting"""
     ip_address = get_client_ip(request) if request else None
-    
-    EmailRequestAttempt.objects.create(
-        user=user,
-        email=email,
-        request_type=request_type,
-        ip_address=ip_address
-    )
+
+    EmailRequestAttempt.objects.create(user=user, email=email, request_type=request_type, ip_address=ip_address)
 
 
 def send_order_receipt_email(order, request=None):
@@ -58,32 +51,35 @@ def send_order_receipt_email(order, request=None):
     """
     try:
         user = order.buyer
-        
+
         # Check rate limit to prevent spam
         can_send, time_remaining = get_email_rate_limit_status_for_receipts(user, user.email)
         if not can_send:
             logger.warning(f"Rate limit exceeded for receipt email to {user.email}. Time remaining: {time_remaining}s")
-            return False, f"Rate limit exceeded. Please wait {time_remaining} seconds before requesting another receipt."
-        
+            return (
+                False,
+                f"Rate limit exceeded. Please wait {time_remaining} seconds before requesting another receipt.",
+            )
+
         # Record the attempt
-        record_email_attempt_for_receipts(user, user.email, 'order_receipt', request)
-        
+        record_email_attempt_for_receipts(user, user.email, "order_receipt", request)
+
         # Get frontend URL for links in email
         frontend_url = settings.FRONTEND_URL
-        
+
         # Prepare email context
         context = {
-            'order': order,
-            'user': user,
-            'frontend_url': frontend_url,
-            'support_email': 'support@designia.com',
-            'company_name': 'Designia',
+            "order": order,
+            "user": user,
+            "frontend_url": frontend_url,
+            "support_email": "support@designia.com",
+            "company_name": "Designia",
         }
-        
+
         # Render email templates
-        html_content = render_to_string('payment_system/emails/order_receipt.html', context)
-        text_content = render_to_string('payment_system/emails/order_receipt.txt', context)
-        
+        html_content = render_to_string("payment_system/emails/order_receipt.html", context)
+        text_content = render_to_string("payment_system/emails/order_receipt.txt", context)
+
         # Email details
         subject = f"Order Receipt #{str(order.id)[:8]} - Designia"
         to_email = [user.email]
@@ -100,7 +96,7 @@ def send_order_receipt_email(order, request=None):
             return True, "Order receipt email sent successfully"
         logger.error(f"Failed to send order receipt email to {user.email}: {info}")
         return False, f"Failed to send receipt email: {info}"
-    
+
     except Exception as e:
         logger.error(f"Error in send_order_receipt_email: {str(e)}")
         return False, f"Error sending receipt email: {str(e)}"
@@ -113,57 +109,60 @@ def send_order_status_update_email(order, previous_status, new_status, request=N
     """
     try:
         user = order.buyer
-        
+
         # Only send emails for important status changes
-        important_statuses = ['shipped', 'delivered', 'cancelled', 'refunded']
+        important_statuses = ["shipped", "delivered", "cancelled", "refunded"]
         if new_status not in important_statuses:
             return True, "Status update email not required for this status"
-        
+
         # Check rate limit
-        can_send, time_remaining = get_email_rate_limit_status_for_receipts(user, user.email, 'order_status_update')
+        can_send, time_remaining = get_email_rate_limit_status_for_receipts(user, user.email, "order_status_update")
         if not can_send:
             logger.warning(f"Rate limit exceeded for status update email to {user.email}")
-            return False, f"Rate limit exceeded for status updates"
-        
+            return False, "Rate limit exceeded for status updates"
+
         # Record the attempt
-        record_email_attempt_for_receipts(user, user.email, 'order_status_update', request)
-        
+        record_email_attempt_for_receipts(user, user.email, "order_status_update", request)
+
         # Get frontend URL
         frontend_url = settings.FRONTEND_URL
-        
+
         # Prepare status-specific content
         status_messages = {
-            'shipped': {
-                'emoji': '🚚',
-                'title': 'Your Order Has Been Shipped!',
-                'message': 'Great news! Your order is on its way to you.',
+            "shipped": {
+                "emoji": "🚚",
+                "title": "Your Order Has Been Shipped!",
+                "message": "Great news! Your order is on its way to you.",
             },
-            'delivered': {
-                'emoji': '📦',
-                'title': 'Your Order Has Been Delivered!',
-                'message': 'Your order has been successfully delivered. We hope you love your purchase!',
+            "delivered": {
+                "emoji": "📦",
+                "title": "Your Order Has Been Delivered!",
+                "message": "Your order has been successfully delivered. We hope you love your purchase!",
             },
-            'cancelled': {
-                'emoji': '❌',
-                'title': 'Your Order Has Been Cancelled',
-                'message': 'Your order has been cancelled. If you had paid, a refund will be processed.',
+            "cancelled": {
+                "emoji": "❌",
+                "title": "Your Order Has Been Cancelled",
+                "message": "Your order has been cancelled. If you had paid, a refund will be processed.",
             },
-            'refunded': {
-                'emoji': '💰',
-                'title': 'Your Order Has Been Refunded',
-                'message': 'Your refund has been processed and should appear in your account soon.',
-            }
+            "refunded": {
+                "emoji": "💰",
+                "title": "Your Order Has Been Refunded",
+                "message": "Your refund has been processed and should appear in your account soon.",
+            },
         }
-        
-        status_info = status_messages.get(new_status, {
-            'emoji': '📋',
-            'title': f'Order Status Updated',
-            'message': f'Your order status has been updated to {new_status.replace("_", " ").title()}.',
-        })
-        
+
+        status_info = status_messages.get(
+            new_status,
+            {
+                "emoji": "📋",
+                "title": "Order Status Updated",
+                "message": f'Your order status has been updated to {new_status.replace("_", " ").title()}.',
+            },
+        )
+
         # Subject line
         subject = f"{status_info['emoji']} {status_info['title']} - Order #{str(order.id)[:8]}"
-        
+
         # Compose text content; using shared util to handle send + console fallback
         text_content = f"""
 Hello {user.first_name or user.username},
@@ -191,11 +190,13 @@ This is an automated message. For support, contact us at support@designia.com
             recipient_list=[user.email],
         )
         if ok:
-            logger.info(f"Status update email sent to {user.email} for order {order.id} ({previous_status} → {new_status})")
+            logger.info(
+                f"Status update email sent to {user.email} for order {order.id} ({previous_status} → {new_status})"
+            )
             return True, "Status update email sent successfully"
         logger.error(f"Failed to send status update email: {info}")
         return False, f"Failed to send status update email: {info}"
-    
+
     except Exception as e:
         logger.error(f"Error in send_order_status_update_email: {str(e)}")
         return False, f"Error sending status update email: {str(e)}"
@@ -208,25 +209,29 @@ def send_order_cancellation_receipt_email(order, cancellation_reason, refund_amo
     """
     try:
         user = order.buyer
-        
+
         # Check rate limit
-        can_send, time_remaining = get_email_rate_limit_status_for_receipts(user, user.email, 'order_cancellation')
+        can_send, time_remaining = get_email_rate_limit_status_for_receipts(user, user.email, "order_cancellation")
         if not can_send:
             logger.warning(f"Rate limit exceeded for cancellation email to {user.email}")
-            return False, f"Rate limit exceeded for cancellation emails"
-        
+            return False, "Rate limit exceeded for cancellation emails"
+
         # Record the attempt
-        record_email_attempt_for_receipts(user, user.email, 'order_cancellation', request)
-        
+        record_email_attempt_for_receipts(user, user.email, "order_cancellation", request)
+
         # Get frontend URL
         frontend_url = settings.FRONTEND_URL
-        
+
         # Subject line
         subject = f" Order Cancelled - #{str(order.id)[:8]} | Refund Processing"
-        
+
         # Send email via shared util
-        refund_text = f"\n\nREFUND INFORMATION:\nA refund of ${refund_amount} has been processed and will appear in your account within 5-10 business days." if refund_amount else ""
-        
+        refund_text = (
+            f"\n\nREFUND INFORMATION:\nA refund of ${refund_amount} has been processed and will appear in your account within 5-10 business days."
+            if refund_amount
+            else ""
+        )
+
         text_content = f"""
 Hello {user.first_name or user.username},
 
@@ -259,7 +264,7 @@ This is an automated message. For support, contact us at support@designia.com
             return True, "Cancellation email sent successfully"
         logger.error(f"Failed to send cancellation email: {info}")
         return False, f"Failed to send cancellation email: {info}"
-    
+
     except Exception as e:
         logger.error(f"Error in send_order_cancellation_receipt_email: {str(e)}")
         return False, f"Error sending cancellation email: {str(e)}"
@@ -272,23 +277,25 @@ def send_failed_refund_notification_email(order, failure_reason, refund_amount=N
     """
     try:
         user = order.buyer
-        
+
         # Check rate limit
-        can_send, time_remaining = get_email_rate_limit_status_for_receipts(user, user.email, 'failed_refund_notification')
+        can_send, time_remaining = get_email_rate_limit_status_for_receipts(
+            user, user.email, "failed_refund_notification"
+        )
         if not can_send:
             logger.warning(f"Rate limit exceeded for failed refund notification email to {user.email}")
-            return False, f"Rate limit exceeded for failed refund notifications"
-        
+            return False, "Rate limit exceeded for failed refund notifications"
+
         # Record the attempt
-        record_email_attempt_for_receipts(user, user.email, 'failed_refund_notification', request)
-        
+        record_email_attempt_for_receipts(user, user.email, "failed_refund_notification", request)
+
         # Get frontend URL
         frontend_url = settings.FRONTEND_URL
-        support_email = os.getenv('SUPPORT_EMAIL', 'support@designia.com')
-        
+        support_email = os.getenv("SUPPORT_EMAIL", "support@designia.com")
+
         # Subject line
         subject = f" Refund Processing Failed - Order #{str(order.id)[:8]} - Action Required"
-        
+
         text_content = f"""
 Hello {user.first_name or user.username},
 
@@ -335,7 +342,7 @@ For immediate assistance, contact us at {support_email}
             return True, "Failed refund notification email sent successfully"
         logger.error(f"Failed to send failed refund notification email: {info}")
         return False, f"Failed to send failed refund notification email: {info}"
-    
+
     except Exception as e:
         logger.error(f"Error in send_failed_refund_notification_email: {str(e)}")
         return False, f"Error sending failed refund notification email: {str(e)}"

@@ -6,43 +6,62 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('activity', '0001_initial'),
+        ("activity", "0001_initial"),
     ]
 
     operations = [
         migrations.RenameIndex(
-            model_name='activitysummary',
-            new_name='activity_ac_product_bbb39e_idx',
-            old_name='activity_ac_product_dc04b5_idx',
+            model_name="activitysummary",
+            new_name="activity_ac_product_bbb39e_idx",
+            old_name="activity_ac_product_dc04b5_idx",
         ),
         migrations.RenameIndex(
-            model_name='activitysummary',
-            new_name='activity_ac_period__f66da4_idx',
-            old_name='activity_ac_period__ab4f9b_idx',
+            model_name="activitysummary",
+            new_name="activity_ac_period__f66da4_idx",
+            old_name="activity_ac_period__ab4f9b_idx",
         ),
         migrations.RenameIndex(
-            model_name='userclick',
-            new_name='activity_us_product_a03e99_idx',
-            old_name='activity_us_product_f79df3_idx',
+            model_name="userclick",
+            new_name="activity_us_product_a03e99_idx",
+            old_name="activity_us_product_f79df3_idx",
         ),
         migrations.RenameIndex(
-            model_name='userclick',
-            new_name='activity_us_user_id_22fa04_idx',
-            old_name='activity_us_user_id_31a8a8_idx',
+            model_name="userclick",
+            new_name="activity_us_user_id_22fa04_idx",
+            old_name="activity_us_user_id_31a8a8_idx",
         ),
         migrations.RenameIndex(
-            model_name='userclick',
-            new_name='activity_us_session_985d3b_idx',
-            old_name='activity_us_session_d9f9e7_idx',
+            model_name="userclick",
+            new_name="activity_us_session_985d3b_idx",
+            old_name="activity_us_session_d9f9e7_idx",
         ),
         migrations.RenameIndex(
-            model_name='userclick',
-            new_name='activity_us_created_351b59_idx',
-            old_name='activity_us_created_b96f92_idx',
+            model_name="userclick",
+            new_name="activity_us_created_351b59_idx",
+            old_name="activity_us_created_b96f92_idx",
         ),
         migrations.AlterField(
-            model_name='userclick',
-            name='action',
-            field=models.CharField(choices=[('view', 'Product View'), ('listing_view', 'Product Listing View'), ('detail_view', 'Product Detail View'), ('click', 'Product Click'), ('favorite', 'Add to Favorites'), ('unfavorite', 'Remove from Favorites'), ('cart_add', 'Add to Cart'), ('cart_remove', 'Remove from Cart'), ('purchase', 'Product Purchase'), ('search_view', 'Search Result View'), ('category_view', 'Category Listing View'), ('share', 'Product Share'), ('review', 'Product Review'), ('contact_seller', 'Contact Seller'), ('image_view', 'Product Image View')], max_length=30),
+            model_name="userclick",
+            name="action",
+            field=models.CharField(
+                choices=[
+                    ("view", "Product View"),
+                    ("listing_view", "Product Listing View"),
+                    ("detail_view", "Product Detail View"),
+                    ("click", "Product Click"),
+                    ("favorite", "Add to Favorites"),
+                    ("unfavorite", "Remove from Favorites"),
+                    ("cart_add", "Add to Cart"),
+                    ("cart_remove", "Remove from Cart"),
+                    ("purchase", "Product Purchase"),
+                    ("search_view", "Search Result View"),
+                    ("category_view", "Category Listing View"),
+                    ("share", "Product Share"),
+                    ("review", "Product Review"),
+                    ("contact_seller", "Contact Seller"),
+                    ("image_view", "Product Image View"),
+                ],
+                max_length=30,
+            ),
         ),
     ]

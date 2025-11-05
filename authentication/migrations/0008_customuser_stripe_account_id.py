@@ -6,13 +6,13 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('authentication', '0007_add_order_email_types'),
+        ("authentication", "0007_add_order_email_types"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='customuser',
-            name='stripe_account_id',
+            model_name="customuser",
+            name="stripe_account_id",
             field=models.CharField(blank=True, max_length=255, null=True, unique=True),
         ),
     ]

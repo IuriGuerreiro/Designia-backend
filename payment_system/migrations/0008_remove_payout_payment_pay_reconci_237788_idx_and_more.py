@@ -6,56 +6,56 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('payment_system', '0007_payout_last_retry_at_payout_performance_metrics_and_more'),
+        ("payment_system", "0007_payout_last_retry_at_payout_performance_metrics_and_more"),
     ]
 
     operations = [
         migrations.RemoveIndex(
-            model_name='payout',
-            name='payment_pay_reconci_237788_idx',
+            model_name="payout",
+            name="payment_pay_reconci_237788_idx",
         ),
         migrations.RemoveIndex(
-            model_name='payout',
-            name='payment_pay_process_f0520b_idx',
+            model_name="payout",
+            name="payment_pay_process_f0520b_idx",
         ),
         migrations.RemoveIndex(
-            model_name='payout',
-            name='payment_pay_retry_c_7c7c8e_idx',
+            model_name="payout",
+            name="payment_pay_retry_c_7c7c8e_idx",
         ),
         migrations.RemoveField(
-            model_name='payout',
-            name='last_retry_at',
+            model_name="payout",
+            name="last_retry_at",
         ),
         migrations.RemoveField(
-            model_name='payout',
-            name='performance_metrics',
+            model_name="payout",
+            name="performance_metrics",
         ),
         migrations.RemoveField(
-            model_name='payout',
-            name='processing_completed_at',
+            model_name="payout",
+            name="processing_completed_at",
         ),
         migrations.RemoveField(
-            model_name='payout',
-            name='processing_duration_ms',
+            model_name="payout",
+            name="processing_duration_ms",
         ),
         migrations.RemoveField(
-            model_name='payout',
-            name='processing_started_at',
+            model_name="payout",
+            name="processing_started_at",
         ),
         migrations.RemoveField(
-            model_name='payout',
-            name='reconciled_at',
+            model_name="payout",
+            name="reconciled_at",
         ),
         migrations.RemoveField(
-            model_name='payout',
-            name='reconciliation_status',
+            model_name="payout",
+            name="reconciliation_status",
         ),
         migrations.RemoveField(
-            model_name='payout',
-            name='status_history',
+            model_name="payout",
+            name="status_history",
         ),
         migrations.AddIndex(
-            model_name='payout',
-            index=models.Index(fields=['retry_count'], name='payment_pay_retry_c_45e170_idx'),
+            model_name="payout",
+            index=models.Index(fields=["retry_count"], name="payment_pay_retry_c_45e170_idx"),
         ),
     ]

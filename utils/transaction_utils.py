@@ -11,12 +11,12 @@ Usage Examples:
     def process_payment(payment_data):
         # Your payment logic here
         pass
-    
+
     # Context manager
     with atomic_with_isolation('REPEATABLE READ'):
         # Your transaction logic here
         pass
-    
+
     # High-security financial operations
     @serializable_transaction
     def handle_payout():
@@ -26,59 +26,65 @@ Usage Examples:
 
 import logging
 import time
-from functools import wraps
 from contextlib import contextmanager
-from django.db import transaction, connection, IntegrityError, OperationalError
-from django.conf import settings
+from functools import wraps
+
+from django.db import IntegrityError, OperationalError, connection, transaction
 
 logger = logging.getLogger(__name__)
 
 # MySQL Isolation Levels
 ISOLATION_LEVELS = {
-    'READ_UNCOMMITTED': 'READ UNCOMMITTED',
-    'READ_COMMITTED': 'READ COMMITTED', 
-    'REPEATABLE_READ': 'REPEATABLE READ',
-    'SERIALIZABLE': 'SERIALIZABLE'
+    "READ_UNCOMMITTED": "READ UNCOMMITTED",
+    "READ_COMMITTED": "READ COMMITTED",
+    "REPEATABLE_READ": "REPEATABLE READ",
+    "SERIALIZABLE": "SERIALIZABLE",
 }
+
 
 class TransactionError(Exception):
     """Custom exception for transaction-related errors"""
+
     pass
+
 
 class DeadlockError(TransactionError):
     """Exception raised when a deadlock is detected"""
+
     pass
 
-def set_isolation_level(level='REPEATABLE READ', using='default'):
+
+def set_isolation_level(level="REPEATABLE READ", using="default"):
     """
     Set MySQL transaction isolation level for the current connection.
-    
+
     Args:
-        level (str): One of 'READ UNCOMMITTED', 'READ COMMITTED', 
+        level (str): One of 'READ UNCOMMITTED', 'READ COMMITTED',
                     'REPEATABLE READ', 'SERIALIZABLE'
         using (str): Database alias to use
     """
     if level not in ISOLATION_LEVELS.values():
         raise ValueError(f"Invalid isolation level: {level}. Must be one of {list(ISOLATION_LEVELS.values())}")
-    
+
     try:
         with connection.cursor() as cursor:
             cursor.execute(f"SET SESSION TRANSACTION ISOLATION LEVEL {level}")
         logger.debug(f"Set transaction isolation level to {level}")
     except Exception as e:
         logger.error(f"Failed to set isolation level to {level}: {e}")
-        raise TransactionError(f"Could not set isolation level: {e}")
+        raise TransactionError(f"Could not set isolation level: {e}") from e
 
-@contextmanager 
-def atomic_with_isolation(isolation_level='REPEATABLE READ', using='default', savepoint=True):
+
+@contextmanager
+def atomic_with_isolation(isolation_level="REPEATABLE READ", using="default", savepoint=True):
     """
     Context manager for atomic transactions with custom isolation level.
-    
+
     Args:
         isolation_level (str): MySQL isolation level
         using (str): Database alias
         savepoint (bool): Whether to use savepoints for nested transactions
-        
+
     Usage:
         with atomic_with_isolation('SERIALIZABLE'):
             # Your transaction code here
@@ -93,64 +99,71 @@ def atomic_with_isolation(isolation_level='REPEATABLE READ', using='default', sa
             yield
             logger.debug("Transaction committed successfully")
     except (IntegrityError, OperationalError) as e:
-        
         logger.error(f"Database error in transaction: {e}")
-        raise TransactionError(f"Transaction failed: {e}")
+        raise TransactionError(f"Transaction failed: {e}") from e
     except Exception as e:
         logger.error(f"Unexpected error in transaction: {e}")
         raise
 
+
 def retry_on_deadlock(max_retries=3, delay=0.01, backoff=2.0):
     """
     Decorator to retry operations on deadlock with exponential backoff.
-    
+
     Args:
         max_retries (int): Maximum number of retry attempts
         delay (float): Initial delay between retries in seconds (default: 0.01 = 10ms)
         backoff (float): Backoff multiplier for delay
     """
+
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
             current_delay = delay
             last_exception = None
-            
+
             for attempt in range(max_retries + 1):
                 try:
                     return func(*args, **kwargs)
                 except OperationalError as e:
                     # Check if this is a deadlock error (MySQL error code 1213)
-                    if 'Deadlock found' in str(e) or '1213' in str(e):
+                    if "Deadlock found" in str(e) or "1213" in str(e):
                         last_exception = DeadlockError(f"Deadlock detected: {e}")
                         if attempt < max_retries:
-                            logger.warning(f"Deadlock detected, retrying in {current_delay}s (attempt {attempt + 1}/{max_retries})")
+                            logger.warning(
+                                f"Deadlock detected, retrying in {current_delay}s (attempt {attempt + 1}/{max_retries})"
+                            )
                             time.sleep(current_delay)
                             current_delay *= backoff
                             continue
-                    raise TransactionError(f"Database operation failed: {e}")
-                except Exception as e:
+                    raise TransactionError(f"Database operation failed: {e}") from e
+                except Exception:
                     raise
-            
+
             # If we get here, we've exhausted all retries
             raise last_exception
+
         return wrapper
+
     return decorator
 
-def transactional(isolation_level='REPEATABLE READ', using='default', retry_deadlocks=True):
+
+def transactional(isolation_level="REPEATABLE READ", using="default", retry_deadlocks=True):
     """
     Decorator for automatic transaction wrapping with custom isolation level.
-    
+
     Args:
         isolation_level (str): MySQL isolation level to use
         using (str): Database alias
         retry_deadlocks (bool): Whether to automatically retry on deadlocks
-        
+
     Usage:
         @transactional(isolation_level='SERIALIZABLE')
         def process_payment(order_id, amount):
             # Payment processing logic
             pass
     """
+
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -161,49 +174,53 @@ def transactional(isolation_level='REPEATABLE READ', using='default', retry_dead
             except Exception as e:
                 logger.error(f"Transaction failed in {func.__name__}: {e}")
                 raise
-        
+
         # Apply deadlock retry if requested
         if retry_deadlocks:
             wrapper = retry_on_deadlock()(wrapper)
-        
+
         return wrapper
+
     return decorator
 
-def serializable_transaction(using='default'):
+
+def serializable_transaction(using="default"):
     """
     Decorator for maximum isolation level transactions (SERIALIZABLE).
     Use for financial operations and critical data consistency requirements.
-    
+
     Usage:
         @serializable_transaction
         def handle_stripe_webhook(event_data):
             # Critical financial operation
             pass
     """
-    return transactional(isolation_level='SERIALIZABLE', using=using, retry_deadlocks=True)
+    return transactional(isolation_level="SERIALIZABLE", using=using, retry_deadlocks=True)
 
-def repeatable_read_transaction(using='default'):
+
+def repeatable_read_transaction(using="default"):
     """
     Decorator for REPEATABLE READ isolation level.
     Good balance between consistency and performance.
-    
+
     Usage:
-        @repeatable_read_transaction  
+        @repeatable_read_transaction
         def update_product_metrics(product_id):
             # Product metrics update
             pass
     """
-    return transactional(isolation_level='REPEATABLE READ', using=using, retry_deadlocks=True)
+    return transactional(isolation_level="REPEATABLE READ", using=using, retry_deadlocks=True)
+
 
 @contextmanager
 def rollback_safe_operation(operation_name="Unknown"):
     """
     Context manager that ensures operations can be safely rolled back.
     Provides detailed logging and error context.
-    
+
     Args:
         operation_name (str): Name of the operation for logging
-        
+
     Usage:
         with rollback_safe_operation("Payment Processing"):
             # Operations that might need rollback
@@ -212,7 +229,7 @@ def rollback_safe_operation(operation_name="Unknown"):
     """
     start_time = time.time()
     logger.info(f"Starting rollback-safe operation: {operation_name}")
-    
+
     try:
         yield
         elapsed = time.time() - start_time
@@ -223,16 +240,18 @@ def rollback_safe_operation(operation_name="Unknown"):
         logger.info(f"Rolling back operation: {operation_name}")
         raise
 
+
 def log_transaction_performance(func):
     """
     Decorator to log transaction performance metrics.
-    
+
     Usage:
         @log_transaction_performance
         @transactional()
         def my_database_operation():
             pass
     """
+
     @wraps(func)
     def wrapper(*args, **kwargs):
         start_time = time.time()
@@ -245,14 +264,16 @@ def log_transaction_performance(func):
             elapsed = time.time() - start_time
             logger.error(f"Transaction {func.__name__} failed after {elapsed:.3f}s: {e}")
             raise
+
     return wrapper
+
 
 # Convenience function for common payment operations
 def financial_transaction(func):
     """
     Convenience decorator for financial operations requiring maximum data consistency.
     Combines SERIALIZABLE isolation, deadlock retry, and performance logging.
-    
+
     Usage:
         @financial_transaction
         def process_stripe_payment(payment_intent_id):
@@ -261,12 +282,13 @@ def financial_transaction(func):
     """
     return log_transaction_performance(serializable_transaction()(func))
 
-# Convenience function for product operations  
+
+# Convenience function for product operations
 def product_transaction(func):
     """
     Convenience decorator for product-related operations.
     Uses REPEATABLE READ isolation with deadlock retry.
-    
+
     Usage:
         @product_transaction
         def create_product_with_metrics(product_data):
@@ -275,29 +297,33 @@ def product_transaction(func):
     """
     return log_transaction_performance(repeatable_read_transaction()(func))
 
+
 # Convenience function for payment webhook operations
 def payment_webhook_transaction(func):
     """
     Convenience decorator for payment webhook operations requiring fast deadlock recovery.
     Uses READ COMMITTED isolation with 10ms deadlock retry for optimal webhook processing.
-    
+
     Usage:
         @payment_webhook_transaction
         def handle_stripe_webhook(event_data):
             # Webhook processing logic
             pass
     """
+
     @retry_on_deadlock(max_retries=3, delay=0.01, backoff=2.0)  # 10ms initial delay
     @log_transaction_performance
     def wrapper(*args, **kwargs):
-        with atomic_with_isolation('READ COMMITTED'):
+        with atomic_with_isolation("READ COMMITTED"):
             return func(*args, **kwargs)
+
     return wrapper
 
-def get_current_isolation_level(using='default'):
+
+def get_current_isolation_level(using="default"):
     """
     Get the current transaction isolation level for debugging.
-    
+
     Returns:
         str: Current isolation level
     """
@@ -311,17 +337,18 @@ def get_current_isolation_level(using='default'):
                 # Fallback to older MySQL variable name
                 cursor.execute("SELECT @@tx_isolation")
                 result = cursor.fetchone()[0]
-            
+
             logger.debug(f"Current isolation level: {result}")
             return result
     except Exception as e:
         logger.error(f"Failed to get isolation level: {e}")
         return None
 
+
 # Transaction monitoring utilities
 class TransactionMonitor:
     """Utility class for monitoring transaction performance and deadlocks"""
-    
+
     @staticmethod
     def log_deadlock_info():
         """Log information about recent deadlocks for debugging"""
@@ -329,14 +356,14 @@ class TransactionMonitor:
             with connection.cursor() as cursor:
                 cursor.execute("SHOW ENGINE INNODB STATUS")
                 status = cursor.fetchone()[2]
-                if 'LATEST DETECTED DEADLOCK' in status:
+                if "LATEST DETECTED DEADLOCK" in status:
                     logger.warning("Recent deadlock detected - check INNODB status")
                     # Log relevant parts of the status for debugging
-                    deadlock_section = status.split('LATEST DETECTED DEADLOCK')[1].split('WE ROLL BACK')[0]
+                    deadlock_section = status.split("LATEST DETECTED DEADLOCK")[1].split("WE ROLL BACK")[0]
                     logger.debug(f"Deadlock info: {deadlock_section[:500]}...")
         except Exception as e:
             logger.error(f"Failed to log deadlock info: {e}")
-    
+
     @staticmethod
     def get_transaction_stats():
         """Get current transaction statistics"""
@@ -345,32 +372,36 @@ class TransactionMonitor:
                 # Try different approaches for different MySQL versions
                 try:
                     # Try SHOW STATUS first (works on most MySQL versions)
-                    cursor.execute("""
+                    cursor.execute(
+                        """
                         SHOW STATUS WHERE Variable_name IN (
                             'Com_commit', 'Com_rollback', 'Innodb_deadlocks',
                             'Innodb_lock_timeouts', 'Innodb_row_lock_waits'
                         )
-                    """)
+                    """
+                    )
                     results = cursor.fetchall()
                     stats = dict(results)
                 except Exception:
                     # Fallback to information_schema if available
                     try:
-                        cursor.execute("""
-                            SELECT 
-                                VARIABLE_NAME, 
-                                VARIABLE_VALUE 
-                            FROM information_schema.GLOBAL_STATUS 
+                        cursor.execute(
+                            """
+                            SELECT
+                                VARIABLE_NAME,
+                                VARIABLE_VALUE
+                            FROM information_schema.GLOBAL_STATUS
                             WHERE VARIABLE_NAME IN (
                                 'Com_commit', 'Com_rollback', 'Innodb_deadlocks',
                                 'Innodb_lock_timeouts', 'Innodb_row_lock_waits'
                             )
-                        """)
+                        """
+                        )
                         stats = dict(cursor.fetchall())
                     except Exception:
                         # Return basic stats if specific stats unavailable
-                        stats = {'connection_test': 'success'}
-                
+                        stats = {"connection_test": "success"}
+
                 logger.debug(f"Transaction stats: {stats}")
                 return stats
         except Exception as e:

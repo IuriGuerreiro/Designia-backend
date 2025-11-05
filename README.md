@@ -17,6 +17,7 @@ cd Designia-backend
 python -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt
+pip install -r requirements-dev.txt  # Tools: black, ruff, isort, pre-commit
 ```
 
 2. **Environment Configuration**
@@ -112,6 +113,25 @@ celery -A designiaBackend beat -l info
 source venv/bin/activate
 python manage.py runserver 0.0.0.0:8000
 ```
+
+## 🧹 Code Style & Hooks
+
+This project uses Black, Ruff, and isort with pre-commit to standardize formatting and linting.
+
+Setup once:
+```bash
+pip install -r requirements-dev.txt
+pre-commit install
+```
+
+Run manually anytime:
+```bash
+black .
+isort .
+ruff check --fix .
+```
+
+Pre-commit will automatically run on each commit.
 
 ### Celery Monitoring (Optional)
 ```bash
@@ -320,7 +340,7 @@ print('Result:', async_result.get())
 ## 📦 Key Components
 
 - **Django REST Framework**: API endpoints
-- **Celery + Redis**: Asynchronous task processing  
+- **Celery + Redis**: Asynchronous task processing
 - **Stripe Integration**: Payment processing
 - **MySQL/PostgreSQL**: Database
 - **JWT Authentication**: User authentication
@@ -352,7 +372,7 @@ sudo systemctl start celery-worker celery-beat
 
 For issues related to:
 - **Payment Processing**: Check Stripe dashboard and webhook logs
-- **Task Scheduling**: Monitor Celery logs and Redis connectivity  
+- **Task Scheduling**: Monitor Celery logs and Redis connectivity
 - **Database**: Review Django migrations and model changes
 - **Authentication**: Verify JWT token configuration
 

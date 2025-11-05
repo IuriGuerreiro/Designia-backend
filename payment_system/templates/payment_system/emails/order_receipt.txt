@@ -42,7 +42,7 @@ TOTAL: ${{ order.total_amount }}
 {% endif %}WHAT'S NEXT?
 ============
 • Your order is being prepared for shipment
-• You'll receive tracking information once your items are shipped  
+• You'll receive tracking information once your items are shipped
 • You can track your order status in your account
 
 Track your order: {{ frontend_url }}/my-orders/{{ order.id }}

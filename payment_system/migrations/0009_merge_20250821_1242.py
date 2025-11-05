@@ -6,9 +6,8 @@ from django.db import migrations
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('payment_system', '0007_add_payout_status_choices'),
-        ('payment_system', '0008_remove_payout_payment_pay_reconci_237788_idx_and_more'),
+        ("payment_system", "0007_add_payout_status_choices"),
+        ("payment_system", "0008_remove_payout_payment_pay_reconci_237788_idx_and_more"),
     ]
 
-    operations = [
-    ]
+    operations = []

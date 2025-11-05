@@ -8,22 +8,24 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('marketplace', '0008_consolidate_user_carts'),
+        ("marketplace", "0008_consolidate_user_carts"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
     operations = [
         migrations.AlterModelOptions(
-            name='cart',
-            options={'verbose_name': 'Shopping Cart', 'verbose_name_plural': 'Shopping Carts'},
+            name="cart",
+            options={"verbose_name": "Shopping Cart", "verbose_name_plural": "Shopping Carts"},
         ),
         migrations.RemoveField(
-            model_name='cart',
-            name='locked',
+            model_name="cart",
+            name="locked",
         ),
         migrations.AlterField(
-            model_name='cart',
-            name='user',
-            field=models.OneToOneField(on_delete=django.db.models.deletion.CASCADE, related_name='cart', to=settings.AUTH_USER_MODEL),
+            model_name="cart",
+            name="user",
+            field=models.OneToOneField(
+                on_delete=django.db.models.deletion.CASCADE, related_name="cart", to=settings.AUTH_USER_MODEL
+            ),
         ),
     ]

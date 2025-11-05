@@ -57,9 +57,7 @@ class Migration(migrations.Migration):
                 ),
                 (
                     "social_media_url",
-                    models.URLField(
-                        blank=True, help_text="Social media link (optional)"
-                    ),
+                    models.URLField(blank=True, help_text="Social media link (optional)"),
                 ),
                 (
                     "status",

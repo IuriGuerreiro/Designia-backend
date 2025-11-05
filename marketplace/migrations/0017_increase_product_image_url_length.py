@@ -6,13 +6,13 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('marketplace', '0016_merge_20250821_1531'),
+        ("marketplace", "0016_merge_20250821_1531"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='orderitem',
-            name='product_image',
+            model_name="orderitem",
+            name="product_image",
             field=models.URLField(blank=True, max_length=2000),
         ),
     ]

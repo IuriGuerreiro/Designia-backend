@@ -47,7 +47,7 @@ from django.core.files.uploadedfile import InMemoryUploadedFile
 def upload_product_image(request):
     try:
         image_file = request.FILES['image']
-        
+
         # Upload with automatic key generation
         result = s3_storage.upload_file(
             file_obj=image_file,
@@ -55,10 +55,10 @@ def upload_product_image(request):
             public=True,  # Make publicly accessible
             metadata={'uploaded_by': str(request.user.id)}
         )
-        
+
         print(f"File uploaded successfully: {result['url']}")
         return result
-        
+
     except S3StorageError as e:
         print(f"Upload failed: {str(e)}")
         return None
@@ -75,9 +75,9 @@ def upload_local_file():
             public=False,
             metadata={'source': 'local_upload'}
         )
-        
+
         return result['url']
-        
+
     except S3StorageError as e:
         print(f"Upload failed: {str(e)}")
         return None
@@ -95,9 +95,9 @@ def upload_with_custom_type():
                 content_type="application/pdf",
                 metadata={'document_type': 'legal'}
             )
-            
+
         return result
-        
+
     except S3StorageError as e:
         print(f"Upload failed: {str(e)}")
         return None
@@ -111,13 +111,13 @@ def upload_with_custom_type():
 def download_file_content():
     try:
         content = s3_storage.download_file("products/images/sample.jpg")
-        
+
         # Process the file content (bytes)
         with open('local_copy.jpg', 'wb') as f:
             f.write(content)
-            
+
         return content
-        
+
     except S3StorageError as e:
         print(f"Download failed: {str(e)}")
         return None
@@ -132,12 +132,12 @@ def download_to_file():
             key="documents/report.pdf",
             download_path="/tmp/downloaded_report.pdf"
         )
-        
+
         if success:
             print("File downloaded successfully")
-            
+
         return success
-        
+
     except S3StorageError as e:
         print(f"Download failed: {str(e)}")
         return False
@@ -150,12 +150,12 @@ def download_to_file():
 ```python
 def check_file_existence():
     exists = s3_storage.file_exists("products/images/product_123.jpg")
-    
+
     if exists:
         print("File exists in S3")
     else:
         print("File not found")
-        
+
     return exists
 ```
 
@@ -165,14 +165,14 @@ def check_file_existence():
 def get_file_details():
     try:
         info = s3_storage.get_file_info("products/images/product_123.jpg")
-        
+
         print(f"File size: {info['size']} bytes")
         print(f"Content type: {info['content_type']}")
         print(f"Last modified: {info['last_modified']}")
         print(f"File URL: {info['url']}")
-        
+
         return info
-        
+
     except S3StorageError as e:
         print(f"Error getting file info: {str(e)}")
         return None
@@ -184,12 +184,12 @@ def get_file_details():
 def delete_file():
     try:
         success = s3_storage.delete_file("products/images/old_product.jpg")
-        
+
         if success:
             print("File deleted successfully")
-            
+
         return success
-        
+
     except S3StorageError as e:
         print(f"Delete failed: {str(e)}")
         return False
@@ -204,14 +204,14 @@ def list_product_images():
             prefix="products/images/",
             max_keys=50
         )
-        
+
         print(f"Found {result['count']} files")
-        
+
         for file in result['files']:
             print(f"- {file['key']} ({file['size']} bytes)")
-            
+
         return result['files']
-        
+
     except S3StorageError as e:
         print(f"Listing failed: {str(e)}")
         return []
@@ -227,7 +227,7 @@ def generate_public_url():
         key="products/images/public_product.jpg",
         public=True
     )
-    
+
     print(f"Public URL: {url}")
     return url
 ```
@@ -241,7 +241,7 @@ def generate_presigned_url():
         public=False,
         expires_in=3600  # 1 hour
     )
-    
+
     print(f"Presigned URL (expires in 1 hour): {url}")
     return url
 ```
@@ -257,12 +257,12 @@ def generate_upload_url():
             content_type="image/jpeg",
             file_size_limit=5 * 1024 * 1024  # 5MB limit
         )
-        
+
         print(f"Upload URL: {result['url']}")
         print(f"Form fields: {result['fields']}")
-        
+
         return result
-        
+
     except S3StorageError as e:
         print(f"Error generating upload URL: {str(e)}")
         return None
@@ -278,19 +278,19 @@ def upload_product_image_helper():
     try:
         image_file = request.FILES['product_image']
         product_id = "123e4567-e89b-12d3-a456-426614174000"
-        
+
         result = s3_storage.upload_product_image(
             product_id=product_id,
             image_file=image_file,
             image_type='main'  # 'main', 'gallery', 'thumbnail'
         )
-        
+
         # Save the URL to your product model
         product.image_url = result['url']
         product.save()
-        
+
         return result
-        
+
     except S3StorageError as e:
         print(f"Product image upload failed: {str(e)}")
         return None
@@ -303,18 +303,18 @@ def upload_user_avatar():
     try:
         avatar_file = request.FILES['avatar']
         user_id = str(request.user.id)
-        
+
         result = s3_storage.upload_user_avatar(
             user_id=user_id,
             avatar_file=avatar_file
         )
-        
+
         # Update user profile
         request.user.profile.avatar_url = result['url']
         request.user.profile.save()
-        
+
         return result
-        
+
     except S3StorageError as e:
         print(f"Avatar upload failed: {str(e)}")
         return None
@@ -325,11 +325,11 @@ def upload_user_avatar():
 ```python
 def manage_product_images():
     product_id = "123e4567-e89b-12d3-a456-426614174000"
-    
+
     # List all images for a product
     images = s3_storage.list_product_images(product_id)
     print(f"Product has {len(images)} images")
-    
+
     # Delete all product images (e.g., when product is deleted)
     deleted_count = s3_storage.delete_product_images(product_id)
     print(f"Deleted {deleted_count} images")
@@ -349,12 +349,12 @@ def safe_file_operation():
             file_obj=file_object,
             key="test/file.jpg"
         )
-        
+
         return {
             'success': True,
             'result': result
         }
-        
+
     except S3StorageError as e:
         # Handle S3-specific errors
         return {
@@ -362,7 +362,7 @@ def safe_file_operation():
             'error': str(e),
             'error_type': 'storage'
         }
-        
+
     except Exception as e:
         # Handle unexpected errors
         return {
@@ -387,25 +387,25 @@ def upload_product_image_view(request):
         try:
             image_file = request.FILES['image']
             product_id = request.POST.get('product_id')
-            
+
             result = s3_storage.upload_product_image(
                 product_id=product_id,
                 image_file=image_file,
                 image_type='gallery'
             )
-            
+
             return JsonResponse({
                 'success': True,
                 'url': result['url'],
                 'key': result['key']
             })
-            
+
         except S3StorageError as e:
             return JsonResponse({
                 'success': False,
                 'error': str(e)
             }, status=400)
-    
+
     return JsonResponse({'success': False, 'error': 'Invalid request'}, status=400)
 ```
 
@@ -418,7 +418,7 @@ from utils import s3_storage
 class Product(models.Model):
     name = models.CharField(max_length=200)
     image_url = models.URLField(blank=True)
-    
+
     def upload_image(self, image_file):
         """Upload product image and update URL"""
         try:
@@ -427,15 +427,15 @@ class Product(models.Model):
                 image_file=image_file,
                 image_type='main'
             )
-            
+
             self.image_url = result['url']
             self.save()
-            
+
             return result
-            
+
         except S3StorageError as e:
             raise ValueError(f"Failed to upload image: {str(e)}")
-    
+
     def delete_images(self):
         """Delete all product images from S3"""
         try:
