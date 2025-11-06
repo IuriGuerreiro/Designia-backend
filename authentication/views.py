@@ -514,7 +514,6 @@ def google_login(request):
                     is_active=True,
                 )
                 logger.info(f"New user created for Google account: {google_data['email']}")
-
                 refresh = CustomRefreshToken.for_user(user)
 
                 response_data = {

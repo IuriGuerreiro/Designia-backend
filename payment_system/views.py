@@ -567,7 +567,6 @@ def stripe_webhook(request):  # noqa: C901
                 logger.info(f"  Updated user ID: {result.get('user_id', 'unknown')}")
             else:
                 logger.warning(f"⚠️ Failed to process account update: {result['errors']}")
-
         except Exception as e:
             logger.error(f" Error processing account.updated webhook: {e}")
             # Don't fail the webhook for account update errors
@@ -610,7 +609,6 @@ def stripe_webhook(request):  # noqa: C901
             logger.info(f"   Order ID: {order_id}")
             logger.info(f"   Seller ID: {seller_id}")
             logger.info(f"   Buyer ID: {buyer_id}")
-
             if transaction_id:
                 # Define deadlock-safe operation for transfer success processing
                 @retry_on_deadlock(max_retries=3, delay=0.01, backoff=2.0)  # 10ms deadlock retry
@@ -652,7 +650,6 @@ def stripe_webhook(request):  # noqa: C901
                     except Exception as e:
                         logger.error(f"Failed to create PaymentTracker for transfer {transfer_id}: {e}")
                         logger.error(f" Failed to create PaymentTracker for transfer {transfer_id}: {e}")
-
                     # Since this is transfer.created, the transfer was successfully created
                     # This means the payment is now successfully released to the seller
                     if not reversed:
@@ -714,7 +711,6 @@ def stripe_webhook(request):  # noqa: C901
                         # Transfer was reversed - this would be unusual for a .created event
                         logger.warning(f"[REVERSED] Transfer {transfer_id} was reversed")
                         logger.warning(f"⚠️ Transfer {transfer_id} was reversed - unusual for created event")
-
                     # Update metadata with webhook information (outside main transaction to avoid conflicts)
                     try:
                         if hasattr(payment_transaction, "metadata") and payment_transaction.metadata:

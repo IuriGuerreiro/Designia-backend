@@ -87,4 +87,5 @@ def require_admin(user):
 
 
 def require_seller(user):
+
     require_role(user, [ROLE_SELLER, ROLE_ADMIN])

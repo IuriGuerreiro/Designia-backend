@@ -12,13 +12,11 @@ try:
     GOOGLE_AUTH_AVAILABLE = True
 except ImportError as e:
     GOOGLE_AUTH_AVAILABLE = False
-    logger = logging.getLogger(__name__)
-    logger.warning(f" Google auth libraries import failed: {e}")
-    logger.warning(
-        "Warning: Google auth libraries not available. Install with: pip install google-auth google-auth-oauthlib"
-    )
+    print(f" Google auth libraries import failed: {e}")
+    print("Warning: Google auth libraries not available. Install with: pip install google-auth google-auth-oauthlib")
 
 User = get_user_model()
+logger = logging.getLogger(__name__)
 
 
 class GoogleAuth:
@@ -27,7 +25,6 @@ class GoogleAuth:
         """
         Verify Google ID token and return user information
         """
-        logger = logging.getLogger(__name__)
         logger.info(f"🔍 GOOGLE_AUTH_AVAILABLE status: {GOOGLE_AUTH_AVAILABLE}")
         if not GOOGLE_AUTH_AVAILABLE:
             return None, "Google authentication libraries not installed"
@@ -35,27 +32,27 @@ class GoogleAuth:
         try:
             # Get Google OAuth client ID from environment
             client_id = os.getenv("GOOGLE_OAUTH_CLIENT_ID")
-            logger.debug(f"🔍 Google OAuth Client ID from env: {'***' + client_id[-20:] if client_id else 'NOT SET'}")
+            print(f"🔍 Google OAuth Client ID from env: {'***' + client_id[-20:] if client_id else 'NOT SET'}")
 
             if not client_id:
                 logger.error(" Google OAuth client ID not configured in environment")
                 return None, "Google OAuth client ID not configured"
 
-            logger.info("🔍 Verifying token with client_id...")
+            print("🔍 Verifying token with client_id...")
             # Verify the token
             idinfo = id_token.verify_oauth2_token(token, requests.Request(), client_id)
-            logger.info("  Token verified successfully")
-            logger.debug(f"🔍 Token info - ISS: {idinfo.get('iss')}")
-            logger.debug(f"🔍 Token info - AUD: {idinfo.get('aud')}")
-            logger.debug(f"🔍 Token info - EMAIL: {idinfo.get('email')}")
-            logger.debug(f"🔍 Token info - NAME: {idinfo.get('name')}")
+            print("  Token verified successfully")
+            print(f"🔍 Token info - ISS: {idinfo.get('iss')}")
+            print(f"🔍 Token info - AUD: {idinfo.get('aud')}")
+            print(f"🔍 Token info - EMAIL: {idinfo.get('email')}")
+            print(f"🔍 Token info - NAME: {idinfo.get('name')}")
 
             # Check if the token is issued by Google
             if idinfo["iss"] not in ["accounts.google.com", "https://accounts.google.com"]:
-                logger.error(f" Invalid token issuer: {idinfo['iss']}")
+                print(f" Invalid token issuer: {idinfo['iss']}")
                 return None, "Invalid token issuer"
 
-            logger.info("  Token verification complete - returning user info")
+            print("  Token verification complete - returning user info")
             return idinfo, None
 
         except ValueError as e:
@@ -70,10 +67,9 @@ class GoogleAuth:
         """
         Get or create user from Google user information
         """
-        logger = logging.getLogger(__name__)
-        logger.info("🔍 Getting/creating user from Google info...")
+        print("🔍 Getting/creating user from Google info...")
         email = google_user_info.get("email")
-        logger.debug(f"🔍 User email from Google: {email}")
+        print(f"🔍 User email from Google: {email}")
 
         if not email:
             logger.error(" No email provided by Google")
@@ -88,7 +84,7 @@ class GoogleAuth:
             # we can link their Google account
             return user, None
         except User.DoesNotExist:
-            logger.info("🔍 User doesn't exist, creating new user...")
+            print("🔍 User doesn't exist, creating new user...")
             # Create new user from Google info
             try:
                 user = User.objects.create_user(

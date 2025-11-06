@@ -7,6 +7,8 @@ from django.db.models import Count
 
 logger = logging.getLogger(__name__)
 
+logger = logging.getLogger(__name__)
+
 
 def consolidate_carts(apps, schema_editor):
     """

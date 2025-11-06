@@ -160,7 +160,6 @@ class StripeConnectService:
         """
         logger.info(f"🔄 STRIPE ACCOUNT CREATION START for user: {user.email}")
         logger.info(f"📋 Request parameters: country={country}, business_type={business_type}")
-
         try:
             # First validate user requirements
             logger.info("🔍 Validating user requirements...")
@@ -240,7 +239,6 @@ class StripeConnectService:
             return {"success": False, "errors": [f"Failed to create Stripe account: {str(e)}"]}
         except Exception as e:
             logger.exception(f" UNEXPECTED ERROR creating Stripe account for user {user.email}: {str(e)}")
-
             logger.error(f"Unexpected error creating Stripe account for user {user.email}: {str(e)}")
             return {"success": False, "errors": [f"An unexpected error occurred: {str(e)}"]}
 
@@ -257,7 +255,6 @@ class StripeConnectService:
         """
         logger.info(f"🔄 STRIPE ACCOUNT SESSION CREATION START for user: {user.email}")
         logger.info(f"🆔 User's Stripe Account ID: {user.stripe_account_id}")
-
         try:
             # Validate user requirements for session access (allows existing accounts)
             logger.info("🔍 Validating user session requirements...")
@@ -321,7 +318,6 @@ class StripeConnectService:
             return {"success": False, "errors": [f"Failed to create account session: {str(e)}"]}
         except Exception as e:
             logger.exception(f" UNEXPECTED ERROR in session creation for user {user.email}: {str(e)}")
-
             logger.error(f"Unexpected error creating account session for user {user.email}: {str(e)}")
             return {"success": False, "errors": [f"An unexpected error occurred: {str(e)}"]}
 

@@ -29,7 +29,6 @@ factory = RequestFactory()
 
 def test_product_creation():
     logger.info("=== DJANGO DEBUG TEST START ===")
-
     # Get or create a test user
     user, created = User.objects.get_or_create(
         email="test@example.com", defaults={"username": "testuser", "first_name": "Test", "last_name": "User"}

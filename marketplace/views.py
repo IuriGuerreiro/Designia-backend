@@ -633,7 +633,6 @@ class ProductViewSet(viewsets.ModelViewSet):
         else:
             logger.info("No images found for this product")
             logger.warning(f"⚠️  No images found for product: {instance.name}")
-
         response = Response(response_data)
 
         # Queue async tracking AFTER response is ready
