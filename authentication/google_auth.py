@@ -1,19 +1,8 @@
 import logging
-import os
 
 from django.contrib.auth import get_user_model
-from rest_framework_simplejwt.tokens import RefreshToken
 
-# Import Google auth modules only when needed to avoid import errors
-try:
-    from google.auth.transport import requests
-    from google.oauth2 import id_token
-
-    GOOGLE_AUTH_AVAILABLE = True
-except ImportError as e:
-    GOOGLE_AUTH_AVAILABLE = False
-    print(f" Google auth libraries import failed: {e}")
-    print("Warning: Google auth libraries not available. Install with: pip install google-auth google-auth-oauthlib")
+from .services import google_oauth as google_service
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -22,92 +11,15 @@ logger = logging.getLogger(__name__)
 class GoogleAuth:
     @staticmethod
     def verify_google_token(token):
-        """
-        Verify Google ID token and return user information
-        """
-        logger.info(f"🔍 GOOGLE_AUTH_AVAILABLE status: {GOOGLE_AUTH_AVAILABLE}")
-        if not GOOGLE_AUTH_AVAILABLE:
-            return None, "Google authentication libraries not installed"
-
-        try:
-            # Get Google OAuth client ID from environment
-            client_id = os.getenv("GOOGLE_OAUTH_CLIENT_ID")
-            print(f"🔍 Google OAuth Client ID from env: {'***' + client_id[-20:] if client_id else 'NOT SET'}")
-
-            if not client_id:
-                logger.error(" Google OAuth client ID not configured in environment")
-                return None, "Google OAuth client ID not configured"
-
-            print("🔍 Verifying token with client_id...")
-            # Verify the token
-            idinfo = id_token.verify_oauth2_token(token, requests.Request(), client_id)
-            print("  Token verified successfully")
-            print(f"🔍 Token info - ISS: {idinfo.get('iss')}")
-            print(f"🔍 Token info - AUD: {idinfo.get('aud')}")
-            print(f"🔍 Token info - EMAIL: {idinfo.get('email')}")
-            print(f"🔍 Token info - NAME: {idinfo.get('name')}")
-
-            # Check if the token is issued by Google
-            if idinfo["iss"] not in ["accounts.google.com", "https://accounts.google.com"]:
-                print(f" Invalid token issuer: {idinfo['iss']}")
-                return None, "Invalid token issuer"
-
-            print("  Token verification complete - returning user info")
-            return idinfo, None
-
-        except ValueError as e:
-            logger.error(f" Token validation error: {str(e)}")
-            return None, f"Invalid token: {str(e)}"
-        except Exception as e:
-            logger.exception(f" Token verification exception: {str(e)}")
-            return None, f"Token verification failed: {str(e)}"
+        """Delegate Google token verification to service layer."""
+        return google_service.verify_google_token(token)
 
     @staticmethod
     def get_or_create_user(google_user_info):
-        """
-        Get or create user from Google user information
-        """
-        print("🔍 Getting/creating user from Google info...")
-        email = google_user_info.get("email")
-        print(f"🔍 User email from Google: {email}")
-
-        if not email:
-            logger.error(" No email provided by Google")
-            return None, "Email not provided by Google"
-
-        # Check if user already exists
-        logger.info(f"🔍 Checking if user exists with email: {email}")
-        try:
-            user = User.objects.get(email=email)
-            logger.info(f"  Existing user found: {user.email}")
-            # If user exists but signed up with regular registration,
-            # we can link their Google account
-            return user, None
-        except User.DoesNotExist:
-            print("🔍 User doesn't exist, creating new user...")
-            # Create new user from Google info
-            try:
-                user = User.objects.create_user(
-                    username=email,  # Use email as username
-                    email=email,
-                    first_name=google_user_info.get("given_name", ""),
-                    last_name=google_user_info.get("family_name", ""),
-                    is_email_verified=True,  # Google accounts are pre-verified
-                    is_active=True,  # Google users are immediately active
-                )
-                logger.info(f"  New user created: {user.email}")
-                return user, None
-            except Exception as e:
-                logger.error(f" User creation failed: {str(e)}")
-                return None, f"Failed to create user: {str(e)}"
+        """Delegate Google user get/create to service layer."""
+        return google_service.get_or_create_user(google_user_info)
 
     @staticmethod
     def generate_tokens(user):
-        """
-        Generate JWT tokens for the user
-        """
-        refresh = RefreshToken.for_user(user)
-        return {
-            "access": str(refresh.access_token),
-            "refresh": str(refresh),
-        }
+        """Delegate token generation to service layer."""
+        return google_service.generate_tokens(user)

@@ -1,0 +1,1 @@
+"""Activity app service layer."""

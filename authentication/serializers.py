@@ -190,7 +190,12 @@ class UserSerializer(serializers.ModelSerializer):
         logger.info(f"Validated data received: {validated_data}")
 
         profile_data = validated_data.pop("profile", {})
-        logger.info(f"Profile data extracted: {profile_data}")
+        # Do not log raw profile payload
+        try:
+            profile_keys = list((profile_data or {}).keys())
+        except Exception:
+            profile_keys = []
+        logger.info("Profile data keys received: %s", profile_keys)
 
         # Ensure profile exists
         if not hasattr(instance, "profile") or instance.profile is None:
@@ -207,28 +212,22 @@ class UserSerializer(serializers.ModelSerializer):
         user_changes = []
 
         if "first_name" in validated_data:
-            old_value = instance.first_name
-            new_value = validated_data["first_name"]
-            instance.first_name = new_value
-            user_changes.append(f"first_name: '{old_value}' → '{new_value}'")
+            instance.first_name = validated_data["first_name"]
+            user_changes.append("first_name")
             user_updated = True
 
         if "last_name" in validated_data:
-            old_value = instance.last_name
-            new_value = validated_data["last_name"]
-            instance.last_name = new_value
-            user_changes.append(f"last_name: '{old_value}' → '{new_value}'")
+            instance.last_name = validated_data["last_name"]
+            user_changes.append("last_name")
             user_updated = True
 
         if "username" in validated_data:
-            old_value = instance.username
-            new_value = validated_data["username"]
-            instance.username = new_value
-            user_changes.append(f"username: '{old_value}' → '{new_value}'")
+            instance.username = validated_data["username"]
+            user_changes.append("username")
             user_updated = True
 
         if user_updated:
-            logger.info(f"User fields being updated: {user_changes}")
+            logger.info("User fields being updated: %s", user_changes)
             try:
                 instance.save()
                 logger.info("User instance saved successfully")
@@ -246,15 +245,15 @@ class UserSerializer(serializers.ModelSerializer):
             for field_name, field_value in profile_data.items():
                 # Only update if the field exists on the model
                 if hasattr(profile, field_name):
-                    old_value = getattr(profile, field_name)
+                    _old_value = getattr(profile, field_name)
                     setattr(profile, field_name, field_value)
-                    profile_changes.append(f"{field_name}: '{old_value}' → '{field_value}'")
+                    profile_changes.append(field_name)
                     profile_updated = True
                 else:
                     logger.warning(f"Profile field '{field_name}' does not exist on model, skipping")
 
             if profile_updated:
-                logger.info(f"Profile fields being updated: {profile_changes}")
+                logger.info("Profile fields being updated: %s", profile_changes)
                 old_completion = profile.profile_completion_percentage
                 profile.save()  # This will trigger calculate_profile_completion()
                 profile.refresh_from_db()  # Get updated completion percentage
@@ -266,10 +265,11 @@ class UserSerializer(serializers.ModelSerializer):
 
         except Exception as e:
             logger.error(f"Error updating profile: {str(e)}")
-            logger.error(f"Profile data that caused error: {profile_data}")
+            # Avoid logging raw profile payload; include only field names
+            logger.error("Profile fields present at error: %s", profile_keys)
             raise serializers.ValidationError(f"Error updating profile: {str(e)}") from e
 
-        logger.info("=== PROFILE UPDATE DEBUG END ===")
+        # End of profile update (no payload logged)
         return instance
 
 

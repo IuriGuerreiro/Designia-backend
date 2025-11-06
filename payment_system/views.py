@@ -36,6 +36,7 @@ from .models import PaymentTracker, PaymentTransaction, Payout, PayoutItem
 
 # Import security utilities
 from .security import PaymentAuditLogger
+from .services import stripe_events
 
 # Set the Stripe API key from Django settings
 stripe.api_key = settings.STRIPE_SECRET_KEY
@@ -112,6 +113,11 @@ def stripe_webhook(request):  # noqa: C901
         logger.info(
             f"Webhook signature verified successfully for event: {event.get('type', 'unknown')} from IP {client_ip}"
         )
+        # Delegate safe event logging to service layer (no payloads)
+        try:
+            stripe_events.handle_event(event)
+        except Exception:  # pragma: no cover - defensive logging only
+            logger.warning("Stripe event logging via service failed; continuing")
     except stripe.error.SignatureVerificationError as e:
         PaymentAuditLogger.log_security_event(
             "webhook_signature_failed", client_ip, details=f"Signature verification failed: {str(e)}"
@@ -759,38 +765,38 @@ def stripe_webhook(request):  # noqa: C901
     elif event.type == "payment_intent.succeeded":
         payment_intent = event.data.object
 
-        print("🔔 ==================== PAYMENT INTENT SUCCEEDED ====================")
-        print(f"🔔 Event Type: {event.type}")
-        print(f"🔔 Event ID: {getattr(event, 'id', 'unknown')}")
-        print(f"🔔 Payment Intent ID: {getattr(payment_intent, 'id', 'unknown')}")
-        print(f"🔔 Amount: {getattr(payment_intent, 'amount', 0)}")
-        print(f"🔔 Currency: {getattr(payment_intent, 'currency', 'unknown')}")
-        print(f"🔔 Status: {getattr(payment_intent, 'status', 'unknown')}")
+        logger.info(
+            "payment_intent.succeeded received (id=%s, amount=%s, currency=%s, status=%s)",
+            getattr(payment_intent, "id", "unknown"),
+            getattr(payment_intent, "amount", 0),
+            getattr(payment_intent, "currency", "unknown"),
+            getattr(payment_intent, "status", "unknown"),
+        )
 
         try:
             # Process payment intent succeeded event using transaction utilities
             result = handle_payment_intent_succeeded(payment_intent)
             if result["success"]:
-                print("  Payment intent succeeded processing completed")
-                print(f"  Updated trackers: {result.get('trackers_updated', 0)}")
-                print(f"  Updated transactions: {result.get('transactions_updated', 0)}")
-                print(f"  Updated orders: {result.get('orders_updated', 0)}")
+                logger.info(
+                    "Payment intent succeeded processed (trackers=%s, transactions=%s, orders=%s)",
+                    result.get("trackers_updated", 0),
+                    result.get("transactions_updated", 0),
+                    result.get("orders_updated", 0),
+                )
                 return HttpResponse(
                     status=200, content="Payment intent succeeded processed successfully.".encode("utf-8")
                 )
             else:
-                print(f"⚠️ Payment intent succeeded processing had issues: {result.get('errors', [])}")
+                logger.warning("Payment intent succeeded processed with issues: %s", result.get("errors", []))
                 return HttpResponse(
                     status=200, content="payment_intent.succeeded event processed with issues".encode("utf-8")
                 )
         except Exception as e:
-            print(f" Error processing payment_intent.succeeded: {e}")
             logger.error(f"Error processing payment_intent.succeeded: {e}")
             return HttpResponse(
                 status=200, content="payment_intent.succeeded event processed with errors".encode("utf-8")
             )
 
-        print("🔔 ================================================================")
         return HttpResponse(
             status=200, content="payment_intent.succeeded event successfully processed".encode("utf-8")
         )
@@ -799,53 +805,55 @@ def stripe_webhook(request):  # noqa: C901
     elif event.type == "payment_intent.payment_failed":
         payment_intent = event.data.object
 
-        print("🔔 ==================== PAYMENT INTENT FAILED ====================")
-        print(f"🔔 Event Type: {event.type}")
-        print(f"🔔 Event ID: {getattr(event, 'id', 'unknown')}")
-        print(f"🔔 Payment Intent ID: {getattr(payment_intent, 'id', 'unknown')}")
-        print(f"🔔 Amount: {getattr(payment_intent, 'amount', 0)}")
-        print(f"🔔 Currency: {getattr(payment_intent, 'currency', 'unknown')}")
-        print(f"🔔 Status: {getattr(payment_intent, 'status', 'unknown')}")
+        logger.info(
+            "payment_intent.payment_failed received (id=%s, amount=%s, currency=%s, status=%s)",
+            getattr(payment_intent, "id", "unknown"),
+            getattr(payment_intent, "amount", 0),
+            getattr(payment_intent, "currency", "unknown"),
+            getattr(payment_intent, "status", "unknown"),
+        )
 
         # Log error details
         error_data = getattr(payment_intent, "last_payment_error", None)
         if error_data:
-            print(f"🔔 Failure Code: {error_data.get('code', 'unknown')}")
-            print(f"🔔 Failure Message: {error_data.get('message', 'unknown')}")
+            logger.warning(
+                "payment_intent failure (code=%s, message=%s)",
+                error_data.get("code", "unknown"),
+                error_data.get("message", "unknown"),
+            )
 
         try:
             # Process payment intent failed event using transaction utilities
             result = handle_payment_intent_failed(payment_intent)
             if result["success"]:
-                print("  Payment intent failure processing completed")
-                print(f"  Updated trackers: {result.get('trackers_updated', 0)}")
-                print(f"  Updated transactions: {result.get('transactions_updated', 0)}")
-                print(f"  Orders updated: {result.get('orders_updated', 0)}")
+                logger.info(
+                    "Payment intent failure processed (trackers=%s, transactions=%s, orders=%s)",
+                    result.get("trackers_updated", 0),
+                    result.get("transactions_updated", 0),
+                    result.get("orders_updated", 0),
+                )
                 return HttpResponse(
                     status=200, content="Payment intent failure processed successfully".encode("utf-8")
                 )
             else:
-                print(f"⚠️ Payment intent failure processing had issues: {result.get('errors', [])}")
+                logger.warning("Payment intent failure processed with issues: %s", result.get("errors", []))
                 return HttpResponse(
                     status=200, content="payment_intent.payment_failed event processed with issues".encode("utf-8")
                 )
         except Exception as e:
-            print(f" Error processing payment_intent.payment_failed: {e}")
             logger.error(f"Error processing payment_intent.payment_failed: {e}")
             return HttpResponse(
                 status=200, content="payment_intent.payment_failed event processed with errors".encode("utf-8")
             )
 
-        print("🔔 ================================================================")
         return HttpResponse(
             status=200, content="payment_intent.payment_failed event successfully processed".encode("utf-8")
         )
 
     else:
-        print(f"ℹ️ Unhandled event type: {event.type}")
+        logger.info("Unhandled Stripe event type: %s", event.type)
         return HttpResponse(status=200, content=f"{event.type} event received but not processed".encode("utf-8"))
 
-    print("🔵 ==================== END OF WEBHOOK EVENT ====================")
     # Fallback return (should not be reached with explicit returns above)
     return HttpResponse(status=200, content="Webhook event successfully processed".encode("utf-8"))
 
@@ -1289,7 +1297,6 @@ def update_payout_from_webhook(event, payout_object):  # noqa: C901
 
     except Exception as e:
         logger.error(f"Unexpected error in update_payout_from_webhook: {str(e)}", exc_info=True)
-        print(f" Unexpected webhook error: {str(e)}")
         return None
 
 
@@ -1304,7 +1311,7 @@ def stripe_webhook_connect(request):  # noqa: C901
     sig_header = request.headers.get("stripe-signature")
 
     if not endpoint_secret:
-        print("⚠️  No endpoint secret configured. Skipping webhook verification.")
+        logger.warning("No Stripe Connect endpoint secret configured; skipping signature verification")
         # If no endpoint secret is configured, we won't verify the signature
         # and will just deserialize the event from JSON
 
@@ -1312,9 +1319,9 @@ def stripe_webhook_connect(request):  # noqa: C901
 
     try:
         event = stripe.Event.construct_from(json.loads(payload), stripe.api_key)
-        print(f"🔔 Event constructed successfully: {event.type}")
+        logger.info("Stripe Connect event constructed (type=%s)", getattr(event, "type", "unknown"))
     except ValueError as e:
-        print(f" Error constructing event: {e}")
+        logger.error(f"Error constructing Stripe Connect event: {e}")
         return HttpResponse(status=400, content="".encode("utf-8"))
 
     # Only verify the event if you've defined an endpoint secret
@@ -1322,17 +1329,21 @@ def stripe_webhook_connect(request):  # noqa: C901
     try:
         event = stripe.Webhook.construct_event(payload, sig_header, endpoint_secret)
     except stripe.error.SignatureVerificationError as e:
-        print("⚠️  Webhook signature verification failed." + str(e))
+        logger.warning("Stripe Connect webhook signature verification failed: %s", str(e))
         return HttpResponse(status=400, content="Webhook signature verification failed.".encode("utf-8"))
     except Exception as e:
-        print(" Error parsing webhook payload: " + str(e))
+        logger.error("Error parsing Stripe Connect webhook payload: %s", str(e))
         return HttpResponse(status=400, content="Webhook payload parsing failed.".encode("utf-8"))
 
-    print(f"🔔 Received Stripe event: {event.type}")
+    logger.info("Received Stripe Connect event: %s", event.type)
     if event.type in ["payout.paid", "payout.failed", "payout.updated", "payout.canceled"]:
         payout_object = event.data.object
 
-        print(f"🔔 Processing payout webhook: {event.type} for payout {getattr(payout_object, 'id', 'unknown')}")
+        logger.info(
+            "Processing Stripe Connect payout webhook: %s for payout %s",
+            event.type,
+            getattr(payout_object, "id", "unknown"),
+        )
 
         try:
             # Extract basic payout info for logging
@@ -1340,9 +1351,11 @@ def stripe_webhook_connect(request):  # noqa: C901
             payout_status = getattr(payout_object, "status", None)
             _payout_arrival_date = getattr(payout_object, "arrival_date", None)
 
-            print("📊 Payout Details:")
-            print(f"   Stripe Payout ID: {stripe_payout_id}")
-            print(f"   Status: {payout_status}")
+            logger.debug(
+                "Payout details (id=%s, status=%s)",
+                stripe_payout_id,
+                payout_status,
+            )
 
             # Use transaction-wrapped function to handle payout updates
             # CRITICAL: Each webhook event processed with proper model ordering
@@ -1363,7 +1376,6 @@ def stripe_webhook_connect(request):  # noqa: C901
             except Exception as webhook_error:
                 # Log webhook-specific error but don't break other events
                 logger.error(f"[ERROR] Error processing {event.type} webhook: {webhook_error}")
-                print(f" Error processing payout webhook: {webhook_error}")
                 # Continue processing - each event is independent
                 updated_payout = None
 
@@ -1374,13 +1386,9 @@ def stripe_webhook_connect(request):  # noqa: C901
 
         except Exception as e:
             logger.error(f"[ERROR] Error processing {event.type} webhook: {e}")
-            print(f" Error processing payout webhook: {e}")
-            import traceback
-
-            traceback.print_exc()
             # Don't fail the webhook for payout processing errors
     else:
-        print(f"ℹ️ Unhandled payout event type: {event.type}")
+        logger.info("Unhandled Stripe Connect payout event type: %s", event.type)
 
     return HttpResponse(status=200, content=f"{event.type} connect webhook successfully processed".encode("utf-8"))
 
