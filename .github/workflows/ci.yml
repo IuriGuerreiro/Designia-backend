@@ -1,0 +1,68 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+          pip install pre-commit ruff black isort
+        working-directory: .
+
+      - name: Show versions
+        run: |
+          python --version
+          ruff --version
+          black --version
+          isort --version
+
+      - name: Run Ruff (lint)
+        run: ruff check .
+
+      - name: Run Black (check)
+        run: black --check --line-length=119 .
+
+      - name: Run isort (check)
+        run: isort --profile=black --line-length=119 --check-only .
+
+      - name: Run pre-commit (all files)
+        run: pre-commit run --all-files
+
+      - name: Run Django tests
+        env:
+          DJANGO_SETTINGS_MODULE: designiaBackend.settings
+          SECRET_KEY: test-secret-key
+          DEBUG: '0'
+          USE_S3: '0'
+          STRIPE_SECRET_KEY: sk_test_dummy
+          STRIPE_WEBHOOK_SECRET: whsec_dummy
+          ALLOWED_HOSTS: '*'
+        run: |
+          python manage.py migrate --noinput
+          python manage.py test --noinput -v 2
+        working-directory: .
