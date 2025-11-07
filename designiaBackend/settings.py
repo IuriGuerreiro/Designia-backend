@@ -125,7 +125,16 @@ ASGI_APPLICATION = "designiaBackend.asgi.application"
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
 # Database Configuration - Use MySQL RDS for production, SQLite for development
-if DEBUG:
+# settings.py
+
+if os.environ.get("CI") == "true":
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "db.sqlite3",
+        }
+    }
+elif DEBUG:
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
