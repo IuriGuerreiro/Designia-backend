@@ -27,18 +27,6 @@ jobs:
         options: >-
           --health-cmd "redis-cli ping || exit 1"
           --health-interval=10s --health-timeout=5s --health-retries=10
-      minio:
-        image: minio/minio:latest
-        env:
-          MINIO_ROOT_USER: minioadmin
-          MINIO_ROOT_PASSWORD: minioadmin
-        ports:
-          - 9000:9000  # S3 API
-          - 9001:9001  # Console (optional)
-        options: >-
-          --health-cmd="curl -f http://localhost:9000/minio/health/ready || exit 1"
-          --health-interval=10s --health-timeout=5s --health-retries=10
-        command: server /data --console-address ":9001"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -98,7 +86,13 @@ jobs:
 
       - name: Wait for MinIO
         run: |
-          for i in `seq 1 30`; do
+          # Start MinIO since GitHub Actions services don't support overriding command
+          docker run -d --name minio \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin \
+            -p 9000:9000 -p 9001:9001 \
+            minio/minio:latest server /data --console-address ":9001"
+          for i in `seq 1 60`; do
             code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:9000/minio/health/ready) || true
             if [ "$code" = "200" ]; then echo "MinIO is up"; break; fi
             echo "Waiting for MinIO..."; sleep 2;
