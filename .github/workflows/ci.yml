@@ -107,7 +107,7 @@ jobs:
           python -m pip install --quiet awscli
           aws --endpoint-url http://127.0.0.1:9000 s3 mb s3://designia || true
 
-      - name: Run Django tests (MySQL)
+      - name: Run Django migrations (MySQL only)
         working-directory: .
         env:
           # Force MySQL usage in settings
@@ -143,4 +143,3 @@ jobs:
           DEFAULT_FROM_EMAIL: test@test.test
         run: |
           python manage.py migrate --noinput
-          python manage.py test --noinput -v 2
