@@ -1,4 +1,4 @@
-name: Backend CI
+name: Backend CI (MySQL)
 
 on:
   push:
@@ -9,6 +9,36 @@ on:
 jobs:
   lint-and-test:
     runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: rootpw
+          MYSQL_DATABASE: designia
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -prootpw"
+          --health-interval=10s --health-timeout=5s --health-retries=10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping || exit 1"
+          --health-interval=10s --health-timeout=5s --health-retries=10
+      minio:
+        image: minio/minio:latest
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        ports:
+          - 9000:9000  # S3 API
+          - 9001:9001  # Console (optional)
+        options: >-
+          --health-cmd="curl -f http://localhost:9000/minio/health/ready || exit 1"
+          --health-interval=10s --health-timeout=5s --health-retries=10
+        command: server /data --console-address ":9001"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -22,17 +52,16 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
+          key: ${{ runner.os }}-pip-${{ hashFiles('Designia-backend/**/requirements*.txt') }}
           restore-keys: |
             ${{ runner.os }}-pip-
 
-      - name: Install dependencies
+      - name: Install dependencies (backend)
+        working-directory: Designia-backend
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install -r requirements.txt
           if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
-          pip install pre-commit ruff black isort
-        working-directory: .
 
       - name: Show versions
         run: |
@@ -53,24 +82,71 @@ jobs:
       - name: Run pre-commit (all files)
         run: pre-commit run --all-files
 
-      - name: Run Django tests
+      - name: Wait for MySQL
+        run: |
+          for i in `seq 1 30`; do
+            (echo > /dev/tcp/127.0.0.1/3306) >/dev/null 2>&1 && echo "MySQL is up" && break
+            echo "Waiting for MySQL..."; sleep 2;
+          done
+
+      - name: Wait for Redis
+        run: |
+          for i in `seq 1 30`; do
+            (echo > /dev/tcp/127.0.0.1/6379) >/dev/null 2>&1 && echo "Redis is up" && break
+            echo "Waiting for Redis..."; sleep 2;
+          done
+
+      - name: Wait for MinIO
+        run: |
+          for i in `seq 1 30`; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:9000/minio/health/ready) || true
+            if [ "$code" = "200" ]; then echo "MinIO is up"; break; fi
+            echo "Waiting for MinIO..."; sleep 2;
+          done
+
+      - name: Create MinIO bucket (designia)
         env:
-          CI: 'true'
+          AWS_ACCESS_KEY_ID: minioadmin
+          AWS_SECRET_ACCESS_KEY: minioadmin
+          AWS_DEFAULT_REGION: us-east-1
+        run: |
+          python -m pip install --quiet awscli
+          aws --endpoint-url http://127.0.0.1:9000 s3 mb s3://designia || true
+
+      - name: Run Django tests (MySQL)
+        working-directory: Designia-backend
+        env:
+          # Force MySQL usage in settings
+          USE_MYSQL: "true"
+          DB_NAME: designia
+          DB_USER: root
+          DB_PASSWORD: rootpw
+          DB_HOST: 127.0.0.1
+          DB_PORT: "3306"
+          # Redis defaults (if your settings read from env)
+          REDIS_URL: redis://127.0.0.1:6379/0
+          # S3 via MinIO (kept optional, set USE_S3 below)
+          AWS_ACCESS_KEY_ID: minioadmin
+          AWS_SECRET_ACCESS_KEY: minioadmin
+          AWS_STORAGE_BUCKET_NAME: designia
+          AWS_S3_ENDPOINT_URL: http://127.0.0.1:9000
+          AWS_S3_REGION_NAME: us-east-1
+          AWS_S3_VERIFY: "false"
+          # App env
           SECRET_KEY: testsecretkey
           DJANGO_SETTINGS_MODULE: designiaBackend.settings
           STRIPE_PUBLISHABLE_KEY: pk_test_1234567890
           STRIPE_SECRET_KEY: sk_test_1234567890
           STRIPE_WEBHOOK_CONNECT_SECRET: whsec_1234567890
           STRIPE_WEBHOOK_SECRET: whsec_0987654321
-          USE_S3: false
+          USE_S3: "false"
           EMAIL_BACKEND: django.core.mail.backends.smtp.EmailBackend
           EMAIL_HOST: test.test.com
-          EMAIL_PORT: 587
-          EMAIL_USE_TLS: True
+          EMAIL_PORT: "587"
+          EMAIL_USE_TLS: "True"
           EMAIL_HOST_USER: test@test.com
           EMAIL_HOST_PASSWORD: test
           DEFAULT_FROM_EMAIL: test@test.test
         run: |
           python manage.py migrate --noinput
           python manage.py test --noinput -v 2
-        working-directory: .
