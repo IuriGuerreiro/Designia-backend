@@ -56,6 +56,7 @@ jobs:
       - name: Run Django tests
         env:
           CI: 'true'
+          SECRET_KEY: testsecretkey
           DJANGO_SETTINGS_MODULE: designiaBackend.settings
         run: |
           python manage.py migrate --noinput

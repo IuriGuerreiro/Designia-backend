@@ -9,7 +9,7 @@ from django.urls import reverse
 
 from marketplace.models import Order, Product
 
-from .models import PaymentTracker, PaymentTransaction
+from ..models import PaymentTracker, PaymentTransaction
 
 User = get_user_model()
 
