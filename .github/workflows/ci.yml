@@ -55,13 +55,8 @@ jobs:
 
       - name: Run Django tests
         env:
+          CI: 'true'
           DJANGO_SETTINGS_MODULE: designiaBackend.settings
-          SECRET_KEY: test-secret-key
-          DEBUG: '0'
-          USE_S3: '0'
-          STRIPE_SECRET_KEY: sk_test_dummy
-          STRIPE_WEBHOOK_SECRET: whsec_dummy
-          ALLOWED_HOSTS: '*'
         run: |
           python manage.py migrate --noinput
           python manage.py test --noinput -v 2
