@@ -40,12 +40,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('Designia-backend/**/requirements*.txt') }}
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
           restore-keys: |
             ${{ runner.os }}-pip-
 
       - name: Install dependencies (backend)
-        working-directory: Designia-backend
+        working-directory: .
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
@@ -108,7 +108,7 @@ jobs:
           aws --endpoint-url http://127.0.0.1:9000 s3 mb s3://designia || true
 
       - name: Run Django tests (MySQL)
-        working-directory: Designia-backend
+        working-directory: .
         env:
           # Force MySQL usage in settings
           USE_MYSQL: "true"
