@@ -62,13 +62,7 @@ jobs:
           STRIPE_SECRET_KEY: sk_test_1234567890
           STRIPE_WEBHOOK_CONNECT_SECRET: whsec_1234567890
           STRIPE_WEBHOOK_SECRET: whsec_0987654321
-          USE_S3: True
-          AWS_ACCESS_KEY_ID: myuser
-          AWS_SECRET_ACCESS_KEY: mystrongpassword123
-          AWS_S3_ENDPOINT_URL: http://localhost:9100
-          AWS_STORAGE_BUCKET_NAME: Test
-          AWS_S3_REGION_NAME: us-east-1
-          AWS_S3_VERIFY: False
+          USE_S3: false
           EMAIL_BACKEND: django.core.mail.backends.smtp.EmailBackend
           EMAIL_HOST: test.test.com
           EMAIL_PORT: 587
