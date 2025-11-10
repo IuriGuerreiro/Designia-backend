@@ -142,7 +142,7 @@ class AsyncTracker:
                     logger.warning(f"Failed to track listing view for product {product.id}: {str(e)}")
                     continue
 
-            logger.info(f"Background listing tracking: {tracked_count}/{len(product_ids)} products")
+            logger.debug(f"Background listing tracking: {tracked_count}/{len(product_ids)} products")
 
         except Exception as e:
             logger.error(f"Error in background listing view processing: {str(e)}")

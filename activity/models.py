@@ -100,7 +100,7 @@ class UserClick(models.Model):
 
             if existing_activity.exists():
                 # Return the most recent existing activity instead of creating a duplicate
-                logger.info(
+                logger.debug(
                     f"Duplicate view prevented (within 1s): {product.name} by {user or session_key or 'anonymous'}"
                 )
                 return existing_activity.first()

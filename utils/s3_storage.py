@@ -606,6 +606,9 @@ class S3Storage:
                 url = self.s3_client.generate_presigned_url(
                     "get_object", Params={"Bucket": self.bucket_name, "Key": key}, ExpiresIn=expires_in
                 )
+                # Force HTTPS for mixed content compliance
+                if url.startswith("http://"):
+                    url = url.replace("http://", "https://", 1)
                 return url
             except ClientError as e:
                 raise S3StorageError(f"Error generating presigned URL: {str(e)}") from e
@@ -629,6 +632,9 @@ class S3Storage:
             url = self.s3_client.generate_presigned_url(
                 "get_object", Params={"Bucket": bucket, "Key": key}, ExpiresIn=expires_in
             )
+            # Force HTTPS for mixed content compliance
+            if url.startswith("http://"):
+                url = url.replace("http://", "https://", 1)
             logger.debug(f"Generated presigned URL for {bucket}/{key} (expires in {expires_in}s)")
             return url
         except ClientError as e:
@@ -667,7 +673,12 @@ class S3Storage:
                 Bucket=self.bucket_name, Key=key, ExpiresIn=expires_in, Conditions=conditions
             )
 
-            return {"url": response["url"], "fields": response["fields"], "expires_in": expires_in}
+            # Force HTTPS for mixed content compliance
+            url = response["url"]
+            if url.startswith("http://"):
+                url = url.replace("http://", "https://", 1)
+
+            return {"url": url, "fields": response["fields"], "expires_in": expires_in}
 
         except ClientError as e:
             raise S3StorageError(f"Error generating presigned upload URL: {str(e)}") from e
@@ -675,7 +686,12 @@ class S3Storage:
     # Marketplace-specific helper methods
 
     def upload_product_image(
-        self, product_id: str, image_file: Union[InMemoryUploadedFile, TemporaryUploadedFile], image_type: str = "main"
+        self,
+        product_id: str,
+        image_file: Union[InMemoryUploadedFile, TemporaryUploadedFile],
+        image_type: str = "main",
+        user_id: Optional[str] = None,
+        category_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Upload product image with marketplace-specific naming and settings.
@@ -684,20 +700,38 @@ class S3Storage:
             product_id: Product UUID
             image_file: Image file to upload
             image_type: Type of image ('main', 'gallery', 'thumbnail')
+            user_id: User UUID for furniture-specific path structure
+            category_name: Category name to determine if this is furniture
 
         Returns:
             Upload result with product-specific metadata
         """
-        # Generate product-specific key
+        # Generate product-specific key with furniture path structure
         timestamp = timezone.now().strftime("%Y%m%d_%H%M%S")
         file_extension = os.path.splitext(image_file.name)[1].lower()
-        key = f"products/{product_id}/{image_type}_{timestamp}{file_extension}"
+
+        # All products are furniture - use furniture path structure
+        if user_id:
+            key = f"furniture/{user_id}/{product_id}/{image_type}_{timestamp}{file_extension}"
+        else:
+            # Fallback if no user_id provided
+            key = f"furniture/unknown/{product_id}/{image_type}_{timestamp}{file_extension}"
 
         # Add product-specific metadata
-        metadata = {"product_id": product_id, "image_type": image_type, "uploaded_by": "marketplace"}
+        metadata = {
+            "product_id": product_id,
+            "image_type": image_type,
+            "uploaded_by": "marketplace",
+            "category": category_name or "general",
+        }
+        if user_id:
+            metadata["user_id"] = user_id
 
         return self.upload_file(
-            file_obj=image_file, key=key, metadata=metadata, public=True  # Product images are public
+            file_obj=image_file,
+            key=key,
+            metadata=metadata,
+            public=True,  # Product images are public
         )
 
     def upload_user_avatar(
@@ -891,7 +925,10 @@ class S3Storage:
         metadata = {"user_id": user_id, "file_type": "profile_picture", "uploaded_at": timezone.now().isoformat()}
 
         return self.upload_file(
-            file_obj=image_file, key=key, metadata=metadata, public=True  # Profile pictures are public
+            file_obj=image_file,
+            key=key,
+            metadata=metadata,
+            public=True,  # Profile pictures are public
         )
 
     def get_profile_picture(self, user_id: str) -> Optional[Dict[str, Any]]:

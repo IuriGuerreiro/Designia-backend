@@ -407,7 +407,10 @@ class ProductViewSet(viewsets.ModelViewSet):
                             image_file.name = validated_image["random_name"]
 
                             result = s3_storage.upload_product_image(
-                                product_id=str(product.id), image_file=image_file, image_type=image_type
+                                product_id=str(product.id),
+                                image_file=image_file,
+                                image_type=image_type,
+                                user_id=str(user.id),
                             )
 
                             # Create ProductImage record with S3 information
@@ -492,7 +495,7 @@ class ProductViewSet(viewsets.ModelViewSet):
             for i, product_data in enumerate(
                 response_data["results"] if "results" in response_data else response_data
             ):
-                logger.info(f"Product {i+1}: {product_data.get('name')} (ID: {product_data.get('id')})")
+                logger.info(f"Product {i + 1}: {product_data.get('name')} (ID: {product_data.get('id')})")
                 primary_image = product_data.get("primary_image")
                 if primary_image:
                     logger.info(f"  - Primary Image ID: {primary_image.get('id')}")
@@ -522,7 +525,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         logger.info(f"Total products: {len(response_data)}")
 
         for i, product_data in enumerate(response_data):
-            logger.info(f"Product {i+1}: {product_data.get('name')} (ID: {product_data.get('id')})")
+            logger.info(f"Product {i + 1}: {product_data.get('name')} (ID: {product_data.get('id')})")
             primary_image = product_data.get("primary_image")
             if primary_image:
                 logger.info(f"  - Primary Image ID: {primary_image.get('id')}")
@@ -621,7 +624,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         if "images" in response_data and response_data["images"]:
             logger.info(f"Total images found: {len(response_data['images'])}")
             for i, image in enumerate(response_data["images"]):
-                logger.info(f"Image {i+1}:")
+                logger.info(f"Image {i + 1}:")
                 logger.info(f"  - ID: {image.get('id')}")
                 logger.info(f"  - Order: {image.get('order')}")
                 logger.info(f"  - Is Primary: {image.get('is_primary')}")
@@ -629,7 +632,7 @@ class ProductViewSet(viewsets.ModelViewSet):
                 logger.info(f"  - Original Filename: {image.get('original_filename')}")
                 logger.info(f"  - Presigned URL: {image.get('presigned_url')}")
                 logger.info(f"  - Image URL (fallback): {image.get('image_url')}")
-                logger.info(f"🖼️  AWS PRESIGNED URL {i+1}: {image.get('presigned_url')}")
+                logger.info(f"🖼️  AWS PRESIGNED URL {i + 1}: {image.get('presigned_url')}")
         else:
             logger.info("No images found for this product")
             logger.warning(f"⚠️  No images found for product: {instance.name}")
@@ -801,7 +804,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         try:
             s3_storage = get_s3_storage()
             result = s3_storage.upload_product_image(
-                product_id=str(product.id), image_file=image_file, image_type=image_type
+                product_id=str(product.id), image_file=image_file, image_type=image_type, user_id=str(request.user.id)
             )
 
             logger.info(f"User {request.user.username} uploaded {image_type} image for product {product.id}")
@@ -1404,7 +1407,6 @@ class CartViewSet(viewsets.ModelViewSet):
         all_valid = True
 
         for item in cart.items.all():
-
             item_result = {
                 "item_id": item.id,
                 "product_id": str(item.product.id),
@@ -1803,7 +1805,7 @@ class OrderViewSet(viewsets.ModelViewSet):
         valid_statuses = ["pending", "confirmed", "awaiting_shipment", "shipped", "delivered", "cancelled", "refunded"]
         if new_status not in valid_statuses:
             return Response(
-                {"detail": f'Invalid status. Must be one of: {", ".join(valid_statuses)}'},
+                {"detail": f"Invalid status. Must be one of: {', '.join(valid_statuses)}"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -2230,7 +2232,7 @@ class UserProfileViewSet(viewsets.ViewSet):
         max_size = 5 * 1024 * 1024  # 5MB
         if image_file.size > max_size:
             return Response(
-                {"detail": f"Image file too large. Maximum size is {max_size // (1024*1024)}MB"},
+                {"detail": f"Image file too large. Maximum size is {max_size // (1024 * 1024)}MB"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -2238,7 +2240,7 @@ class UserProfileViewSet(viewsets.ViewSet):
         allowed_types = ["image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp"]
         if hasattr(image_file, "content_type") and image_file.content_type not in allowed_types:
             return Response(
-                {"detail": f'Invalid file type. Allowed types: {", ".join(allowed_types)}'},
+                {"detail": f"Invalid file type. Allowed types: {', '.join(allowed_types)}"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
