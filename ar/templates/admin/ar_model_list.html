@@ -1,0 +1,88 @@
+{% extends "admin/base_site.html" %}
+{% block title %}Product 3D Models{% endblock %}
+
+{% block content %}
+<div class="app-ar-models">
+  <h1>Product 3D Models</h1>
+  <p class="help">
+    This dashboard lists every uploaded 3D model. Use the download icon to generate a temporary S3 link.
+  </p>
+
+  {% if ar_models %}
+    <table class="table table-striped ar-model-table">
+      <thead>
+        <tr>
+          <th>Product</th>
+          <th>File</th>
+          <th>Size</th>
+          <th>Uploaded By</th>
+          <th>Uploaded At</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for model in ar_models %}
+          <tr>
+            <td>
+              <strong>{{ model.product.name }}</strong><br />
+              <small>{{ model.product.id }}</small>
+            </td>
+            <td>
+              {{ model.original_filename }}<br />
+              <code>{{ model.s3_key }}</code>
+            </td>
+            <td>
+              {% if model.file_size %}
+                {{ model.file_size|filesizeformat }}
+              {% else %}
+                &mdash;
+              {% endif %}
+            </td>
+            <td>
+              {% if model.uploaded_by %}
+                {{ model.uploaded_by.get_full_name|default:model.uploaded_by.username }}
+              {% else %}
+                &mdash;
+              {% endif %}
+            </td>
+            <td>{{ model.uploaded_at|date:"Y-m-d H:i" }}</td>
+            <td>
+              <a class="button" href="{% url 'admin-ar-model-download' model.pk %}">
+                Download
+              </a>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <div class="empty">
+      <p>No 3D models have been uploaded yet.</p>
+    </div>
+  {% endif %}
+</div>
+
+<style>
+  .app-ar-models table {
+    width: 100%;
+    margin-top: 1rem;
+  }
+
+  .app-ar-models .button {
+    display: inline-block;
+    padding: 6px 10px;
+    background: #1d4ed8;
+    border-radius: 4px;
+    color: #fff;
+    text-decoration: none;
+  }
+
+  .app-ar-models .button:hover {
+    background: #1e3a8a;
+  }
+
+  .app-ar-models code {
+    font-size: 12px;
+  }
+</style>
+{% endblock %}

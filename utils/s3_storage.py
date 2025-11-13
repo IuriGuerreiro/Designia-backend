@@ -25,6 +25,13 @@ from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
+# Register common 3D model MIME types that the stdlib may not know
+mimetypes.add_type("model/gltf-binary", ".glb")
+mimetypes.add_type("model/gltf+json", ".gltf")
+mimetypes.add_type("model/vnd.usdz+zip", ".usdz")
+mimetypes.add_type("model/obj", ".obj")
+mimetypes.add_type("application/x-autodesk-fbx", ".fbx")
+
 
 class S3StorageError(Exception):
     """Custom exception for S3 storage operations"""
@@ -609,7 +616,13 @@ class S3Storage:
                 raise S3StorageError(f"File not found: {key}") from e
             raise S3StorageError(f"Error getting file: {str(e)}") from e
 
-    def get_file_url(self, key: str, public: bool = False, expires_in: int = 3600) -> str:
+    def get_file_url(
+        self,
+        key: str,
+        public: bool = False,
+        expires_in: int = 3600,
+        use_proxy: Optional[bool] = None,
+    ) -> str:
         """
         Generate URL for a file in S3.
 
@@ -617,11 +630,20 @@ class S3Storage:
             key: S3 object key
             public: Whether to generate public URL
             expires_in: Expiration time for presigned URL (seconds)
+            use_proxy: Force enabling/disabling of system proxy for public URLs
 
         Returns:
             File URL
         """
+        proxy_enabled = getattr(settings, "S3_USE_PROXY_FOR_PUBLIC_URLS", True)
+        if use_proxy is not None:
+            proxy_enabled = use_proxy
+
         if public:
+            if proxy_enabled:
+                proxy_base = getattr(settings, "S3_PROXY_BASE_PATH", "/api/system/s3-images")
+                proxy_base = proxy_base.rstrip("/")
+                return f"{proxy_base}/{key}"
             # Generate public URL
             if getattr(self, "endpoint_url", None):
                 base = self.endpoint_url.rstrip("/")
@@ -760,6 +782,99 @@ class S3Storage:
             metadata=metadata,
             public=True,  # Product images are public
         )
+
+    def upload_product_3d_model(
+        self,
+        product_id: str,
+        model_file: Union[InMemoryUploadedFile, TemporaryUploadedFile, BytesIO],
+        user_id: Optional[str] = None,
+        allowed_extensions: Optional[List[str]] = None,
+        max_file_size_mb: int = 150,
+    ) -> Dict[str, Any]:
+        """
+        Upload a 3D model binary for AR/visualization use cases.
+
+        Args:
+            product_id: Product UUID
+            model_file: Uploaded model file
+            user_id: Optional uploader UUID for metadata
+            allowed_extensions: Override default extensions
+            max_file_size_mb: File size limit (defaults to 150MB)
+
+        Returns:
+            Upload result metadata
+        """
+        extensions = allowed_extensions or [".glb", ".gltf", ".usdz", ".usd", ".obj", ".fbx", ".zip"]
+        file_name = getattr(model_file, "name", "model").lower()
+        file_extension = os.path.splitext(file_name)[1]
+
+        if file_extension not in extensions:
+            raise S3StorageError(
+                f"File extension '{file_extension}' not allowed for 3D models. Allowed: {', '.join(extensions)}"
+            )
+
+        max_bytes = max_file_size_mb * 1024 * 1024
+        file_size = self._get_file_size(model_file)
+        if file_size > max_bytes:
+            raise S3StorageError(
+                f"3D model size {file_size / 1024 / 1024:.1f}MB exceeds limit of {max_file_size_mb}MB"
+            )
+
+        timestamp = timezone.now().strftime("%Y%m%d_%H%M%S")
+        key = f"product-ar-models/{product_id}/model_{timestamp}{file_extension}"
+
+        metadata = {
+            "product_id": product_id,
+            "file_type": "3d-model",
+            "uploaded_by": user_id or "unknown",
+        }
+
+        content_type_overrides = {
+            ".glb": "model/gltf-binary",
+            ".gltf": "model/gltf+json",
+            ".usdz": "model/vnd.usdz+zip",
+            ".usd": "model/vnd.pixar.usd",
+            ".obj": "model/obj",
+            ".fbx": "application/x-autodesk-fbx",
+            ".zip": "application/zip",
+        }
+        content_type = content_type_overrides.get(file_extension) or self._get_content_type(file_name)
+
+        return self.upload_file(
+            file_obj=model_file,
+            key=key,
+            metadata=metadata,
+            public=False,
+            content_type=content_type,
+            validate_image=False,
+        )
+
+    def download_product_3d_model(
+        self,
+        key: str,
+        as_url: bool = True,
+        expires_in: int = 900,
+        download_path: Optional[str] = None,
+    ) -> Union[str, bytes, bool]:
+        """
+        Download or generate a download URL for a 3D model key.
+
+        Args:
+            key: S3 object key for the model
+            as_url: Return a presigned URL when True (default)
+            expires_in: URL expiration in seconds (used when as_url is True)
+            download_path: Optional local path when downloading the binary
+
+        Returns:
+            Presigned URL (str) or download result from `download_file`
+        """
+        if not key:
+            raise S3StorageError("3D model key is required for download.")
+
+        if as_url:
+            return self.get_file_url(key, public=False, expires_in=expires_in)
+
+        return self.download_file(key, download_path=download_path)
 
     def upload_user_avatar(
         self, user_id: str, avatar_file: Union[InMemoryUploadedFile, TemporaryUploadedFile]

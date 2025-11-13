@@ -20,6 +20,8 @@ from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
 
+from ar.admin_views import ProductARModelAdminDownloadView, ProductARModelAdminListView
+
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/auth/", include("authentication.urls")),
@@ -28,6 +30,13 @@ urlpatterns = [
     path("api/payments/", include("payment_system.urls")),
     path("api/chat/", include("chat.urls")),
     path("api/system/", include("system_info.urls")),
+    path("api/ar/", include("ar.urls")),
+    path("admin/ar/models/", ProductARModelAdminListView.as_view(), name="admin-ar-models"),
+    path(
+        "admin/ar/models/<int:pk>/download/",
+        ProductARModelAdminDownloadView.as_view(),
+        name="admin-ar-model-download",
+    ),
 ]
 
 # Serve media files during development

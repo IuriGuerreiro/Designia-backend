@@ -1,6 +1,7 @@
 import json
 import logging
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
@@ -128,6 +129,8 @@ class ProductImageSerializer(serializers.ModelSerializer):
 
     def get_presigned_url(self, obj):
         """Get presigned URL with 1 hour expiration (legacy)"""
+        if getattr(settings, "S3_USE_PROXY_FOR_IMAGE_LINKS", True):
+            return obj.get_proxy_url()
         return obj.get_presigned_url(expires_in=3600)
 
     def get_proxy_url(self, obj):

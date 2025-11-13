@@ -84,6 +84,7 @@ INSTALLED_APPS = [
     "payment_system",
     "chat",
     "system_info",
+    "ar",
 ]
 
 MIDDLEWARE = [
@@ -242,6 +243,9 @@ CSRF_TRUSTED_ORIGINS = os.getenv(
 
 # AWS S3 / MinIO Storage Configuration
 USE_S3 = os.getenv("USE_S3", "False").lower() == "true"
+S3_USE_PROXY_FOR_PUBLIC_URLS = os.getenv("S3_USE_PROXY_FOR_PUBLIC_URLS", "True").lower() == "true"
+S3_USE_PROXY_FOR_IMAGE_LINKS = os.getenv("S3_USE_PROXY_FOR_IMAGE_LINKS", "True").lower() == "true"
+S3_PROXY_BASE_PATH = os.getenv("S3_PROXY_BASE_PATH", "/api/system/s3-images")
 
 if USE_S3:
     # Only the required variables (MinIO-compatible)

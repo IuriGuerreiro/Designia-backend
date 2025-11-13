@@ -204,6 +204,7 @@ class ProductImage(models.Model):
         import logging
 
         logger = logging.getLogger(__name__)
+        from django.conf import settings
 
         logger.info("=== GET PRESIGNED URL DEBUG ===")
         logger.info(f"Image ID: {self.id}")
@@ -218,6 +219,12 @@ class ProductImage(models.Model):
             if self.image:
                 return self.image.url
             return None
+
+        if getattr(settings, "S3_USE_PROXY_FOR_IMAGE_LINKS", True):
+            proxy_url = self.get_proxy_url()
+            if proxy_url:
+                logger.info(f"Returning proxy URL for image {self.id}: {proxy_url}")
+                return proxy_url
 
         try:
             from utils.s3_storage import get_s3_storage
