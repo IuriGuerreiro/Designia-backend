@@ -8,11 +8,11 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 
 from marketplace.models import Product
-from marketplace.permissions import IsSellerUser
+from marketplace.permissions import IsAdminUser, IsSellerUser
 from utils.s3_storage import S3StorageError, get_s3_storage
 
 from .models import ProductARModel
-from .serializers import ProductARModelSerializer, ProductARModelUploadSerializer
+from .serializers import ProductARCatalogSerializer, ProductARModelSerializer, ProductARModelUploadSerializer
 
 logger = logging.getLogger(__name__)
 
@@ -123,3 +123,20 @@ class ProductARModelViewSet(viewsets.GenericViewSet):
         ar_model.save(update_fields=["last_download_requested_at"])
 
         return Response({"download_url": download_url, "expires_in": ttl})
+
+    @action(detail=False, methods=["get"], url_path="catalog", permission_classes=[IsAdminUser])
+    def catalog(self, request):
+        """Return catalog of products with AR models for admin/AR tooling."""
+        queryset = (
+            self.get_queryset()
+            .select_related("product", "uploaded_by", "product__category")
+            .prefetch_related("product__images")
+            .order_by("-uploaded_at")
+        )
+
+        serializer = ProductARCatalogSerializer(
+            queryset,
+            many=True,
+            context={**self.get_serializer_context(), "include_download_url": True},
+        )
+        return Response(serializer.data)

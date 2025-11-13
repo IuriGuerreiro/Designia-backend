@@ -14,6 +14,7 @@ import mimetypes
 import os
 from io import BytesIO
 from typing import Any, Dict, List, Optional, Union
+from urllib.parse import urljoin, urlparse, urlunparse
 
 import boto3
 import magic
@@ -641,9 +642,7 @@ class S3Storage:
 
         if public:
             if proxy_enabled:
-                proxy_base = getattr(settings, "S3_PROXY_BASE_PATH", "/api/system/s3-images")
-                proxy_base = proxy_base.rstrip("/")
-                return f"{proxy_base}/{key}"
+                return self._build_proxy_url(key)
             # Generate public URL
             if getattr(self, "endpoint_url", None):
                 base = self.endpoint_url.rstrip("/")
@@ -658,6 +657,7 @@ class S3Storage:
                 # Force HTTPS for mixed content compliance
                 if url.startswith("http://"):
                     url = url.replace("http://", "https://", 1)
+                url = self._rewrite_presigned_host(url)
                 return url
             except ClientError as e:
                 raise S3StorageError(f"Error generating presigned URL: {str(e)}") from e
@@ -1182,6 +1182,48 @@ class S3Storage:
             Upload result
         """
         return self.upload_profile_picture(user_id=user_id, image_file=image_file, replace_existing=True)
+
+    def _build_proxy_url(self, key: str) -> str:
+        base_path = getattr(settings, "S3_PROXY_BASE_PATH", "/api/system/s3-images").strip()
+        if not base_path:
+            base_path = "/api/system/s3-images"
+        base_path = "/" + base_path.lstrip("/")
+        key_path = key.lstrip("/")
+        relative = f"{base_path}/{key_path}"
+        base_url = getattr(settings, "S3_PROXY_BASE_URL", "").rstrip("/")
+        if base_url:
+            # Ensure single slash between host and path
+            return urljoin(base_url + "/", relative.lstrip("/"))
+        return relative
+
+    def _rewrite_presigned_host(self, url: str) -> str:
+        """
+        Replace the hostname of a presigned URL with configured proxy host if provided.
+        Keeps the original path/query so signatures remain intact (works when proxy forwards).
+        """
+        proxy_base = getattr(settings, "S3_PROXY_BASE_URL", "").strip()
+        if not proxy_base:
+            return url
+
+        # Ensure proxy base has scheme
+        if "://" not in proxy_base:
+            proxy_base = f"https://{proxy_base.lstrip('/')}"
+
+        proxy_parsed = urlparse(proxy_base)
+        original = urlparse(url)
+
+        # Preserve path/query from original signed URL
+        rewritten = urlunparse(
+            (
+                proxy_parsed.scheme or original.scheme,
+                proxy_parsed.netloc or original.netloc,
+                (proxy_parsed.path.rstrip("/") + "/" + original.path.lstrip("/")).replace("//", "/"),
+                original.params,
+                original.query,
+                original.fragment,
+            )
+        )
+        return rewritten
 
 
 # Convenience instance for easy import

@@ -243,9 +243,19 @@ CSRF_TRUSTED_ORIGINS = os.getenv(
 
 # AWS S3 / MinIO Storage Configuration
 USE_S3 = os.getenv("USE_S3", "False").lower() == "true"
+
+
+def _env_str(name: str, default: str = "") -> str:
+    value = os.getenv(name, default)
+    return value.strip() if isinstance(value, str) else value
+
+
+BASE_URL = _env_str("BASE_URL", "")
 S3_USE_PROXY_FOR_PUBLIC_URLS = os.getenv("S3_USE_PROXY_FOR_PUBLIC_URLS", "True").lower() == "true"
 S3_USE_PROXY_FOR_IMAGE_LINKS = os.getenv("S3_USE_PROXY_FOR_IMAGE_LINKS", "True").lower() == "true"
-S3_PROXY_BASE_PATH = os.getenv("S3_PROXY_BASE_PATH", "/api/system/s3-images")
+S3_USE_PROXY_FOR_MODEL_LINKS = os.getenv("S3_USE_PROXY_FOR_MODEL_LINKS", "True").lower() == "true"
+S3_PROXY_BASE_PATH = _env_str("S3_PROXY_BASE_PATH", "/api/system/s3-images")
+S3_PROXY_BASE_URL = _env_str("S3_PROXY_BASE_URL", BASE_URL)
 
 if USE_S3:
     # Only the required variables (MinIO-compatible)

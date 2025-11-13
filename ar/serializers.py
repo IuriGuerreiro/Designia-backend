@@ -1,5 +1,6 @@
 from rest_framework import serializers
 
+from marketplace.models import ProductImage
 from utils.s3_storage import S3StorageError, get_s3_storage
 
 from .models import ProductARModel
@@ -63,3 +64,53 @@ class ProductARModelUploadSerializer(serializers.Serializer):
         if value.size and value.size > max_size:
             raise serializers.ValidationError("3D model must be smaller than 150MB.")
         return value
+
+
+class ProductARCatalogSerializer(ProductARModelSerializer):
+    """Expanded serializer including product metadata for admin/AR catalog."""
+
+    product = serializers.SerializerMethodField()
+    download_url = serializers.SerializerMethodField()
+
+    class Meta(ProductARModelSerializer.Meta):
+        fields = ProductARModelSerializer.Meta.fields + [
+            "product",
+        ]
+
+    def get_product(self, obj):
+        product = obj.product
+        primary_image = self._get_primary_image(product)
+        return {
+            "id": str(product.id),
+            "name": product.name,
+            "slug": product.slug,
+            "short_description": product.short_description,
+            "price": str(product.price),
+            "brand": product.brand,
+            "model": product.model,
+            "category": product.category.name if product.category else None,
+            "primary_image": primary_image,
+        }
+
+    def get_download_url(self, obj):
+        try:
+            storage = get_s3_storage()
+            return storage.download_product_3d_model(
+                obj.s3_key, as_url=True, expires_in=self.context.get("download_ttl", 900)
+            )
+        except S3StorageError:
+            return None
+
+    def _get_primary_image(self, product):
+        images = getattr(product, "_cached_images", None)
+        if images is None and hasattr(product, "images"):
+            images = list(product.images.all())
+            product._cached_images = images
+        elif images is None:
+            images = list(ProductImage.objects.filter(product=product))
+
+        primary = next((img for img in images if img.is_primary), None)
+        image = primary or (images[0] if images else None)
+        if not image:
+            return None
+        return image.get_proxy_url() or image.get_presigned_url()
