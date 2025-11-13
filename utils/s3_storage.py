@@ -582,6 +582,33 @@ class S3Storage:
             else:
                 raise S3StorageError(f"Error getting file info: {str(e)}") from e
 
+    def get_file(self, key: str) -> Dict[str, Any]:
+        """
+        Get file content from S3.
+
+        Args:
+            key: S3 object key
+
+        Returns:
+            Dict containing file content and metadata
+
+        Raises:
+            S3StorageError: If file not found or access fails
+        """
+        try:
+            response = self.s3_client.get_object(Bucket=self.bucket_name, Key=key)
+
+            return {
+                "body": response["Body"].read(),
+                "content_type": response.get("ContentType", "application/octet-stream"),
+                "size": response.get("ContentLength", 0),
+                "last_modified": response.get("LastModified"),
+            }
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "NoSuchKey":
+                raise S3StorageError(f"File not found: {key}") from e
+            raise S3StorageError(f"Error getting file: {str(e)}") from e
+
     def get_file_url(self, key: str, public: bool = False, expires_in: int = 3600) -> str:
         """
         Generate URL for a file in S3.

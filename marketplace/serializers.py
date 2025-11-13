@@ -102,10 +102,11 @@ class CategorySerializer(serializers.ModelSerializer):
 
 
 class ProductImageSerializer(serializers.ModelSerializer):
-    """Product image serializer with presigned URL support"""
+    """Product image serializer with proxy URL support"""
 
     presigned_url = serializers.SerializerMethodField()
-    image_url = serializers.ReadOnlyField()  # Uses the property from model
+    proxy_url = serializers.SerializerMethodField()
+    image_url = serializers.ReadOnlyField()  # Uses property from model
 
     class Meta:
         model = ProductImage
@@ -116,6 +117,7 @@ class ProductImageSerializer(serializers.ModelSerializer):
             "is_primary",
             "order",
             "presigned_url",
+            "proxy_url",
             "image_url",
             "s3_key",
             "original_filename",
@@ -125,8 +127,12 @@ class ProductImageSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "s3_key", "original_filename", "file_size", "content_type"]
 
     def get_presigned_url(self, obj):
-        """Get presigned URL with 1 hour expiration"""
+        """Get presigned URL with 1 hour expiration (legacy)"""
         return obj.get_presigned_url(expires_in=3600)
+
+    def get_proxy_url(self, obj):
+        """Get proxy URL (recommended for frontend use)"""
+        return obj.get_proxy_url()
 
 
 class ProductReviewSerializer(serializers.ModelSerializer):
@@ -546,7 +552,10 @@ class ProductCreateUpdateSerializer(serializers.ModelSerializer):
             for i, image in enumerate(uploaded_images):
                 logger.info(f"Creating ProductImage {i}: {image.name}")
                 ProductImage.objects.create(
-                    product=product, image=image, is_primary=(i == 0), order=i  # First image is primary
+                    product=product,
+                    image=image,
+                    is_primary=(i == 0),
+                    order=i,  # First image is primary
                 )
 
             logger.info("=== SERIALIZER CREATE DEBUG - SUCCESS ===")
@@ -667,25 +676,16 @@ class OrderItemSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "total_price"]
 
     def get_product_image_fresh(self, obj):
-        """Get fresh product image URL from S3"""
+        """Get fresh product image URL using proxy"""
         try:
-            from utils.s3_storage import get_s3_storage
+            # Get the primary image from the product's images
+            primary_image = obj.product.images.filter(is_primary=True).first()
+            if not primary_image:
+                primary_image = obj.product.images.order_by("order").first()
 
-            s3_storage = get_s3_storage()
-
-            # Get fresh images from the product
-            product_images = s3_storage.get_product_images(str(obj.product.id))
-
-            if product_images:
-                # Return the main image or first available image
-                main_image = next((img for img in product_images if img.get("is_main")), product_images[0])
-
-                # Generate fresh presigned URL
-                fresh_url = s3_storage.generate_presigned_url(
-                    bucket=s3_storage.bucket_name, key=main_image["key"], expires_in=3600  # 1 hour
-                )
-
-                return fresh_url
+            if primary_image:
+                # Use the proxy URL from the model
+                return primary_image.get_proxy_url()
 
             return None
 

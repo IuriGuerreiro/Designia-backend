@@ -1,4 +1,5 @@
 import uuid
+from typing import Optional
 
 from django.contrib.auth import get_user_model
 from django.core.validators import MaxValueValidator, MinValueValidator
@@ -173,8 +174,33 @@ class ProductImage(models.Model):
             ProductImage.objects.filter(product=self.product, is_primary=True).update(is_primary=False)
         super().save(*args, **kwargs)
 
+    def get_proxy_url(self) -> Optional[str]:
+        """Get S3 proxy URL for this image (solves mixed content/CSP issues)"""
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        logger.info("=== GET PROXY URL DEBUG ===")
+        logger.info(f"Image ID: {self.id}")
+        logger.info(f"Product: {self.product.name}")
+        logger.info(f"S3 Key: {self.s3_key}")
+        logger.info(f"S3 Bucket: {self.s3_bucket}")
+        logger.info(f"Has image field: {bool(self.image)}")
+
+        if not self.s3_key or not self.s3_bucket:
+            logger.warning(f"Missing S3 data for image {self.id} - s3_key: {self.s3_key}, s3_bucket: {self.s3_bucket}")
+            # Fallback to traditional image field if available
+            if self.image:
+                return self.image.url
+            return None
+
+        # Return proxy URL
+        proxy_url = f"/api/system/s3-images/{self.s3_key}"
+        logger.info(f"Generated proxy URL for image {self.id}: {proxy_url}")
+        return proxy_url
+
     def get_presigned_url(self, expires_in=3600):
-        """Generate a pre-signed URL for S3 image access"""
+        """Generate a pre-signed URL for S3 image access (legacy - use proxy instead)"""
         import logging
 
         logger = logging.getLogger(__name__)
@@ -219,12 +245,12 @@ class ProductImage(models.Model):
         logger.info(f"Product: {self.product.name}")
 
         if self.s3_key and self.s3_bucket:
-            logger.info("Using S3 presigned URL path")
-            presigned_url = self.get_presigned_url()
-            if presigned_url:
-                return presigned_url
+            logger.info("Using S3 proxy URL path")
+            proxy_url = self.get_proxy_url()
+            if proxy_url:
+                return proxy_url
             else:
-                logger.warning("S3 presigned URL failed, falling back to image field")
+                logger.warning("S3 proxy URL failed, falling back to image field")
 
         if self.image:
             logger.info(f"Using traditional image field: {self.image.url}")
