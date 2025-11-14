@@ -1213,11 +1213,22 @@ class S3Storage:
         original = urlparse(url)
 
         # Preserve path/query from original signed URL
+        original_path = original.path.lstrip("/")
+        bucket_name = getattr(settings, "AWS_STORAGE_BUCKET_NAME", "").strip("/")
+        if bucket_name and original_path.startswith(f"{bucket_name}/"):
+            stripped_path = original_path[len(bucket_name) + 1 :]
+        else:
+            stripped_path = original_path
+
+        proxy_path = proxy_parsed.path.strip("/")
+        parts = [proxy_path, stripped_path] if proxy_path else [stripped_path]
+        new_path = "/".join(part for part in parts if part)
+
         rewritten = urlunparse(
             (
                 proxy_parsed.scheme or original.scheme,
                 proxy_parsed.netloc or original.netloc,
-                (proxy_parsed.path.rstrip("/") + "/" + original.path.lstrip("/")).replace("//", "/"),
+                "/" + new_path if new_path else "/" + stripped_path,
                 original.params,
                 original.query,
                 original.fragment,

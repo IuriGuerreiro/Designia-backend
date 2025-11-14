@@ -10,6 +10,8 @@ from utils.s3_storage import S3StorageError, get_s3_storage
 
 logger = logging.getLogger(__name__)
 
+bucket_root_folders = ["furniture", "product-ar-models"]
+
 
 @csrf_exempt
 @require_GET
@@ -31,7 +33,7 @@ def s3_image_proxy(request, path):
 
         # Expected path format: furniture/userId/productId/filename
         path_parts = path.split("/")
-        if len(path_parts) < 4 or path_parts[0] != "furniture":
+        if len(path_parts) < 2 or path_parts[0] not in bucket_root_folders:
             return HttpResponseBadRequest("Invalid S3 path format")
 
         # Construct S3 key
