@@ -278,6 +278,7 @@ class ProductDetailSerializer(serializers.ModelSerializer):
     reviews = ProductReviewSerializer(many=True, read_only=True)
     is_favorited = serializers.SerializerMethodField()
     seller_product_count = serializers.SerializerMethodField()
+    has_ar_model = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
@@ -314,6 +315,7 @@ class ProductDetailSerializer(serializers.ModelSerializer):
             "discount_percentage",
             "is_favorited",
             "seller_product_count",
+            "has_ar_model",
             "created_at",
             "updated_at",
             "view_count",
@@ -345,6 +347,10 @@ class ProductDetailSerializer(serializers.ModelSerializer):
 
     def get_seller_product_count(self, obj):
         return obj.seller.products.filter(is_active=True).count()
+
+    def get_has_ar_model(self, obj):
+        """Check if product has an AR 3D model"""
+        return hasattr(obj, "ar_model") and obj.ar_model is not None
 
 
 class ProductCreateUpdateSerializer(serializers.ModelSerializer):

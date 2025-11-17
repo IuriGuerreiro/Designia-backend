@@ -10,7 +10,6 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
-import logging
 import os
 from datetime import timedelta
 from pathlib import Path
@@ -35,33 +34,10 @@ DEBUG = os.getenv("DEBUG", "False").lower() == "true"
 # SECURITY FIX: Require SECRET_KEY environment variable in production
 SECRET_KEY = os.getenv("SECRET_KEY")
 if not SECRET_KEY:
-    if DEBUG:
-        # Allow fallback only in development when DEBUG=True
-        SECRET_KEY = "django-insecure-development-key-only-for-debug-mode"
-    else:
-        raise ValueError("SECRET_KEY environment variable must be set in production")
+    raise ValueError("SECRET_KEY environment variable must be set in production")
 
 # Parse ALLOWED_HOSTS from environment variable
 ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "192.168.3.2,localhost,127.0.0.1").split(",")
-
-# SECURITY FIX: Only add ngrok domain in development mode
-if DEBUG:
-    # For development only - use specific ngrok subdomain if available
-    ngrok_domain = os.getenv("NGROK_DOMAIN")
-    if ngrok_domain:
-        ALLOWED_HOSTS.append(ngrok_domain)  # Specific subdomain
-    else:
-        # Wildcard fallback for development convenience
-        ALLOWED_HOSTS.append(".ngrok-free.app")
-        logging.getLogger(__name__).warning("⚠️  SECURITY WARNING: Using wildcard ngrok domain (.ngrok-free.app)")
-        logging.getLogger(__name__).warning(
-            "   This is a potential security risk - use specific NGROK_DOMAIN in production-like environments"
-        )
-        logging.getLogger(__name__).warning(
-            "   Set NGROK_DOMAIN=your-specific-subdomain.ngrok-free.app for better security"
-        )
-# In production, ngrok domains are never allowed
-
 
 # Application definition
 
@@ -182,7 +158,7 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
-STATIC_URL = "static/"
+STATIC_URL = "/static/"
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
@@ -257,45 +233,40 @@ S3_USE_PROXY_FOR_MODEL_LINKS = os.getenv("S3_USE_PROXY_FOR_MODEL_LINKS", "True")
 S3_PROXY_BASE_PATH = _env_str("S3_PROXY_BASE_PATH", "/api/system/s3-images")
 S3_PROXY_BASE_URL = _env_str("S3_PROXY_BASE_URL", BASE_URL)
 
-if USE_S3:
-    # Only the required variables (MinIO-compatible)
-    AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
-    AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
-    AWS_STORAGE_BUCKET_NAME = os.getenv("AWS_STORAGE_BUCKET_NAME")
-    AWS_S3_REGION_NAME = os.getenv("AWS_S3_REGION_NAME", "us-east-1")
-    AWS_S3_ENDPOINT_URL = os.getenv("AWS_S3_ENDPOINT_URL")  # e.g., http://localhost:9100
+# S3 is always mandatory
+AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
+AWS_STORAGE_BUCKET_NAME = os.getenv("AWS_STORAGE_BUCKET_NAME")
+AWS_S3_REGION_NAME = os.getenv("AWS_S3_REGION_NAME", "us-east-1")
+AWS_S3_ENDPOINT_URL = os.getenv("AWS_S3_ENDPOINT_URL")
 
-    # Verification toggle (handy for local http endpoints)
-    _env_verify = os.getenv("AWS_S3_VERIFY")
-    AWS_S3_VERIFY = (_env_verify.lower() == "true") if _env_verify is not None else True
+_env_verify = os.getenv("AWS_S3_VERIFY")
+AWS_S3_VERIFY = (_env_verify.lower() == "true") if _env_verify is not None else True
 
-    # Safe defaults for MinIO (no extra envs required)
-    AWS_DEFAULT_ACL = None
-    AWS_S3_ADDRESSING_STYLE = "path"
-    AWS_S3_SIGNATURE_VERSION = "s3v4"
+AWS_DEFAULT_ACL = None
+AWS_S3_ADDRESSING_STYLE = "path"
+AWS_S3_SIGNATURE_VERSION = "s3v4"
 
-    # Use S3 for static and media
-    STATICFILES_STORAGE = "storages.backends.s3boto3.S3Boto3Storage"
-    DEFAULT_FILE_STORAGE = "storages.backends.s3boto3.S3Boto3Storage"
+# Use S3 for media only
+DEFAULT_FILE_STORAGE = "storages.backends.s3boto3.S3Boto3Storage"
 
-    # URL base derived from endpoint + bucket (MinIO-friendly)
-    base = (AWS_S3_ENDPOINT_URL or "").rstrip("/")
-    if base:
-        STATIC_URL = f"{base}/{AWS_STORAGE_BUCKET_NAME}/static/"
-        MEDIA_URL = f"{base}/{AWS_STORAGE_BUCKET_NAME}/media/"
-    else:
-        # Fallback for AWS without endpoint (still works if user points back to AWS)
-        STATIC_URL = f"https://{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com/static/"
-        MEDIA_URL = f"https://{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com/media/"
+# Static files from local /static/ path
+BASE_DIR = Path(__file__).resolve().parent.parent
+STATICFILES_STORAGE = "django.contrib.staticfiles.storage.StaticFilesStorage"
+STATIC_URL = "/static/"
+STATICFILES_DIRS = [BASE_DIR / "static"]
+STATIC_ROOT = BASE_DIR / "staticfiles"
+
+print(f"BASE_DIR: {BASE_DIR}")
+print(f"STATIC_ROOT: {STATIC_ROOT}")
+print(f"STATIC_URL: {STATIC_URL}")
+
+# Media files go to S3
+base = (AWS_S3_ENDPOINT_URL or "").rstrip("/")
+if base:
+    MEDIA_URL = f"{base}/{AWS_STORAGE_BUCKET_NAME}/media/"
 else:
-    # Local storage settings (development)
-    STATIC_URL = "static/"
-    STATICFILES_DIRS = [BASE_DIR / "static"]
-    STATIC_ROOT = BASE_DIR / "staticfiles"
-
-    # Media files
-    MEDIA_URL = "/media/"
-    MEDIA_ROOT = BASE_DIR / "media"
+    MEDIA_URL = f"https://{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com/media/"
 
 # Email settings
 EMAIL_BACKEND = os.getenv("EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")

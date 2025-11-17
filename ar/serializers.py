@@ -3,7 +3,7 @@ from rest_framework import serializers
 from marketplace.models import ProductImage
 from utils.s3_storage import S3StorageError, get_s3_storage
 
-from .models import ProductARModel
+from .models import ProductARModel, ProductARModelDownload
 
 
 class ProductARModelSerializer(serializers.ModelSerializer):
@@ -114,3 +114,56 @@ class ProductARCatalogSerializer(ProductARModelSerializer):
         if not image:
             return None
         return image.get_proxy_url() or image.get_presigned_url()
+
+
+class ProductARModelDownloadSerializer(serializers.ModelSerializer):
+    """Serializer for tracking user downloads of AR models."""
+
+    product_id = serializers.UUIDField(write_only=True, required=False)
+    product_model_id = serializers.IntegerField(source="product_model.id", read_only=True)
+    product = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProductARModelDownload
+        fields = [
+            "id",
+            "product_model_id",
+            "product",
+            "product_id",
+            "local_path",
+            "file_name",
+            "file_size",
+            "platform",
+            "app_version",
+            "device_info",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "product_model_id",
+            "product",
+            "created_at",
+            "updated_at",
+        ]
+
+    def validate(self, attrs):
+        product_id = attrs.pop("product_id", None)
+        if product_id is not None:
+            try:
+                attrs["product_model"] = ProductARModel.objects.select_related("product").get(product__id=product_id)
+            except ProductARModel.DoesNotExist as exc:
+                raise serializers.ValidationError(
+                    {"product_id": "No AR model is available for this product."}
+                ) from exc
+        elif not self.instance:
+            raise serializers.ValidationError({"product_id": "This field is required."})
+        return super().validate(attrs)
+
+    def get_product(self, obj):
+        product = obj.product_model.product
+        return {
+            "id": str(product.id),
+            "name": product.name,
+            "slug": product.slug,
+        }

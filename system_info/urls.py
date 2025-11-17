@@ -8,4 +8,6 @@ urlpatterns = [
     # S3 image proxy endpoints
     path("s3-images/<path:path>/", views.s3_image_proxy, name="s3_image_proxy"),
     path("s3-images/<path:path>/info/", views.s3_image_info, name="s3_image_info"),
+    # App version check endpoint
+    path("app-version-check/", views.app_version_check, name="app_version_check"),
 ]

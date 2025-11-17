@@ -2,11 +2,14 @@ import logging
 
 from django.conf import settings
 from django.core.cache import cache
-from django.http import HttpResponse, HttpResponseBadRequest, HttpResponseNotFound
+from django.http import HttpResponse, HttpResponseBadRequest, HttpResponseNotFound, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET
+from packaging import version
 
 from utils.s3_storage import S3StorageError, get_s3_storage
+
+from .models import AppVersion
 
 logger = logging.getLogger(__name__)
 
@@ -140,3 +143,73 @@ def s3_image_info(request, path):
     except Exception as e:
         logger.error(f"Unexpected error in S3 image info for path {path}: {str(e)}")
         return HttpResponseBadRequest("Server error")
+
+
+@csrf_exempt
+@require_GET
+def app_version_check(request):
+    """
+    Check if the app version meets mandatory requirements.
+
+    Query parameters:
+    - platform: 'android' or 'ios'
+    - current_version: current app version (e.g., '1.1.0')
+
+    Returns:
+    - requires_update: boolean
+    - is_mandatory: boolean
+    - latest_version: string
+    - update_message: string
+    - download_url: string
+    """
+    try:
+        platform = request.GET.get("platform")
+        current_version = request.GET.get("current_version")
+
+        if not platform or not current_version:
+            return JsonResponse({"error": "platform and current_version parameters are required"}, status=400)
+
+        if platform not in ["android", "ios"]:
+            return JsonResponse({"error": "Invalid platform. Must be android or ios"}, status=400)
+
+        # Get version info from database
+        try:
+            app_version = AppVersion.objects.get(platform=platform, is_active=True)
+        except AppVersion.DoesNotExist:
+            # No version requirements set
+            return JsonResponse(
+                {
+                    "requires_update": False,
+                    "is_mandatory": False,
+                    "latest_version": current_version,
+                    "update_message": "",
+                    "download_url": "",
+                }
+            )
+
+        # Compare versions
+        try:
+            current = version.parse(current_version)
+            mandatory = version.parse(app_version.mandatory_version)
+            latest = version.parse(app_version.latest_version)
+
+            requires_update = current < latest
+            is_mandatory = current < mandatory
+
+        except Exception as e:
+            logger.error(f"Version parsing error: {e}")
+            return JsonResponse({"error": "Invalid version format"}, status=400)
+
+        return JsonResponse(
+            {
+                "requires_update": requires_update,
+                "is_mandatory": is_mandatory,
+                "latest_version": app_version.latest_version,
+                "update_message": app_version.update_message,
+                "download_url": app_version.download_url,
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"Error in app version check: {e}")
+        return JsonResponse({"error": "Internal server error"}, status=500)

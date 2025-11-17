@@ -238,9 +238,9 @@ class ProductViewSet(viewsets.ModelViewSet):
         """Override to add action-specific and user-specific optimizations"""
         queryset = super().get_queryset()
 
-        # For detail views, prefetch reviews with reviewer info
+        # For detail views, prefetch reviews with reviewer info and AR model
         if self.action == "retrieve":
-            queryset = queryset.prefetch_related("reviews__reviewer")
+            queryset = queryset.prefetch_related("reviews__reviewer", "ar_model")
 
         # If user is authenticated, prefetch their favorites for this queryset
         if hasattr(self.request, "user") and self.request.user.is_authenticated:

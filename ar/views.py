@@ -11,8 +11,13 @@ from marketplace.models import Product
 from marketplace.permissions import IsAdminUser, IsSellerUser
 from utils.s3_storage import S3StorageError, get_s3_storage
 
-from .models import ProductARModel
-from .serializers import ProductARCatalogSerializer, ProductARModelSerializer, ProductARModelUploadSerializer
+from .models import ProductARModel, ProductARModelDownload
+from .serializers import (
+    ProductARCatalogSerializer,
+    ProductARModelDownloadSerializer,
+    ProductARModelSerializer,
+    ProductARModelUploadSerializer,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -140,3 +145,23 @@ class ProductARModelViewSet(viewsets.GenericViewSet):
             context={**self.get_serializer_context(), "include_download_url": True},
         )
         return Response(serializer.data)
+
+
+class ProductARModelDownloadViewSet(viewsets.ModelViewSet):
+    """
+    CRUD operations for tracking the models a user has downloaded.
+    Users only see and manage their own download records.
+    """
+
+    serializer_class = ProductARModelDownloadSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return (
+            ProductARModelDownload.objects.filter(user=self.request.user)
+            .select_related("product_model__product")
+            .order_by("-created_at")
+        )
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)

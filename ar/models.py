@@ -36,4 +36,34 @@ class ProductARModel(models.Model):
         return f"3D model for {self.product.name}"
 
 
-# Create your models here.
+class ProductARModelDownload(models.Model):
+    """
+    Tracks when a user downloads a 3D model and where it was stored locally.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="ar_model_downloads",
+    )
+    product_model = models.ForeignKey(
+        ProductARModel,
+        on_delete=models.CASCADE,
+        related_name="downloads",
+    )
+    local_path = models.CharField(max_length=1024, blank=True, default="")
+    file_name = models.CharField(max_length=255, blank=True, default="")
+    file_size = models.BigIntegerField(null=True, blank=True)
+    platform = models.CharField(max_length=64, blank=True)
+    app_version = models.CharField(max_length=64, blank=True)
+    device_info = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Product 3D Model Download"
+        verbose_name_plural = "Product 3D Model Downloads"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.file_name} - {self.user}"
