@@ -255,7 +255,76 @@ class ProductViewSet(viewsets.ModelViewSet):
         return queryset
 
     def create(self, request, *args, **kwargs):
-        """Override create method with enhanced error handling for file uploads"""
+        """
+        Create product with feature flag routing.
+
+        Routes to either:
+        - CatalogService if USE_SERVICE_LAYER_PRODUCTS=True
+        - Legacy implementation (current)
+        """
+        from django.conf import settings
+
+        use_service_layer = settings.FEATURE_FLAGS.get("USE_SERVICE_LAYER_PRODUCTS", False)
+
+        if use_service_layer:
+            logger.info("🚀 Using CatalogService for product create")
+            return self._create_via_service(request, *args, **kwargs)
+        else:
+            logger.info("📦 Using legacy implementation for product create")
+            return self._create_legacy(request, *args, **kwargs)
+
+    def _create_via_service(self, request, *args, **kwargs):
+        """Product creation using CatalogService"""
+        from marketplace.services import CatalogService
+
+        # Validate serializer first
+        serializer = self.get_serializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        # Extract data from validated serializer
+        data = serializer.validated_data
+
+        # Get image files from request
+        images = []
+        for key in request.FILES:
+            images.extend(request.FILES.getlist(key))
+
+        # Call service
+        catalog_service = CatalogService()
+        result = catalog_service.create_product(data=data, user=request.user, images=images if images else None)
+
+        if not result.ok:
+            if result.error == "PERMISSION_DENIED":
+                return Response({"detail": result.error_detail}, status=status.HTTP_403_FORBIDDEN)
+            return Response({"error": result.error, "detail": result.error_detail}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Serialize created product
+        product = result.value
+        response_serializer = self.get_serializer(product)
+
+        # Add image information
+        response_data = response_serializer.data.copy()
+        product_images = product.images.order_by("order", "id")
+        if product_images.exists():
+            from .serializers import ProductImageSerializer
+
+            images_data = ProductImageSerializer(product_images, many=True).data
+            response_data["images"] = images_data
+            response_data["primary_image"] = next(
+                (img for img in images_data if img["is_primary"]), images_data[0] if images_data else None
+            )
+            response_data["total_images"] = len(images_data)
+        else:
+            response_data["images"] = []
+            response_data["primary_image"] = None
+            response_data["total_images"] = 0
+
+        headers = self.get_success_headers(response_data)
+        return Response(response_data, status=status.HTTP_201_CREATED, headers=headers)
+
+    def _create_legacy(self, request, *args, **kwargs):
+        """Legacy product creation implementation"""
         try:
             serializer = self.get_serializer(data=request.data)
 
@@ -480,7 +549,104 @@ class ProductViewSet(viewsets.ModelViewSet):
         return product
 
     def list(self, request, *args, **kwargs):
-        """Override list method with truly async view tracking"""
+        """
+        Override list method with feature flag routing.
+
+        Routes to either:
+        - CatalogService (new service layer) if USE_SERVICE_LAYER_PRODUCTS=True
+        - Legacy implementation (current queryset-based)
+        """
+        from django.conf import settings
+
+        # Check feature flag
+        use_service_layer = settings.FEATURE_FLAGS.get("USE_SERVICE_LAYER_PRODUCTS", False)
+
+        if use_service_layer:
+            logger.info("🚀 Using CatalogService (new service layer) for product listing")
+            return self._list_via_service(request, *args, **kwargs)
+        else:
+            logger.info("📦 Using legacy implementation for product listing")
+            return self._list_legacy(request, *args, **kwargs)
+
+    def _list_via_service(self, request, *args, **kwargs):
+        """Product listing using CatalogService (new service layer)"""
+        from marketplace.services import CatalogService
+
+        # Extract filters from request
+        filters = {}
+
+        # Category filter
+        if request.query_params.get("category"):
+            filters["category"] = request.query_params.get("category")
+
+        # Seller filter
+        if request.query_params.get("seller"):
+            filters["seller"] = request.query_params.get("seller")
+
+        # Price filters
+        if request.query_params.get("price_min"):
+            filters["price_min"] = request.query_params.get("price_min")
+        if request.query_params.get("price_max"):
+            filters["price_max"] = request.query_params.get("price_max")
+
+        # Condition filter
+        if request.query_params.get("condition"):
+            filters["condition"] = request.query_params.get("condition")
+
+        # Brand filter
+        if request.query_params.get("brand"):
+            filters["brand"] = request.query_params.get("brand")
+
+        # Stock filter
+        if request.query_params.get("in_stock"):
+            filters["in_stock"] = request.query_params.get("in_stock").lower() == "true"
+
+        # Featured filter
+        if request.query_params.get("is_featured"):
+            filters["is_featured"] = request.query_params.get("is_featured").lower() == "true"
+
+        # Pagination
+        page = int(request.query_params.get("page", 1))
+        page_size = int(
+            request.query_params.get("page_size", self.pagination_class.page_size if self.pagination_class else 20)
+        )
+
+        # Ordering
+        ordering = request.query_params.get("ordering", "-created_at")
+
+        # Call service
+        catalog_service = CatalogService()
+        result = catalog_service.list_products(filters=filters, page=page, page_size=page_size, ordering=ordering)
+
+        if not result.ok:
+            logger.error(f"CatalogService list_products failed: {result.error}")
+            return Response(
+                {"error": result.error, "detail": result.error_detail}, status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        # Serialize products
+        products = result.value["results"]
+        serializer = self.get_serializer(products, many=True)
+
+        # Build paginated response
+        response_data = {
+            "count": result.value["count"],
+            "next": None,  # TODO: Build next/previous URLs
+            "previous": None,
+            "results": serializer.data,
+            "page": result.value["page"],
+            "num_pages": result.value["num_pages"],
+        }
+
+        # Queue async tracking
+        from .async_tracking import AsyncTracker
+
+        start_background_tracking(lambda: AsyncTracker.queue_listing_view(products, request))
+
+        return Response(response_data)
+
+    def _list_legacy(self, request, *args, **kwargs):
+        """Legacy product listing implementation (original queryset-based)"""
         queryset = self.filter_queryset(self.get_queryset())
 
         page = self.paginate_queryset(queryset)
@@ -612,6 +778,62 @@ class ProductViewSet(viewsets.ModelViewSet):
             return Response({"detail": "Failed to fetch products"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def retrieve(self, request, *args, **kwargs):
+        """
+        Retrieve product details with feature flag routing.
+
+        Routes to either:
+        - CatalogService if USE_SERVICE_LAYER_PRODUCTS=True
+        - Legacy implementation (current)
+        """
+        from django.conf import settings
+
+        use_service_layer = settings.FEATURE_FLAGS.get("USE_SERVICE_LAYER_PRODUCTS", False)
+
+        if use_service_layer:
+            logger.info("🚀 Using CatalogService for product retrieve")
+            return self._retrieve_via_service(request, *args, **kwargs)
+        else:
+            logger.info("📦 Using legacy implementation for product retrieve")
+            return self._retrieve_legacy(request, *args, **kwargs)
+
+    def _retrieve_via_service(self, request, *args, **kwargs):
+        """Product detail using CatalogService"""
+        from marketplace.services import CatalogService
+
+        # Get product_id from slug lookup
+        lookup_value = kwargs.get(self.lookup_field)
+
+        try:
+            # We need to get product by slug
+            product = Product.objects.get(slug=lookup_value, is_active=True)
+            product_id = str(product.id)
+        except Product.DoesNotExist:
+            return Response({"detail": "Product not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        # Call service
+        catalog_service = CatalogService()
+        result = catalog_service.get_product(product_id, track_view=True)
+
+        if not result.ok:
+            if result.error == "PRODUCT_NOT_FOUND":
+                return Response({"detail": result.error_detail}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"error": result.error, "detail": result.error_detail}, status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        # Serialize product
+        product = result.value
+        serializer = self.get_serializer(product)
+
+        # Queue async tracking
+        from .async_tracking import AsyncTracker
+
+        start_background_tracking(lambda: AsyncTracker.queue_product_view(product, request))
+
+        return Response(serializer.data)
+
+    def _retrieve_legacy(self, request, *args, **kwargs):
+        """Legacy product detail implementation"""
         instance = self.get_object()
 
         serializer = self.get_serializer(instance)
@@ -644,6 +866,113 @@ class ProductViewSet(viewsets.ModelViewSet):
         start_background_tracking(lambda: AsyncTracker.queue_product_view(instance, request))
 
         return response
+
+    def update(self, request, *args, **kwargs):
+        """
+        Update product with feature flag routing.
+
+        Routes to either:
+        - CatalogService if USE_SERVICE_LAYER_PRODUCTS=True
+        - Legacy implementation (DRF ModelViewSet default)
+        """
+        from django.conf import settings
+
+        use_service_layer = settings.FEATURE_FLAGS.get("USE_SERVICE_LAYER_PRODUCTS", False)
+
+        if use_service_layer:
+            logger.info("🚀 Using CatalogService for product update")
+            return self._update_via_service(request, *args, **kwargs)
+        else:
+            logger.info("📦 Using legacy implementation for product update")
+            return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        """Partial update routing (uses update method)"""
+        kwargs["partial"] = True
+        return self.update(request, *args, **kwargs)
+
+    def _update_via_service(self, request, *args, **kwargs):
+        """Product update using CatalogService"""
+        from marketplace.services import CatalogService
+
+        partial = kwargs.pop("partial", False)
+
+        # Get product by slug
+        lookup_value = kwargs.get(self.lookup_field)
+        try:
+            product = Product.objects.get(slug=lookup_value, is_active=True)
+            product_id = str(product.id)
+        except Product.DoesNotExist:
+            return Response({"detail": "Product not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        # Validate serializer
+        serializer = self.get_serializer(product, data=request.data, partial=partial)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        # Extract validated data
+        data = serializer.validated_data
+
+        # Call service
+        catalog_service = CatalogService()
+        result = catalog_service.update_product(product_id=product_id, data=data, user=request.user)
+
+        if not result.ok:
+            if result.error == "NOT_PRODUCT_OWNER":
+                return Response({"detail": result.error_detail}, status=status.HTTP_403_FORBIDDEN)
+            elif result.error == "PRODUCT_NOT_FOUND":
+                return Response({"detail": result.error_detail}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"error": result.error, "detail": result.error_detail}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Serialize updated product
+        updated_product = result.value
+        response_serializer = self.get_serializer(updated_product)
+
+        return Response(response_serializer.data)
+
+    def destroy(self, request, *args, **kwargs):
+        """
+        Delete product with feature flag routing.
+
+        Routes to either:
+        - CatalogService if USE_SERVICE_LAYER_PRODUCTS=True
+        - Legacy implementation (DRF ModelViewSet default)
+        """
+        from django.conf import settings
+
+        use_service_layer = settings.FEATURE_FLAGS.get("USE_SERVICE_LAYER_PRODUCTS", False)
+
+        if use_service_layer:
+            logger.info("🚀 Using CatalogService for product delete")
+            return self._destroy_via_service(request, *args, **kwargs)
+        else:
+            logger.info("📦 Using legacy implementation for product delete")
+            return super().destroy(request, *args, **kwargs)
+
+    def _destroy_via_service(self, request, *args, **kwargs):
+        """Product deletion using CatalogService"""
+        from marketplace.services import CatalogService
+
+        # Get product by slug
+        lookup_value = kwargs.get(self.lookup_field)
+        try:
+            product = Product.objects.get(slug=lookup_value, is_active=True)
+            product_id = str(product.id)
+        except Product.DoesNotExist:
+            return Response({"detail": "Product not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        # Call service (soft delete by default)
+        catalog_service = CatalogService()
+        result = catalog_service.delete_product(product_id=product_id, user=request.user, hard_delete=False)
+
+        if not result.ok:
+            if result.error == "NOT_PRODUCT_OWNER":
+                return Response({"detail": result.error_detail}, status=status.HTTP_403_FORBIDDEN)
+            elif result.error == "PRODUCT_NOT_FOUND":
+                return Response({"detail": result.error_detail}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"error": result.error, "detail": result.error_detail}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=["post"])
     def favorite(self, request, slug=None):

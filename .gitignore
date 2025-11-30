@@ -10,3 +10,6 @@ db.sqlite3
 debug.log
 .ruff_cache/
 .serena/
+.claude/
+.opencode/
+.serena/

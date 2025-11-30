@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
+import logging
 import os
 from datetime import timedelta
 from pathlib import Path
@@ -54,6 +55,8 @@ INSTALLED_APPS = [
     "django_filters",
     "storages",  # AWS S3 storage backend
     "django_celery_beat",  # Celery Beat for scheduled tasks
+    "drf_spectacular",  # OpenAPI/Swagger documentation
+    "infrastructure",  # Infrastructure abstractions (SOLID refactoring)
     "authentication",
     "marketplace",
     "activity",
@@ -181,6 +184,32 @@ REST_FRAMEWORK = {
         "rest_framework.throttling.UserRateThrottle",
     ],
     "DEFAULT_THROTTLE_RATES": {"anon": "60/min", "user": "120/min"},
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+}
+
+# drf-spectacular settings for OpenAPI/Swagger documentation
+SPECTACULAR_SETTINGS = {
+    "TITLE": "Designia Backend API",
+    "DESCRIPTION": "API documentation for Designia marketplace platform",
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
+    "COMPONENT_SPLIT_REQUEST": True,
+    "SCHEMA_PATH_PREFIX": r"/api/",
+    "SWAGGER_UI_SETTINGS": {
+        "deepLinking": True,
+        "persistAuthorization": True,
+        "displayOperationId": True,
+    },
+    "APPEND_COMPONENTS": {
+        "securitySchemes": {
+            "Bearer": {
+                "type": "http",
+                "scheme": "bearer",
+                "bearerFormat": "JWT",
+            }
+        }
+    },
+    "SECURITY": [{"Bearer": []}],
 }
 
 
@@ -463,3 +492,86 @@ CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 # Celery Security
 CELERY_WORKER_HIJACK_ROOT_LOGGER = False
 CELERY_WORKER_LOG_COLOR = False
+
+# ===============================
+# FEATURE FLAGS - SOLID REFACTORING
+# ===============================
+
+# Infrastructure Abstractions (Epic 1) & Service Layer (Epic 2)
+# Controls whether to use new implementations or legacy code
+# DEFAULT: TRUE - Use new service layer and infrastructure (Epic 1 & 2 complete)
+# Set environment variable to "false" to rollback to legacy implementation
+FEATURE_FLAGS = {
+    # Infrastructure layer (Epic 1 - Story 1.6)
+    # ✅ COMPLETE - Defaults to TRUE (use new infrastructure abstractions)
+    "USE_NEW_STORAGE": os.getenv("FEATURE_FLAG_USE_NEW_STORAGE", "True").lower() == "true",
+    "USE_NEW_EMAIL": os.getenv("FEATURE_FLAG_USE_NEW_EMAIL", "True").lower() == "true",
+    "USE_NEW_PAYMENTS": os.getenv("FEATURE_FLAG_USE_NEW_PAYMENTS", "True").lower() == "true",
+    # Service layer - Marketplace (Epic 2)
+    # ✅ COMPLETE - Defaults to TRUE (use new service layer)
+    "USE_SERVICE_LAYER_MARKETPLACE": os.getenv("FEATURE_FLAG_USE_SERVICE_LAYER_MARKETPLACE", "True").lower() == "true",
+    "USE_SERVICE_LAYER_PRODUCTS": os.getenv("FEATURE_FLAG_USE_SERVICE_LAYER_PRODUCTS", "True").lower() == "true",
+    "USE_SERVICE_LAYER_CART": os.getenv("FEATURE_FLAG_USE_SERVICE_LAYER_CART", "True").lower() == "true",
+    "USE_SERVICE_LAYER_ORDERS": os.getenv("FEATURE_FLAG_USE_SERVICE_LAYER_ORDERS", "True").lower() == "true",
+    # Service layer - Payments (Epic 4)
+    # ⏳ PENDING - Defaults to FALSE (use legacy until Epic 4 complete)
+    "USE_SERVICE_LAYER_PAYMENTS": os.getenv("FEATURE_FLAG_USE_SERVICE_LAYER_PAYMENTS", "False").lower() == "true",
+}
+
+# Infrastructure Configuration
+# Used by DI container to determine which infrastructure implementations to use
+INFRASTRUCTURE = {
+    # Storage backend: 's3', 'local', 'minio'
+    "STORAGE_BACKEND": os.getenv("STORAGE_BACKEND", "s3"),
+    "STORAGE_CONFIG": {
+        "s3": {
+            "bucket_name": AWS_STORAGE_BUCKET_NAME,
+            "region": AWS_S3_REGION_NAME,
+            "access_key": AWS_ACCESS_KEY_ID,
+            "secret_key": AWS_SECRET_ACCESS_KEY,
+            "endpoint_url": AWS_S3_ENDPOINT_URL,
+        },
+        "local": {
+            "base_path": BASE_DIR / "media_local",
+        },
+    },
+    # Email backend: 'smtp', 'mock'
+    "EMAIL_BACKEND_TYPE": os.getenv("EMAIL_BACKEND_TYPE", "smtp" if not DEBUG else "mock"),
+    "EMAIL_CONFIG": {
+        "smtp": {
+            "host": EMAIL_HOST,
+            "port": EMAIL_PORT,
+            "use_tls": EMAIL_USE_TLS,
+            "username": EMAIL_HOST_USER,
+            "password": EMAIL_HOST_PASSWORD,
+            "from_email": DEFAULT_FROM_EMAIL,
+        },
+        "mock": {
+            "log_file": BASE_DIR / "logs" / "emails.log",
+        },
+    },
+    # Payment provider: 'stripe', 'mock'
+    "PAYMENT_PROVIDER": os.getenv("PAYMENT_PROVIDER", "stripe" if not DEBUG else "mock"),
+    "PAYMENT_CONFIG": {
+        "stripe": {
+            "secret_key": STRIPE_SECRET_KEY,
+            "publishable_key": STRIPE_PUBLISHABLE_KEY,
+            "webhook_secret": STRIPE_WEBHOOK_SECRET,
+            "webhook_connect_secret": STRIPE_WEBHOOK_CONNECT_SECRET,
+            "application_fee_percent": STRIPE_APPLICATION_FEE_PERCENT,
+        },
+        "mock": {
+            "enable_failures": os.getenv("MOCK_PAYMENT_ENABLE_FAILURES", "False").lower() == "true",
+        },
+    },
+}
+
+logger = logging.getLogger(__name__)
+logger.info("=== FEATURE FLAGS STATUS ===")
+for flag_name, flag_value in FEATURE_FLAGS.items():
+    status = "ENABLED" if flag_value else "DISABLED"
+    logger.info(f"{flag_name}: {status}")
+logger.info(f"STORAGE_BACKEND: {INFRASTRUCTURE['STORAGE_BACKEND']}")
+logger.info(f"EMAIL_BACKEND_TYPE: {INFRASTRUCTURE['EMAIL_BACKEND_TYPE']}")
+logger.info(f"PAYMENT_PROVIDER: {INFRASTRUCTURE['PAYMENT_PROVIDER']}")
+logger.info("=" * 30)
