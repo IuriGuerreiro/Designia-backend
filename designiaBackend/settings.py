@@ -337,13 +337,8 @@ LOGGING = {
     "loggers": {
         "marketplace": {
             "handlers": ["console", "file"],
-            "level": "DEBUG",
-            "propagate": True,
-        },
-        "marketplace.views": {
-            "handlers": ["console", "file"],
-            "level": "DEBUG",
-            "propagate": True,
+            "level": "INFO",
+            "propagate": False,
         },
         "marketplace.serializers": {
             "handlers": ["console", "file"],

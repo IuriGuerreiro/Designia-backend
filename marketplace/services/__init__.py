@@ -32,6 +32,7 @@ from .inventory_service import InventoryService
 from .order_service import OrderService
 from .pricing_service import PricingService
 from .review_metrics_service import ReviewMetricsService
+from .review_service import ReviewService
 from .search_service import SearchService
 
 __all__ = [
@@ -50,5 +51,6 @@ __all__ = [
     "OrderService",
     "PricingService",
     "ReviewMetricsService",
+    "ReviewService",
     "SearchService",
 ]

@@ -370,9 +370,11 @@ class CartService(BaseService):
             issues = []
             valid = True
 
+            validation_items = []
             for item in items:
                 product = item["product"]
                 quantity = item["quantity"]
+                item_issues = []
 
                 # Check if product is still active
                 if not product.is_active:
@@ -384,12 +386,17 @@ class CartService(BaseService):
                             "message": f"{product.name} is no longer available",
                         }
                     )
+                    item_issues.append("Product inactive")
                     valid = False
-                    continue
+                    # continue - Don't continue, still add to validation_items
 
                 # Check stock availability
                 stock_check = self.inventory_service.check_availability(str(product.id), quantity)
-                if stock_check.ok and not stock_check.value:
+                if not stock_check.ok:
+                    # If the stock service itself returned an error, propagate it immediately
+                    return service_err(stock_check.error, stock_check.error_detail)
+
+                if not stock_check.value:
                     issues.append(
                         {
                             "product_id": str(product.id),
@@ -400,12 +407,27 @@ class CartService(BaseService):
                             "available": product.stock_quantity,
                         }
                     )
+                    item_issues.append(
+                        f"Insufficient stock. Requested: {quantity}, available {product.stock_quantity}"
+                    )
                     valid = False
+
+                validation_items.append(
+                    {
+                        "product_id": str(product.id),
+                        "product_name": product.name,
+                        "quantity": quantity,
+                        "available": product.stock_quantity,
+                        "issues": item_issues,
+                    }
+                )
 
             validation = {
                 "valid": valid,
                 "issues": issues,
+                "items": validation_items,  # Added items list
                 "items_count": len(items),
+                "total_items": len(items),  # For compatibility with legacy tests
                 "checked_at": None,  # TODO: Add timestamp
             }
 

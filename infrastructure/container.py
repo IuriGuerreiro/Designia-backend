@@ -48,6 +48,15 @@ class ServiceContainer:
             self._storage: Optional[StorageInterface] = None
             self._email: Optional[EmailServiceInterface] = None
             self._payment: Optional[PaymentProviderInterface] = None
+
+            # Domain Services
+            self._inventory_service = None
+            self._pricing_service = None
+            self._cart_service = None
+            self._review_service = None
+            self._search_service = None
+            self._order_service = None  # Added order_service
+
             self._initialized = True
             logger.info("Service container initialized")
 
@@ -98,6 +107,72 @@ class ServiceContainer:
 
         return self._payment
 
+    def inventory_service(self):
+        """Get InventoryService instance."""
+        if self._inventory_service is None:
+            from marketplace.services import InventoryService
+
+            self._inventory_service = InventoryService()
+            logger.debug("Created InventoryService")
+        return self._inventory_service
+
+    def pricing_service(self):
+        """Get PricingService instance."""
+        if self._pricing_service is None:
+            from marketplace.services import PricingService
+
+            self._pricing_service = PricingService()
+            logger.debug("Created PricingService")
+        return self._pricing_service
+
+    def cart_service(self):
+        """Get CartService instance."""
+        if self._cart_service is None:
+            from marketplace.services import CartService
+
+            # CartService depends on InventoryService and PricingService
+            self._cart_service = CartService(
+                inventory_service=self.inventory_service(), pricing_service=self.pricing_service()
+            )
+            logger.debug("Created CartService")
+        return self._cart_service
+
+    def review_metrics_service(self):
+        from marketplace.services import ReviewMetricsService
+
+        return ReviewMetricsService()
+
+    def review_service(self):
+        """Get ReviewService instance."""
+        if self._review_service is None:
+            from marketplace.services import ReviewService
+
+            self._review_service = ReviewService(review_metrics_service=self.review_metrics_service())
+            logger.debug("Created ReviewService")
+        return self._review_service
+
+    def search_service(self):
+        """Get SearchService instance."""
+        if self._search_service is None:
+            from marketplace.services import SearchService
+
+            self._search_service = SearchService()
+            logger.debug("Created SearchService")
+        return self._search_service
+
+    def order_service(self):
+        """Get OrderService instance."""
+        if self._order_service is None:
+            from marketplace.services import OrderService
+
+            self._order_service = OrderService(
+                cart_service=self.cart_service(),
+                inventory_service=self.inventory_service(),
+                pricing_service=self.pricing_service(),
+            )
+            logger.debug("Created OrderService")
+        return self._order_service
+
     def reset(self):
         """
         Reset all cached service instances.
@@ -107,6 +182,12 @@ class ServiceContainer:
         self._storage = None
         self._email = None
         self._payment = None
+        self._inventory_service = None
+        self._pricing_service = None
+        self._cart_service = None
+        self._review_service = None
+        self._search_service = None
+        self._order_service = None  # Added reset
         logger.info("Service container reset")
 
     def configure_for_testing(self):

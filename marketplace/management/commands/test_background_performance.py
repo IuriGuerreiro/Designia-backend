@@ -12,7 +12,7 @@ from django.core.management.base import BaseCommand
 from django.test import RequestFactory
 
 from marketplace.models import Product
-from marketplace.views import ProductViewSet
+from marketplace.views.product_views import ProductViewSet
 
 User = get_user_model()
 

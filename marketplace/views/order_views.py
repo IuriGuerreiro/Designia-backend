@@ -1,0 +1,162 @@
+from rest_framework import status, viewsets
+from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+
+from infrastructure.container import container
+from marketplace.serializers import OrderSerializer
+from marketplace.services import ErrorCodes, OrderService
+
+
+class OrderViewSet(viewsets.ViewSet):
+    permission_classes = [IsAuthenticated]
+
+    def get_service(self) -> OrderService:
+        return container.order_service()
+
+    def list(self, request):
+        service = self.get_service()
+
+        status_filter = request.query_params.get("status")
+        page = int(request.query_params.get("page", 1))
+        page_size = int(request.query_params.get("page_size", 20))
+
+        result = service.list_orders(request.user, status_filter, page, page_size)
+
+        if not result.ok:
+            return Response({"detail": result.error_detail}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        # Serialize results
+        orders_data = OrderSerializer(result.value["results"], many=True).data
+        response_data = result.value
+        response_data["results"] = orders_data
+
+        return Response(response_data, status=status.HTTP_200_OK)
+
+    def retrieve(self, request, pk=None):
+        service = self.get_service()
+
+        result = service.get_order(pk, request.user)
+
+        if not result.ok:
+            if result.error == ErrorCodes.ORDER_NOT_FOUND:
+                return Response({"detail": result.error_detail}, status=status.HTTP_404_NOT_FOUND)
+            elif result.error == ErrorCodes.NOT_ORDER_OWNER:
+                return Response({"detail": result.error_detail}, status=status.HTTP_403_FORBIDDEN)
+            return Response({"detail": result.error_detail}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response(OrderSerializer(result.value).data, status=status.HTTP_200_OK)
+
+    def create(self, request):
+        service = self.get_service()
+
+        # Assuming the request data contains shipping_address and buyer_notes
+        shipping_address = request.data.get("shipping_address")
+        buyer_notes = request.data.get("buyer_notes", "")
+        shipping_cost = request.data.get("shipping_cost")  # Optional override
+
+        if not shipping_address:
+            return Response({"detail": "shipping_address is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Validate shipping address structure (basic check)
+        required_address_fields = ["street", "city", "country"]
+        if not all(field in shipping_address for field in required_address_fields):
+            return Response(
+                {"detail": f"shipping_address must contain: {', '.join(required_address_fields)}"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Optionally get cart_id if needed, but OrderService.create_order uses user's current cart
+        # cart_id = request.data.get("cart_id")
+        # For simplicity, we use the user's current active cart as per OrderService's create_order method
+
+        result = service.create_order(request.user, shipping_address, buyer_notes, shipping_cost)
+
+        if not result.ok:
+            if result.error == ErrorCodes.CART_EMPTY:
+                return Response({"detail": result.error_detail}, status=status.HTTP_400_BAD_REQUEST)
+            elif result.error == ErrorCodes.VALIDATION_ERROR:
+                return Response({"detail": result.error_detail}, status=status.HTTP_400_BAD_REQUEST)
+            elif result.error == ErrorCodes.INSUFFICIENT_STOCK:  # From nested inventory service
+                return Response({"detail": result.error_detail}, status=status.HTTP_409_CONFLICT)
+            elif result.error == ErrorCodes.RESERVATION_FAILED:
+                return Response({"detail": result.error_detail}, status=status.HTTP_409_CONFLICT)
+            return Response({"detail": result.error_detail}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response(OrderSerializer(result.value).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["patch"])
+    def update_shipping(self, request, pk=None):
+        service = self.get_service()
+
+        tracking_number = request.data.get("tracking_number")
+        carrier = request.data.get("shipping_carrier")
+        carrier_code = request.data.get("carrier_code", "")
+
+        if not tracking_number or not carrier:
+            return Response(
+                {"detail": "tracking_number and shipping_carrier are required"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Assuming user must be staff or seller of items in order to update shipping
+        # The service method handles the actual permission checking internally based on order items
+        # if not request.user.is_staff and not order.items.filter(seller=request.user).exists():
+        #     return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
+        # OrderService.update_shipping does not take user param, so permission check needed here or ensure in service.
+
+        # For this story, `update_shipping` is meant for admin/seller. Let's assume the service handles internal permission or a higher-level permission class.
+        # But `OrderService.update_shipping` doesn't take `user`. So, a permission check on the Order items from the view might be needed before calling the service.
+        # However, the AC says: "update_shipping()" is migrated. And service handles "state transitions".
+        # Let's adjust for `update_shipping` to take a user, and service checks if user is seller of items.
+
+        # For simplicity, for now, we'll let service handle internal state checks, but for permission
+        # the view needs to check if current user has rights to update this order's shipping.
+        # Given in `views_legacy.py` there was `if not (request.user == order.buyer or order.items.filter(seller=request.user).exists() or request.user.is_staff):`
+        # Let's add that to the view before calling the service, or make service take user.
+        # The service method `update_shipping` does NOT take user currently. It's more of a system-level update.
+        # Let's assume for this story, `update_shipping` is for an admin or privileged user via another viewset.
+        # Or, the AC says "Order list filtered by user (can't see others' orders)". So, it implies the viewset scope handles user.
+        # But `update_shipping` is an action on `detail=True`.
+
+        # Let's adjust the update_shipping in OrderService to take user to check permission properly.
+        # But wait, it's about migrating existing endpoints. Let's assume for now, `update_shipping` is a system call.
+        # Or I need to manually fetch the order here and verify permission before calling service.
+        # AC: "Order list filtered by user (can't see others' orders)" means list/retrieve only for owner.
+        # `update_shipping` in views_legacy was:
+        # `if not (request.user == order.buyer or order.items.filter(seller=request.user).exists() or request.user.is_staff):`
+        # This means anyone associated with the order (buyer, seller, admin) can update status.
+
+        # For `update_shipping`, the `OrderService` method should ideally take `user` and perform authorization internally.
+        # I need to modify `OrderService.update_shipping` to take `user`.
+
+        result = service.update_shipping(pk, request.user, tracking_number, carrier, carrier_code)
+
+        if not result.ok:
+            if result.error == ErrorCodes.ORDER_NOT_FOUND:
+                return Response({"detail": result.error_detail}, status=status.HTTP_404_NOT_FOUND)
+            elif result.error == ErrorCodes.INVALID_ORDER_STATE:
+                return Response({"detail": result.error_detail}, status=status.HTTP_400_BAD_REQUEST)
+            elif result.error == ErrorCodes.PERMISSION_DENIED:
+                return Response({"detail": result.error_detail}, status=status.HTTP_403_FORBIDDEN)
+            return Response({"detail": result.error_detail}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response(OrderSerializer(result.value).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"])
+    def cancel(self, request, pk=None):
+        service = self.get_service()
+
+        reason = request.data.get("reason", "")
+
+        result = service.cancel_order(pk, request.user, reason)
+
+        if not result.ok:
+            if result.error == ErrorCodes.ORDER_NOT_FOUND:
+                return Response({"detail": result.error_detail}, status=status.HTTP_404_NOT_FOUND)
+            elif result.error == ErrorCodes.NOT_ORDER_OWNER:
+                return Response({"detail": result.error_detail}, status=status.HTTP_403_FORBIDDEN)
+            elif result.error == ErrorCodes.ORDER_CANNOT_CANCEL:
+                return Response({"detail": result.error_detail}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"detail": result.error_detail}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response(OrderSerializer(result.value).data, status=status.HTTP_200_OK)

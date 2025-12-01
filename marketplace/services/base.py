@@ -264,6 +264,8 @@ class ErrorCodes:
     # Validation errors
     VALIDATION_ERROR = "validation_error"
     INVALID_INPUT = "invalid_input"
+    DUPLICATE_REVIEW = "duplicate_review"  # Added DUPLICATE_REVIEW
+    NOT_FOUND = "not_found"  # Added NOT_FOUND
 
     # Internal errors
     INTERNAL_ERROR = "internal_error"

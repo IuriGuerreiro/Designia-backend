@@ -312,7 +312,7 @@ class OrderService(BaseService):
     @BaseService.log_performance
     @transaction.atomic
     def update_shipping(
-        self, order_id: str, tracking_number: str, carrier: str, carrier_code: str = ""
+        self, order_id: str, user: User, tracking_number: str, carrier: str, carrier_code: str = ""
     ) -> ServiceResult[Order]:
         """
         Update order shipping information (admin/seller only).
@@ -321,28 +321,35 @@ class OrderService(BaseService):
 
         Args:
             order_id: Order UUID
+            user: User performing the update
             tracking_number: Tracking number
             carrier: Shipping carrier name
             carrier_code: Optional carrier code
 
         Returns:
             ServiceResult with updated Order
-
-        Example:
-            >>> result = order_service.update_shipping(
-            ...     order_id,
-            ...     tracking_number="DY08912401385471",
-            ...     carrier="CTT"
-            ... )
         """
         try:
             order = Order.objects.select_for_update().get(id=order_id)
+            self.logger.debug(f"Update shipping for order {order_id}: order status={order.status}")
 
             # Validate order can be shipped
             if order.status not in ["payment_confirmed", "awaiting_shipment"]:
+                self.logger.warning(
+                    f"Update shipping: Invalid state transition for order {order_id} from {order.status}"
+                )
                 return service_err(
                     ErrorCodes.INVALID_ORDER_STATE,
                     f"Cannot ship order in status '{order.status}'. Must be payment_confirmed or awaiting_shipment.",
+                )
+
+            # Permission check: Only seller of items or staff can update shipping
+            user_is_seller = order.items.filter(seller=user).exists()
+            self.logger.debug(f"Update shipping: user {user.id} is_seller={user_is_seller}, is_staff={user.is_staff}")
+            if not (user_is_seller or user.is_staff):
+                self.logger.warning(f"Update shipping: Permission denied for user {user.id} on order {order_id}")
+                return service_err(
+                    ErrorCodes.PERMISSION_DENIED, "You don't have permission to update shipping for this order"
                 )
 
             # Update shipping info

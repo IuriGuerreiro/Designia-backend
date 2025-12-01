@@ -7,8 +7,9 @@ from .views import (
     OrderViewSet,
     ProductImageViewSet,
     ProductMetricsViewSet,
-    ProductReviewViewSet,
     ProductViewSet,
+    ReviewViewSet,
+    SearchViewSet,
     UserProfileViewSet,
     seller_profile,
 )
@@ -17,7 +18,7 @@ from .views import (
 router = DefaultRouter()
 router.register(r"categories", CategoryViewSet, basename="category")
 router.register(r"products", ProductViewSet, basename="product")
-router.register(r"reviews", ProductReviewViewSet, basename="review")
+router.register(r"reviews", ReviewViewSet, basename="review")
 router.register(r"cart", CartViewSet, basename="cart")
 router.register(r"orders", OrderViewSet, basename="order")
 router.register(r"metrics", ProductMetricsViewSet, basename="metrics")
@@ -26,6 +27,10 @@ router.register(r"profiles", UserProfileViewSet, basename="profile")
 app_name = "marketplace"
 
 urlpatterns = [
+    # Search endpoints (override ProductViewSet search)
+    path("products/search/", SearchViewSet.as_view({"get": "search"}), name="product-search"),
+    path("products/autocomplete/", SearchViewSet.as_view({"get": "autocomplete"}), name="product-autocomplete"),
+    path("products/filters/", SearchViewSet.as_view({"get": "filters"}), name="product-filters"),
     # Main API routes
     path("", include(router.urls)),
     # Nested product routes (manual routing)
@@ -38,16 +43,6 @@ urlpatterns = [
         "products/<slug:product_slug>/images/<int:pk>/",
         ProductImageViewSet.as_view({"get": "retrieve", "put": "update", "delete": "destroy"}),
         name="product-images-detail",
-    ),
-    path(
-        "products/<slug:product_slug>/reviews/",
-        ProductReviewViewSet.as_view({"get": "list", "post": "create"}),
-        name="product-reviews-list",
-    ),
-    path(
-        "products/<slug:product_slug>/reviews/<int:pk>/",
-        ProductReviewViewSet.as_view({"get": "retrieve", "put": "update", "delete": "destroy"}),
-        name="product-reviews-detail",
     ),
     # Seller profile route
     path("sellers/<int:seller_id>/", seller_profile, name="seller-profile"),

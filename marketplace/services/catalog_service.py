@@ -18,6 +18,7 @@ from django.db.models import Q
 
 from infrastructure.container import container
 from marketplace.models import Category, Product, ProductImage
+from utils.rbac import is_seller
 
 from .base import BaseService, ErrorCodes, ServiceResult, service_err, service_ok
 
@@ -218,7 +219,7 @@ class CatalogService(BaseService):
         """
         try:
             # Validate user is a seller
-            if not hasattr(user, "seller_profile") or not user.seller_profile:
+            if not is_seller(user):
                 return service_err(ErrorCodes.PERMISSION_DENIED, "User is not a seller")
 
             # Get or validate category
