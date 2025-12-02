@@ -13,7 +13,7 @@ from django.db import connection, reset_queries
 from django.test import RequestFactory
 
 from marketplace.models import Product
-from marketplace.views import ProductViewSet
+from marketplace.views.product_views import ProductViewSet
 
 User = get_user_model()
 

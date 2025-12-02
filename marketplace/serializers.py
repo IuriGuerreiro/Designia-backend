@@ -610,44 +610,62 @@ class ProductFavoriteSerializer(serializers.ModelSerializer):
 
 
 class CartItemSerializer(serializers.ModelSerializer):
-    """Cart item serializer"""
+    """Serializer for CartItem model - used for adding/updating items via API."""
 
-    product = ProductListSerializer(read_only=True)
-    product_id = serializers.UUIDField(write_only=True)
-    total_price = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    product_id = serializers.CharField(write_only=True)  # For input, expect product_id not product object
+    product = ProductListSerializer(read_only=True)  # For output, show product details
 
     class Meta:
         model = CartItem
-        fields = ["id", "product", "product_id", "quantity", "total_price", "added_at"]
-        read_only_fields = ["id", "total_price", "added_at"]
+        fields = ["id", "product", "product_id", "quantity", "added_at"]
+        read_only_fields = ["id", "product", "added_at"]
 
-    def validate_quantity(self, value):
-        if value <= 0:
-            raise serializers.ValidationError("Quantity must be greater than 0")
-        return value
+    def create(self, validated_data):
+        # This serializer is used for validation and data representation in views,
+        # but the actual CartItem creation/update is handled by CartService.
+        # This method should not be called in the new service-oriented architecture.
+        raise NotImplementedError("CartItem creation should be handled by CartService")
 
-    def validate_product_id(self, value):
-        try:
-            Product.objects.get(id=value, is_active=True)
-        except Product.DoesNotExist:
-            raise serializers.ValidationError("Product not found or not available") from None
-        return value
+    def update(self, instance, validated_data):
+        # This serializer is used for validation and data representation in views,
+        # but the actual CartItem creation/update is handled by CartService.
+        # This method should not be called in the new service-oriented architecture.
+        raise NotImplementedError("CartItem update should be handled by CartService")
 
-    def validate(self, data):
-        product_id = data.get("product_id")
-        quantity = data.get("quantity", 1)
+        def validate_quantity(self, value):
+            if value <= 0:
+                raise serializers.ValidationError("Quantity must be a positive integer.")
+            return value
 
-        if product_id:
-            try:
-                product = Product.objects.get(id=product_id, is_active=True)
-                if quantity > product.stock_quantity:
-                    raise serializers.ValidationError(
-                        {"quantity": f"Only {product.stock_quantity} items available in stock"}
-                    )
-            except Product.DoesNotExist:
-                pass  # Already handled in validate_product_id
+        def validate(self, data):
+            # Delegate stock validation to CartService
+            return data
 
-        return data
+
+class CartItemServiceOutputSerializer(serializers.Serializer):
+    """
+    Serializer for individual cart items as returned by CartService.get_cart.
+    It expects 'product' to be a Product model instance directly.
+    """
+
+    id = serializers.UUIDField(read_only=True)
+    product = ProductListSerializer(read_only=True)  # Use existing ProductListSerializer
+    quantity = serializers.IntegerField()
+    added_at = serializers.DateTimeField(read_only=True)
+
+
+class CartServiceOutputSerializer(serializers.Serializer):
+    """
+    Serializer for the entire cart data structure as returned by CartService.get_cart.
+    """
+
+    id = serializers.UUIDField(read_only=True)
+    user_id = serializers.IntegerField(read_only=True)
+    items = CartItemServiceOutputSerializer(many=True, read_only=True)
+    items_count = serializers.IntegerField(read_only=True)
+    totals = serializers.JSONField(read_only=True)  # Totals are already calculated and structured by PricingService
+    created_at = serializers.DateTimeField(read_only=True)
+    updated_at = serializers.DateTimeField(read_only=True)
 
 
 class CartSerializer(serializers.ModelSerializer):
