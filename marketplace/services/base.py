@@ -248,10 +248,16 @@ class ErrorCodes:
     # Order errors
     ORDER_NOT_FOUND = "order_not_found"
     ORDER_ALREADY_PAID = "order_already_paid"
-    ORDER_CANNOT_CANCEL = "order_cannot_cancel"
     INVALID_ORDER_STATE = "invalid_order_state"
+    ORDER_CANNOT_CANCEL = "order_cannot_cancel"
 
-    # Inventory errors
+    # Payment errors
+    INVALID_PAYMENT_DATA = "invalid_payment_data"
+    PAYMENT_FAILED = "payment_failed"
+    PAYMENT_PROVIDER_ERROR = "payment_provider_error"
+    INVALID_OPERATION = "invalid_operation"
+
+    # Review errors
     INSUFFICIENT_STOCK = "insufficient_stock"
     RESERVATION_FAILED = "reservation_failed"
     RESERVATION_EXPIRED = "reservation_expired"

@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 
 import stripe
 from django.conf import settings
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from .interface import (
     CheckoutSession,
@@ -42,6 +43,18 @@ class StripeProvider(PaymentProviderInterface):
         if not stripe.api_key:
             logger.warning("STRIPE_SECRET_KEY not configured")
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type(
+            (
+                stripe.error.RateLimitError,
+                stripe.error.APIConnectionError,
+                stripe.error.APIError,
+            )
+        ),
+        reraise=True,
+    )
     def create_checkout_session(
         self,
         amount: Decimal,
@@ -120,6 +133,18 @@ class StripeProvider(PaymentProviderInterface):
             logger.error(f"Unexpected error creating session: {str(e)}")
             raise PaymentException(f"Session creation error: {str(e)}") from e
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type(
+            (
+                stripe.error.RateLimitError,
+                stripe.error.APIConnectionError,
+                stripe.error.APIError,
+            )
+        ),
+        reraise=True,
+    )
     def retrieve_session(self, session_id: str) -> CheckoutSession:
         """
         Retrieve an existing Stripe checkout session.
@@ -185,6 +210,18 @@ class StripeProvider(PaymentProviderInterface):
             logger.error(f"Webhook signature verification failed: {str(e)}")
             raise PaymentException("Webhook signature verification failed") from e
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type(
+            (
+                stripe.error.RateLimitError,
+                stripe.error.APIConnectionError,
+                stripe.error.APIError,
+            )
+        ),
+        reraise=True,
+    )
     def create_refund(
         self,
         payment_intent_id: str,
@@ -226,6 +263,80 @@ class StripeProvider(PaymentProviderInterface):
             logger.error(f"Refund creation failed: {str(e)}")
             raise PaymentException(f"Refund failed: {str(e)}") from e
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type(
+            (
+                stripe.error.RateLimitError,
+                stripe.error.APIConnectionError,
+                stripe.error.APIError,
+            )
+        ),
+        reraise=True,
+    )
+    def create_transfer(
+        self,
+        amount: Decimal,
+        currency: str,
+        destination_account: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Create a transfer to a connected account.
+
+        Args:
+            amount: Amount to transfer
+            currency: Currency code
+            destination_account: Destination Stripe account ID
+            metadata: Optional metadata
+
+        Returns:
+            Transfer details dictionary
+
+        Raises:
+            PaymentException: If transfer fails
+        """
+        try:
+            amount_cents = int(amount * 100)
+
+            transfer_params = {
+                "amount": amount_cents,
+                "currency": currency.lower(),
+                "destination": destination_account,
+            }
+
+            if metadata:
+                transfer_params["metadata"] = metadata
+
+            transfer = stripe.Transfer.create(**transfer_params)
+
+            logger.info(f"Created Stripe transfer: {transfer.id} to {destination_account}")
+
+            return {
+                "id": transfer.id,
+                "amount": transfer.amount,
+                "currency": transfer.currency,
+                "destination": transfer.destination,
+                "status": "succeeded",  # Transfers are synchronous
+            }
+
+        except stripe.error.StripeError as e:
+            logger.error(f"Stripe transfer failed: {str(e)}")
+            raise PaymentException(f"Transfer failed: {str(e)}") from e
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type(
+            (
+                stripe.error.RateLimitError,
+                stripe.error.APIConnectionError,
+                stripe.error.APIError,
+            )
+        ),
+        reraise=True,
+    )
     def retrieve_payment_intent(self, intent_id: str) -> PaymentIntent:
         """
         Retrieve Stripe payment intent details.

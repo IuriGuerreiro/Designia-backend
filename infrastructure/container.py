@@ -223,3 +223,17 @@ def get_email() -> EmailServiceInterface:
 def get_payment() -> PaymentProviderInterface:
     """Get payment provider from global container."""
     return container.payment()
+
+
+def get_payment_provider() -> PaymentProviderInterface:
+    """Get payment provider (alias for get_payment)."""
+    return container.payment()
+
+
+# For class-based usage (static access pattern)
+class Container:
+    """Static access to container services."""
+
+    @staticmethod
+    def get_payment_provider() -> PaymentProviderInterface:
+        return get_payment_provider()

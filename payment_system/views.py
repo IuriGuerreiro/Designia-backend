@@ -1730,8 +1730,13 @@ def handle_sucessfull_checkout(session):  # noqa: C901
         return False
 
 
-def get_product_image_url(product):
-    """Return the best product image URL, preferring presigned S3 URLs then stored fields."""
+def get_product_image_url(product, request=None):
+    """Return the best product image URL, preferring presigned S3 URLs then stored fields.
+
+    Args:
+        product: Product instance
+        request: Optional request object to build absolute URIs for relative paths
+    """
     if not product.images.exists():
         return ""
 
@@ -1742,32 +1747,41 @@ def get_product_image_url(product):
     if not primary_image:
         return ""
 
+    url = ""
     # Try to get presigned URL first (best option)
     try:
         presigned_url = primary_image.get_presigned_url(expires_in=3600)
         if presigned_url:
             print(f"🔗 Using presigned URL for product {product.name}: {presigned_url[:50]}...")
-            return presigned_url
+            url = presigned_url
     except Exception as e:
         print(f"⚠️ Failed to get presigned URL for product {product.name}: {str(e)}")
 
-    # Fallback to image_url property
-    try:
-        image_url = primary_image.image_url
-        if image_url:
-            print(f"🔗 Using image_url for product {product.name}: {image_url[:50]}...")
-            return image_url
-    except Exception as e:
-        print(f"⚠️ Failed to get image_url for product {product.name}: {str(e)}")
+    # Fallback to image_url property if no presigned URL
+    if not url:
+        try:
+            image_url = primary_image.image_url
+            if image_url:
+                print(f"🔗 Using image_url for product {product.name}: {image_url[:50]}...")
+                url = image_url
+        except Exception as e:
+            print(f"⚠️ Failed to get image_url for product {product.name}: {str(e)}")
 
     # Final fallback to basic URL
-    try:
-        basic_url = primary_image.image.url
-        print(f"🔗 Using basic image URL for product {product.name}: {basic_url[:50]}...")
-        return basic_url
-    except Exception as e:
-        print(f" Failed to get any image URL for product {product.name}: {str(e)}")
-        return ""
+    if not url:
+        try:
+            basic_url = primary_image.image.url
+            print(f"🔗 Using basic image URL for product {product.name}: {basic_url[:50]}...")
+            url = basic_url
+        except Exception as e:
+            print(f" Failed to get any image URL for product {product.name}: {str(e)}")
+            return ""
+
+    # Ensure absolute URI if request is provided and URL is relative
+    if url and url.startswith("/") and request:
+        return request.build_absolute_uri(url)
+
+    return url
 
 
 # Create a Stripe Embedded Checkout Session
@@ -1820,7 +1834,9 @@ def create_checkout_session(request):
                             "name": item.product.name,
                             "description": item.product.short_description or item.product.description[:100],
                             "images": (
-                                [get_product_image_url(item.product)] if get_product_image_url(item.product) else []
+                                [get_product_image_url(item.product, request)]
+                                if get_product_image_url(item.product, request)
+                                else []
                             ),
                         },
                     },
@@ -1900,6 +1916,11 @@ def create_checkout_session(request):
             print(f"🛒 Cart cleared for user {request.user.username}")
 
         print(f"🔔 Creating Stripe checkout session for order {order.id}")
+        # Ensure FRONTEND_URL is valid for return_url
+        frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:5173")
+        if not frontend_url.startswith("http"):
+            frontend_url = f"https://{frontend_url}"
+
         # Create Stripe Embedded Checkout Session with order_id instead of cart_id
         session = stripe.checkout.Session.create(
             ui_mode="embedded",
@@ -1915,7 +1936,7 @@ def create_checkout_session(request):
                     "order_id": str(order.id),
                 },
             },
-            return_url=f"{settings.FRONTEND_URL}/order-success/{order.id}",
+            return_url=f"{frontend_url}/order-success/{order.id}",
             metadata={  # 👈 this metadata is on the Checkout Session itself
                 "user_id": str(request.user.id),
                 "order_id": str(order.id),
@@ -2003,7 +2024,9 @@ def create_checkout_failed_checkout(request, order_id):
                             "name": item.product.name,
                             "description": item.product.short_description or item.product.description[:100],
                             "images": (
-                                [get_product_image_url(item.product)] if get_product_image_url(item.product) else []
+                                [get_product_image_url(item.product, request)]
+                                if get_product_image_url(item.product, request)
+                                else []
                             ),
                         },
                     },
@@ -2025,7 +2048,11 @@ def create_checkout_failed_checkout(request, order_id):
             }
         )
 
-        # Create order with pending_payment status before Stripe session
+        # Ensure FRONTEND_URL is valid for return_url
+        frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:5173")
+        if not frontend_url.startswith("http"):
+            frontend_url = f"https://{frontend_url}"
+
         print(f"🔔 Creating Stripe checkout session for order {order.id}")
         # Create Stripe Embedded Checkout Session with order_id instead of cart_id
         session = stripe.checkout.Session.create(
@@ -2042,7 +2069,7 @@ def create_checkout_failed_checkout(request, order_id):
                     "order_id": str(order.id),
                 },
             },
-            return_url=f"{settings.FRONTEND_URL}/order-success/{order.id}",
+            return_url=f"{frontend_url}/order-success/{order.id}",
             metadata={  # 👈 this metadata is on the Checkout Session itself
                 "user_id": str(request.user.id),
                 "order_id": str(order.id),
