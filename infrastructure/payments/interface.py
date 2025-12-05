@@ -10,7 +10,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 
 class PaymentStatus(str, Enum):
@@ -104,6 +104,7 @@ class PaymentProviderInterface(ABC):
         cancel_url: str,
         metadata: Optional[Dict[str, Any]] = None,
         customer_email: Optional[str] = None,
+        line_items: Optional[List[Dict[str, Any]]] = None,
     ) -> CheckoutSession:
         """
         Create a payment checkout session.
@@ -115,6 +116,7 @@ class PaymentProviderInterface(ABC):
             cancel_url: Redirect URL on canceled payment
             metadata: Custom data to attach to session
             customer_email: Pre-fill customer email
+            line_items: Optional list of line items for the checkout session
 
         Returns:
             CheckoutSession object with session details
@@ -177,6 +179,31 @@ class PaymentProviderInterface(ABC):
 
         Raises:
             PaymentException: If refund creation fails
+        """
+        pass
+
+    @abstractmethod
+    def create_transfer(
+        self,
+        amount: Decimal,
+        currency: str,
+        destination_account: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Create a transfer to a connected account (e.g. seller payout).
+
+        Args:
+            amount: Amount to transfer
+            currency: Currency code
+            destination_account: Destination account ID (e.g. Stripe Connect ID)
+            metadata: Optional metadata
+
+        Returns:
+            Dictionary with transfer details
+
+        Raises:
+            PaymentException: If transfer fails
         """
         pass
 

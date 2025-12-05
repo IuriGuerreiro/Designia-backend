@@ -26,8 +26,7 @@ class StripeWebhookTransferCreatedTest(TestCase):
             stock_quantity=10,
         )
         self.order = Order.objects.create(
-            buyer=self.buyer,
-            total_amount=Decimal("100.00"),
+            buyer=self.buyer, total_amount=Decimal("100.00"), subtotal=Decimal("100.00"), shipping_address={}
         )
         self.payment_transaction = PaymentTransaction.objects.create(
             order=self.order,
