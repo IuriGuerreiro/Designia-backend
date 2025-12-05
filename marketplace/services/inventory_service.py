@@ -96,12 +96,10 @@ class InventoryService(BaseService):
             user_id: Optional user ID for tracking
 
         Returns:
-            ServiceResult with reservation details or error
-
-        Example:
-            >>> result = inventory_service.reserve_stock(product_id, 2, order_id="123")
-            >>> if result.ok:
-            ...     print(f"Reserved: {result.value}")
+            ServiceResult with reservation details or error:
+            - quantity_reserved: Reserved amount
+            - new_stock: Updated stock level
+            - reserved_at: Timestamp
         """
         if quantity <= 0:
             return service_err(ErrorCodes.INVALID_QUANTITY, "Quantity must be positive")

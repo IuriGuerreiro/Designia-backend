@@ -5,6 +5,8 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
+from ar.services.ar_service import ARService
+
 from .models import (
     Cart,
     CartItem,
@@ -18,6 +20,9 @@ from .models import (
     ProductMetrics,
     ProductReview,
 )
+from .services.inventory_service import InventoryService
+from .services.pricing_service import PricingService
+from .services.review_metrics_service import ReviewMetricsService
 
 User = get_user_model()
 
@@ -176,6 +181,13 @@ class ProductListSerializer(serializers.ModelSerializer):
     review_count = serializers.SerializerMethodField()
     average_rating = serializers.SerializerMethodField()
 
+    # Pricing fields (delegated to PricingService)
+    is_on_sale = serializers.SerializerMethodField()
+    discount_percentage = serializers.SerializerMethodField()
+
+    # Inventory fields (delegated to InventoryService)
+    is_in_stock = serializers.SerializerMethodField()
+
     class Meta:
         model = Product
         fields = [
@@ -208,11 +220,6 @@ class ProductListSerializer(serializers.ModelSerializer):
             "id",
             "slug",
             "seller",
-            "average_rating",
-            "review_count",
-            "is_in_stock",
-            "is_on_sale",
-            "discount_percentage",
             "created_at",
             "view_count",
             "favorite_count",
@@ -258,15 +265,31 @@ class ProductListSerializer(serializers.ModelSerializer):
         # Use pre-calculated value from annotation if available
         if hasattr(obj, "calculated_review_count"):
             return obj.calculated_review_count or 0
-        # Fallback to property method
-        return obj.review_count
+
+        # Use service (bypassing deprecated model property)
+        result = ReviewMetricsService().get_review_count(str(obj.id))
+        return result.value if result.ok else 0
 
     def get_average_rating(self, obj):
         # Use pre-calculated value from annotation if available
         if hasattr(obj, "calculated_avg_rating"):
             return obj.calculated_avg_rating or 0
-        # Fallback to property method
-        return obj.average_rating
+
+        # Use service (bypassing deprecated model property)
+        result = ReviewMetricsService().calculate_average_rating(str(obj.id))
+        return result.value if result.ok else 0
+
+    def get_is_on_sale(self, obj):
+        result = PricingService().is_on_sale(obj)
+        return result.value if result.ok else False
+
+    def get_discount_percentage(self, obj):
+        result = PricingService().calculate_discount_percentage(obj)
+        return int(result.value) if result.ok else 0
+
+    def get_is_in_stock(self, obj):
+        result = InventoryService().is_in_stock(str(obj.id))
+        return result.value if result.ok else False
 
 
 class ProductDetailSerializer(serializers.ModelSerializer):
@@ -278,6 +301,18 @@ class ProductDetailSerializer(serializers.ModelSerializer):
     reviews = ProductReviewSerializer(many=True, read_only=True)
     is_favorited = serializers.SerializerMethodField()
     seller_product_count = serializers.SerializerMethodField()
+    # Pricing fields (delegated to PricingService)
+    is_on_sale = serializers.SerializerMethodField()
+    discount_percentage = serializers.SerializerMethodField()
+
+    # Review fields (delegated to ReviewMetricsService)
+    average_rating = serializers.SerializerMethodField()
+    review_count = serializers.SerializerMethodField()
+
+    # Inventory fields (delegated to InventoryService)
+    is_in_stock = serializers.SerializerMethodField()
+
+    # AR fields (delegated to ARService)
     has_ar_model = serializers.SerializerMethodField()
 
     class Meta:
@@ -326,11 +361,6 @@ class ProductDetailSerializer(serializers.ModelSerializer):
             "id",
             "slug",
             "seller",
-            "average_rating",
-            "review_count",
-            "is_in_stock",
-            "is_on_sale",
-            "discount_percentage",
             "seller_product_count",
             "created_at",
             "updated_at",
@@ -350,7 +380,28 @@ class ProductDetailSerializer(serializers.ModelSerializer):
 
     def get_has_ar_model(self, obj):
         """Check if product has an AR 3D model"""
-        return hasattr(obj, "ar_model") and obj.ar_model is not None
+        result = ARService().has_3d_model(str(obj.id))
+        return result.value if result.ok else False
+
+    def get_is_on_sale(self, obj):
+        result = PricingService().is_on_sale(obj)
+        return result.value if result.ok else False
+
+    def get_discount_percentage(self, obj):
+        result = PricingService().calculate_discount_percentage(obj)
+        return int(result.value) if result.ok else 0
+
+    def get_average_rating(self, obj):
+        result = ReviewMetricsService().calculate_average_rating(str(obj.id))
+        return result.value if result.ok else 0
+
+    def get_review_count(self, obj):
+        result = ReviewMetricsService().get_review_count(str(obj.id))
+        return result.value if result.ok else 0
+
+    def get_is_in_stock(self, obj):
+        result = InventoryService().is_in_stock(str(obj.id))
+        return result.value if result.ok else False
 
 
 class ProductCreateUpdateSerializer(serializers.ModelSerializer):

@@ -1,10 +1,8 @@
 import uuid
-from typing import Optional
 
 from django.contrib.auth import get_user_model
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
-from django.utils import timezone
 from django.utils.text import slugify
 
 User = get_user_model()
@@ -121,31 +119,6 @@ class Product(models.Model):
             self.slug = slugify(f"{self.name}-{str(self.id)[:8]}")
         super().save(*args, **kwargs)
 
-    @property
-    def is_on_sale(self):
-        return self.original_price and self.original_price > self.price
-
-    @property
-    def discount_percentage(self):
-        if self.is_on_sale:
-            return int(((self.original_price - self.price) / self.original_price) * 100)
-        return 0
-
-    @property
-    def average_rating(self):
-        reviews = self.reviews.filter(is_active=True)
-        if reviews.exists():
-            return reviews.aggregate(models.Avg("rating"))["rating__avg"]
-        return 0
-
-    @property
-    def review_count(self):
-        return self.reviews.filter(is_active=True).count()
-
-    @property
-    def is_in_stock(self):
-        return self.stock_quantity > 0
-
     def __str__(self):
         return self.name
 
@@ -173,98 +146,6 @@ class ProductImage(models.Model):
         if self.is_primary:
             ProductImage.objects.filter(product=self.product, is_primary=True).update(is_primary=False)
         super().save(*args, **kwargs)
-
-    def get_proxy_url(self) -> Optional[str]:
-        """Get S3 proxy URL for this image (solves mixed content/CSP issues)"""
-        import logging
-
-        logger = logging.getLogger(__name__)
-
-        logger.info("=== GET PROXY URL DEBUG ===")
-        logger.info(f"Image ID: {self.id}")
-        logger.info(f"Product: {self.product.name}")
-        logger.info(f"S3 Key: {self.s3_key}")
-        logger.info(f"S3 Bucket: {self.s3_bucket}")
-        logger.info(f"Has image field: {bool(self.image)}")
-
-        if not self.s3_key or not self.s3_bucket:
-            logger.warning(f"Missing S3 data for image {self.id} - s3_key: {self.s3_key}, s3_bucket: {self.s3_bucket}")
-            # Fallback to traditional image field if available
-            if self.image:
-                return self.image.url
-            return None
-
-        # Return proxy URL
-        proxy_url = f"/api/system/s3-images/{self.s3_key}"
-        logger.info(f"Generated proxy URL for image {self.id}: {proxy_url}")
-        return proxy_url
-
-    def get_presigned_url(self, expires_in=3600):
-        """Generate a pre-signed URL for S3 image access (legacy - use proxy instead)"""
-        import logging
-
-        logger = logging.getLogger(__name__)
-        from django.conf import settings
-
-        logger.info("=== GET PRESIGNED URL DEBUG ===")
-        logger.info(f"Image ID: {self.id}")
-        logger.info(f"Product: {self.product.name}")
-        logger.info(f"S3 Key: {self.s3_key}")
-        logger.info(f"S3 Bucket: {self.s3_bucket}")
-        logger.info(f"Has image field: {bool(self.image)}")
-
-        if not self.s3_key or not self.s3_bucket:
-            logger.warning(f"Missing S3 data for image {self.id} - s3_key: {self.s3_key}, s3_bucket: {self.s3_bucket}")
-            # Fallback to traditional image field if available
-            if self.image:
-                return self.image.url
-            return None
-
-        if getattr(settings, "S3_USE_PROXY_FOR_IMAGE_LINKS", True):
-            proxy_url = self.get_proxy_url()
-            if proxy_url:
-                logger.info(f"Returning proxy URL for image {self.id}: {proxy_url}")
-                return proxy_url
-
-        try:
-            from utils.s3_storage import get_s3_storage
-
-            s3_storage = get_s3_storage()
-            presigned_url = s3_storage.generate_presigned_url(self.s3_bucket, self.s3_key, expires_in)
-            logger.info(f"Generated presigned URL for image {self.id}: {presigned_url}")
-            return presigned_url
-        except Exception as e:
-            logger.error(f"Failed to generate presigned URL for image {self.id}: {e}")
-            # Fallback to traditional image field if available
-            if self.image:
-                return self.image.url
-            return None
-
-    @property
-    def image_url(self):
-        """Get image URL - prioritize S3 presigned URL, fallback to regular image field"""
-        import logging
-
-        logger = logging.getLogger(__name__)
-
-        logger.info("=== IMAGE URL PROPERTY DEBUG ===")
-        logger.info(f"Image ID: {self.id}")
-        logger.info(f"Product: {self.product.name}")
-
-        if self.s3_key and self.s3_bucket:
-            logger.info("Using S3 proxy URL path")
-            proxy_url = self.get_proxy_url()
-            if proxy_url:
-                return proxy_url
-            else:
-                logger.warning("S3 proxy URL failed, falling back to image field")
-
-        if self.image:
-            logger.info(f"Using traditional image field: {self.image.url}")
-            return self.image.url
-        else:
-            logger.warning(f"No image data available for image {self.id}")
-            return None
 
     def __str__(self):
         return f"Image for {self.product.name}"
@@ -388,34 +269,6 @@ class Order(models.Model):
     def __str__(self):
         return f"Order {str(self.id)[:8]} by {self.buyer.username}"
 
-    def lock_order(self):
-        """Lock the order to prevent modifications during/after payment"""
-        if not self.is_locked:
-            self.is_locked = True
-            self.locked_at = timezone.now()
-            self.save(update_fields=["is_locked", "locked_at"])
-
-    def can_be_modified(self):
-        """Check if order can be modified (not locked and payment not initiated)"""
-        return not self.is_locked and self.payment_status in ["pending"]
-
-    def initiate_payment(self):
-        """Mark payment as initiated and lock the order"""
-        if self.can_be_modified():
-            self.payment_status = "processing"
-            self.status = "awaiting_payment"
-            self.payment_initiated_at = timezone.now()
-            self.lock_order()
-            self.save(update_fields=["payment_status", "status", "payment_initiated_at"])
-            return True
-        return False
-
-    def confirm_payment(self):
-        """Confirm successful payment"""
-        self.payment_status = "paid"
-        self.status = "confirmed"
-        self.save(update_fields=["payment_status", "status"])
-
 
 class OrderItem(models.Model):
     order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="items")
@@ -430,10 +283,6 @@ class OrderItem(models.Model):
     product_name = models.CharField(max_length=200)
     product_description = models.TextField()
     product_image = models.URLField(max_length=2000, blank=True)
-
-    def save(self, *args, **kwargs):
-        self.total_price = self.quantity * self.unit_price
-        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.quantity}x {self.product_name} in order {str(self.order.id)[:8]}"
@@ -478,29 +327,6 @@ class Cart(models.Model):
     def __str__(self):
         return f"Cart for {self.user.username}"
 
-    @property
-    def total_items(self):
-        return self.items.aggregate(total=models.Sum("quantity"))["total"] or 0
-
-    @property
-    def total_amount(self):
-        from decimal import Decimal
-
-        total = Decimal("0")
-        for item in self.items.all():
-            total += item.quantity * item.product.price
-        return total
-
-    def clear_items(self):
-        """Clear all items from cart"""
-        self.items.all().delete()
-
-    @classmethod
-    def get_or_create_cart(cls, user):
-        """Get or create user's unique cart"""
-        cart, created = cls.objects.get_or_create(user=user)
-        return cart
-
 
 class CartItem(models.Model):
     cart = models.ForeignKey(Cart, on_delete=models.CASCADE, related_name="items")
@@ -513,10 +339,6 @@ class CartItem(models.Model):
 
     def __str__(self):
         return f"{self.quantity}x {self.product.name} in {self.cart.user.username}'s cart"
-
-    @property
-    def total_price(self):
-        return self.quantity * self.product.price
 
 
 class ProductMetrics(models.Model):
@@ -532,40 +354,3 @@ class ProductMetrics(models.Model):
 
     def __str__(self):
         return f"Metrics for {self.product.name}"
-
-    def update_conversion_rates(self):
-        """
-        Update calculated conversion rate fields.
-        This method is now a no-op since rate fields have been removed.
-        Kept for backwards compatibility with existing tracking code.
-        """
-        # No-op: Rate fields have been removed from the model
-        pass
-
-    @property
-    def view_to_click_rate(self):
-        """Calculate view-to-click conversion rate on-demand"""
-        if self.total_views == 0:
-            return 0.0
-        return (self.total_clicks / self.total_views) * 100
-
-    @property
-    def click_to_cart_rate(self):
-        """Calculate click-to-cart conversion rate on-demand"""
-        if self.total_clicks == 0:
-            return 0.0
-        return (self.total_cart_additions / self.total_clicks) * 100
-
-    @property
-    def cart_to_purchase_rate(self):
-        """Calculate cart-to-purchase conversion rate on-demand"""
-        if self.total_cart_additions == 0:
-            return 0.0
-        return (self.total_sales / self.total_cart_additions) * 100
-
-    @property
-    def overall_conversion_rate(self):
-        """Calculate overall view-to-purchase conversion rate on-demand"""
-        if self.total_views == 0:
-            return 0.0
-        return (self.total_sales / self.total_views) * 100

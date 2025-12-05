@@ -94,10 +94,6 @@ class ProductAdmin(admin.ModelAdmin):
         "view_count",
         "click_count",
         "favorite_count",
-        "average_rating",
-        "review_count",
-        "is_on_sale",
-        "discount_percentage",
     )
 
     inlines = [ProductImageInline, ProductReviewInline, ProductMetricsInline]
@@ -107,7 +103,7 @@ class ProductAdmin(admin.ModelAdmin):
         ("Seller & Category", {"fields": ("seller", "category")}),
         (
             "Pricing & Inventory",
-            {"fields": ("price", "original_price", "stock_quantity", "is_on_sale", "discount_percentage")},
+            {"fields": ("price", "original_price", "stock_quantity")},
         ),
         ("Product Details", {"fields": ("condition", "brand", "model", "colors", "materials", "tags")}),
         (
@@ -121,7 +117,7 @@ class ProductAdmin(admin.ModelAdmin):
         (
             "Metrics",
             {
-                "fields": ("view_count", "click_count", "favorite_count", "average_rating", "review_count"),
+                "fields": ("view_count", "click_count", "favorite_count"),
                 "classes": ("collapse",),
             },
         ),
@@ -280,25 +276,25 @@ class OrderItemAdmin(admin.ModelAdmin):
 class CartItemInline(admin.TabularInline):
     model = CartItem
     extra = 0
-    readonly_fields = ("total_price",)
+    readonly_fields = ()
 
 
 @admin.register(Cart)
 class CartAdmin(admin.ModelAdmin):
-    list_display = ("user", "total_items", "total_amount", "created_at", "updated_at")
+    list_display = ("user", "created_at", "updated_at")
     list_filter = ("created_at", "updated_at")
     search_fields = ("user__username", "user__email")
-    readonly_fields = ("total_items", "total_amount", "created_at", "updated_at")
+    readonly_fields = ("created_at", "updated_at")
 
     inlines = [CartItemInline]
 
 
 @admin.register(CartItem)
 class CartItemAdmin(admin.ModelAdmin):
-    list_display = ("cart_user", "product", "quantity", "total_price", "added_at")
+    list_display = ("cart_user", "product", "quantity", "added_at")
     list_filter = ("added_at",)
     search_fields = ("cart__user__username", "product__name")
-    readonly_fields = ("total_price",)
+    readonly_fields = ()
 
     def cart_user(self, obj):
         return obj.cart.user.username

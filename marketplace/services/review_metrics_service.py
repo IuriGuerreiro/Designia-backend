@@ -191,23 +191,18 @@ class ReviewMetricsService(BaseService):
         """
         Update (refresh) all metrics for a product.
 
-        Recalculates and updates cache. Call this when a review is added/updated/deleted.
+        Recalculates metrics by bypassing the cache and then updates the cache with fresh values.
+        This method is typically called by a Celery task or Signal when a review is added, updated, or deleted.
 
         Args:
             product_id: Product UUID
 
         Returns:
-            ServiceResult with all metrics
-
-        Example:
-            >>> result = review_metrics_service.update_metrics(product_id)
-            >>> if result.ok:
-            ...     metrics = result.value
-            ...     # {
-            ...     #   "average_rating": 4.5,
-            ...     #   "review_count": 180,
-            ...     #   "rating_distribution": {5: 120, 4: 45, ...}
-            ...     # }
+            ServiceResult with all metrics:
+            - average_rating
+            - review_count
+            - rating_distribution
+            - updated_at
         """
         try:
             # Recalculate all metrics (bypass cache)
