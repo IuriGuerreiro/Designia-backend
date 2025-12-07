@@ -1,4 +1,9 @@
-from .settings import *  # noqa: F403, F405
+import os
+
+# Mock SECRET_KEY for tests BEFORE importing settings to bypass validation
+os.environ.setdefault("SECRET_KEY", "django-insecure-test-key-for-unit-tests-only")
+
+from .settings import *  # noqa: F403
 
 # Override Database to use SQLite for tests
 DATABASES = {
@@ -16,8 +21,20 @@ INFRASTRUCTURE["STORAGE_BACKEND"] = "local"  # noqa: F405
 INFRASTRUCTURE["EMAIL_BACKEND_TYPE"] = "mock"  # noqa: F405
 INFRASTRUCTURE["PAYMENT_PROVIDER"] = "mock"  # noqa: F405
 
+STRIPE_SECRET_KEY = "sk_test_mock_key"
+
 # Ensure Feature Flags are set for tests (using new architecture)
 FEATURE_FLAGS["USE_SERVICE_LAYER_PRODUCTS"] = True  # noqa: F405
 FEATURE_FLAGS["USE_SERVICE_LAYER_MARKETPLACE"] = True  # noqa: F405
 FEATURE_FLAGS["USE_SERVICE_LAYER_CART"] = True  # noqa: F405
 FEATURE_FLAGS["USE_SERVICE_LAYER_ORDERS"] = True  # noqa: F405
+
+# Enable SessionAuthentication for tests to support client.force_login()
+if "DEFAULT_AUTHENTICATION_CLASSES" in REST_FRAMEWORK:  # noqa: F405
+    REST_FRAMEWORK["DEFAULT_AUTHENTICATION_CLASSES"].append(  # noqa: F405
+        "rest_framework.authentication.SessionAuthentication"
+    )
+else:
+    REST_FRAMEWORK["DEFAULT_AUTHENTICATION_CLASSES"] = [  # noqa: F405
+        "rest_framework.authentication.SessionAuthentication"
+    ]

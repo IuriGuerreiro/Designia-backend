@@ -1,5 +1,5 @@
 # Designia-backend/marketplace/tests/integration/test_cart_views.py
-import uuid
+import uuid  # Import uuid for explicit ID generation
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
@@ -8,7 +8,8 @@ from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from marketplace.models import CartItem, Category, Product
+from marketplace.models import CartItem
+from marketplace.tests.factories import CategoryFactory, ProductFactory, SellerFactory, UserFactory
 
 User = get_user_model()
 
@@ -20,33 +21,21 @@ class CartViewIntegrationTest(TestCase):
     def setUp(self):
         self.client = APIClient()
 
-        # Create users
-        self.user1 = User.objects.create_user(username="user1", password="password", email="user1@example.com")
-        self.user2 = User.objects.create_user(username="user2", password="password", email="user2@example.com")
+        # Create users using factories with explicit UUIDs
+        self.user1 = UserFactory(username="user1", email="user1@example.com")
+        self.user2 = UserFactory(username="user2", email="user2@example.com")
+        self.seller1 = SellerFactory(username="seller1", email="seller1@example.com")
+        self.seller2 = SellerFactory(username="seller2", email="seller2@example.com")
 
-        # Create category
-        self.category = Category.objects.create(name="Electronics", slug="electronics")
+        # Create category using factory
+        self.category = CategoryFactory()
 
-        # Create products
-        self.product1 = Product.objects.create(
-            name="Product 1",
-            slug="product-1",
-            description="Desc 1",
-            price=10.00,
-            seller=self.user1,  # User1 is seller for product1
-            category=self.category,
-            stock_quantity=10,
-            is_active=True,
+        # Create products using factories
+        self.product1 = ProductFactory(
+            seller=self.seller1, category=self.category, stock_quantity=10, price=Decimal("10.00")
         )
-        self.product2 = Product.objects.create(
-            name="Product 2",
-            slug="product-2",
-            description="Desc 2",
-            price=20.00,
-            seller=self.user2,  # User2 is seller for product2
-            category=self.category,
-            stock_quantity=5,
-            is_active=True,
+        self.product2 = ProductFactory(
+            seller=self.seller2, category=self.category, stock_quantity=5, price=Decimal("20.00")
         )
 
         # URLs for the CartViewSet actions, using app_name and basename

@@ -15,7 +15,7 @@ from django.test import Client, TestCase
 class WebhookSecurityTest(TestCase):
     def setUp(self):
         self.client = Client()
-        self.webhook_url = "/api/payments/webhooks/stripe/"
+        self.webhook_url = "/api/payments/stripe_webhook/"
         self.test_secret = "whsec_test_secret_key_for_testing"
         self.test_payload = {
             "id": "evt_test_webhook",
@@ -72,8 +72,16 @@ class WebhookSecurityTest(TestCase):
     @patch("stripe.Webhook.construct_event")
     def test_webhook_accepts_valid_signature(self, mock_construct_event):
         """Test that webhook accepts requests with valid signature"""
-        # Mock successful signature verification
-        mock_construct_event.return_value = {"type": "checkout.session.completed", "data": self.test_payload["data"]}
+        # Mock successful signature verification - return object with attributes
+        mock_event = type(
+            "Event",
+            (),
+            {
+                "type": "checkout.session.completed",
+                "data": type("Data", (), {"object": self.test_payload["data"]["object"]})(),
+            },
+        )()
+        mock_construct_event.return_value = mock_event
 
         valid_signature = self.generate_stripe_signature(self.test_payload, "test_secret")
 
@@ -89,6 +97,7 @@ class WebhookSecurityTest(TestCase):
         # construct_event should be called for signature verification
         mock_construct_event.assert_called_once()
 
+    @patch("payment_system.views.settings.STRIPE_WEBHOOK_SECRET", None)
     def test_webhook_logs_security_events(self):
         """Test that security events are properly logged"""
         with self.assertLogs("payment_system.views", level="ERROR") as log:

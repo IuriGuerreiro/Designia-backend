@@ -55,6 +55,10 @@ class StripeProvider(PaymentProviderInterface):
         ),
         reraise=True,
     )
+    def _create_checkout_session_api(self, **kwargs):
+        """Internal method to create session with retries."""
+        return stripe.checkout.Session.create(**kwargs)
+
     def create_checkout_session(
         self,
         amount: Decimal,
@@ -112,8 +116,8 @@ class StripeProvider(PaymentProviderInterface):
             if customer_email:
                 session_params["customer_email"] = customer_email
 
-            # Create Stripe checkout session
-            session = stripe.checkout.Session.create(**session_params)
+            # Create Stripe checkout session with retry logic
+            session = self._create_checkout_session_api(**session_params)
 
             logger.info(f"Created Stripe checkout session: {session.id}")
 
@@ -145,6 +149,9 @@ class StripeProvider(PaymentProviderInterface):
         ),
         reraise=True,
     )
+    def _retrieve_session_api(self, session_id):
+        return stripe.checkout.Session.retrieve(session_id)
+
     def retrieve_session(self, session_id: str) -> CheckoutSession:
         """
         Retrieve an existing Stripe checkout session.
@@ -159,7 +166,7 @@ class StripeProvider(PaymentProviderInterface):
             PaymentException: If retrieval fails
         """
         try:
-            session = stripe.checkout.Session.retrieve(session_id)
+            session = self._retrieve_session_api(session_id)
 
             logger.info(f"Retrieved Stripe session: {session_id}")
 
@@ -222,6 +229,9 @@ class StripeProvider(PaymentProviderInterface):
         ),
         reraise=True,
     )
+    def _create_refund_api(self, **kwargs):
+        return stripe.Refund.create(**kwargs)
+
     def create_refund(
         self,
         payment_intent_id: str,
@@ -253,7 +263,7 @@ class StripeProvider(PaymentProviderInterface):
             if reason:
                 refund_params["reason"] = reason
 
-            refund = stripe.Refund.create(**refund_params)
+            refund = self._create_refund_api(**refund_params)
 
             logger.info(f"Created refund: {refund.id} for payment {payment_intent_id}")
 
@@ -275,6 +285,9 @@ class StripeProvider(PaymentProviderInterface):
         ),
         reraise=True,
     )
+    def _create_transfer_api(self, **kwargs):
+        return stripe.Transfer.create(**kwargs)
+
     def create_transfer(
         self,
         amount: Decimal,
@@ -309,7 +322,7 @@ class StripeProvider(PaymentProviderInterface):
             if metadata:
                 transfer_params["metadata"] = metadata
 
-            transfer = stripe.Transfer.create(**transfer_params)
+            transfer = self._create_transfer_api(**transfer_params)
 
             logger.info(f"Created Stripe transfer: {transfer.id} to {destination_account}")
 
@@ -337,6 +350,9 @@ class StripeProvider(PaymentProviderInterface):
         ),
         reraise=True,
     )
+    def _retrieve_payment_intent_api(self, intent_id):
+        return stripe.PaymentIntent.retrieve(intent_id)
+
     def retrieve_payment_intent(self, intent_id: str) -> PaymentIntent:
         """
         Retrieve Stripe payment intent details.
@@ -351,7 +367,7 @@ class StripeProvider(PaymentProviderInterface):
             PaymentException: If retrieval fails
         """
         try:
-            intent = stripe.PaymentIntent.retrieve(intent_id)
+            intent = self._retrieve_payment_intent_api(intent_id)
 
             logger.info(f"Retrieved payment intent: {intent_id}")
 

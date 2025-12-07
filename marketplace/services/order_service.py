@@ -200,6 +200,7 @@ class OrderService(BaseService):
                     seller=product.seller,
                     quantity=quantity,
                     unit_price=product.price,  # Snapshot price
+                    total_price=quantity * product.price,  # Calculate total_price
                     product_name=product.name,  # Snapshot name
                     product_description=product.description[:500] if product.description else "",  # Truncate
                     product_image=product.images.first().get_proxy_url() if product.images.exists() else "",

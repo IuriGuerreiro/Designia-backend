@@ -665,8 +665,8 @@ class EdgeCaseAndErrorHandlingTests(BaseAuthTestCase):
         data = {"amount": 0, "currency": "usd"}
 
         response = self.client.post(url, data, format="json")
-        # Should reject zero amount
-        self.assertIn(response.status_code, [status.HTTP_400_BAD_REQUEST, status.HTTP_403_FORBIDDEN])
+        # Feature disabled -> 410 Gone
+        self.assertEqual(response.status_code, status.HTTP_410_GONE)
 
     def test_negative_amount_payout(self):
         """Test handling of negative amount"""
@@ -675,8 +675,8 @@ class EdgeCaseAndErrorHandlingTests(BaseAuthTestCase):
         data = {"amount": -5000, "currency": "usd"}
 
         response = self.client.post(url, data, format="json")
-        # Should reject negative amount
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        # Feature disabled -> 410 Gone
+        self.assertEqual(response.status_code, status.HTTP_410_GONE)
 
     def test_concurrent_payout_creation(self):
         """Test handling of concurrent payout creation attempts"""
@@ -687,7 +687,8 @@ class EdgeCaseAndErrorHandlingTests(BaseAuthTestCase):
     def test_malformed_json(self):
         """Test handling of malformed JSON"""
         self.authenticate_seller()
-        url = reverse("payment_system:seller_payout")
+        # Use an enabled endpoint for this generic test
+        url = reverse("payment_system:create_stripe_account_session")
 
         response = self.client.post(
             url, data='{"amount": "not-a-number", "currency": }', content_type="application/json"  # Invalid JSON
@@ -698,8 +699,9 @@ class EdgeCaseAndErrorHandlingTests(BaseAuthTestCase):
     def test_missing_required_fields(self):
         """Test handling of missing required fields"""
         self.authenticate_seller()
-        url = reverse("payment_system:seller_payout")
-        data = {"amount": 5000}  # Missing currency
+        # Use stripe account creation which requires specific fields
+        url = reverse("payment_system:stripe_account")
+        data = {"business_type": "individual"}  # Missing country
 
         response = self.client.post(url, data, format="json")
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)

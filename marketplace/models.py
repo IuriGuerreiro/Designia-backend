@@ -324,6 +324,12 @@ class Cart(models.Model):
         verbose_name = "Shopping Cart"
         verbose_name_plural = "Shopping Carts"
 
+    @classmethod
+    def get_or_create_cart(cls, user):
+        """Get existing cart or create a new one for the user."""
+        cart, _ = cls.objects.get_or_create(user=user)
+        return cart
+
     def __str__(self):
         return f"Cart for {self.user.username}"
 
@@ -336,6 +342,10 @@ class CartItem(models.Model):
 
     class Meta:
         unique_together = ["cart", "product"]
+
+    @property
+    def total_price(self):
+        return self.quantity * self.product.price
 
     def __str__(self):
         return f"{self.quantity}x {self.product.name} in {self.cart.user.username}'s cart"

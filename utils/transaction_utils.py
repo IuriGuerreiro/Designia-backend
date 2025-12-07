@@ -29,6 +29,7 @@ import time
 from contextlib import contextmanager
 from functools import wraps
 
+from django.conf import settings
 from django.db import IntegrityError, OperationalError, connection, transaction
 
 logger = logging.getLogger(__name__)
@@ -56,20 +57,28 @@ class DeadlockError(TransactionError):
 
 def set_isolation_level(level="REPEATABLE READ", using="default"):
     """
-    Set MySQL transaction isolation level for the current connection.
+    Set transaction isolation level for the current connection.
+    This function is primarily intended for MySQL/PostgreSQL.
+    For SQLite, setting isolation level via SQL command is not supported.
 
     Args:
         level (str): One of 'READ UNCOMMITTED', 'READ COMMITTED',
                     'REPEATABLE READ', 'SERIALIZABLE'
         using (str): Database alias to use
     """
+    db_engine = settings.DATABASES[using]["ENGINE"]
+
+    if "sqlite" in db_engine:
+        logger.debug(f"SQLite database detected. Skipping explicit isolation level setting to {level}.")
+        return
+
     if level not in ISOLATION_LEVELS.values():
         raise ValueError(f"Invalid isolation level: {level}. Must be one of {list(ISOLATION_LEVELS.values())}")
 
     try:
         with connection.cursor() as cursor:
             cursor.execute(f"SET SESSION TRANSACTION ISOLATION LEVEL {level}")
-        logger.debug(f"Set transaction isolation level to {level}")
+        logger.debug(f"Set transaction isolation level to {level} for {db_engine}")
     except Exception as e:
         logger.error(f"Failed to set isolation level to {level}: {e}")
         raise TransactionError(f"Could not set isolation level: {e}") from e
@@ -81,7 +90,7 @@ def atomic_with_isolation(isolation_level="REPEATABLE READ", using="default", sa
     Context manager for atomic transactions with custom isolation level.
 
     Args:
-        isolation_level (str): MySQL isolation level
+        isolation_level (str): Isolation level
         using (str): Database alias
         savepoint (bool): Whether to use savepoints for nested transactions
 
@@ -91,11 +100,21 @@ def atomic_with_isolation(isolation_level="REPEATABLE READ", using="default", sa
             model.save()
             other_model.create(...)
     """
+    db_engine = settings.DATABASES[using]["ENGINE"]
+    is_sqlite = "sqlite" in db_engine
+
+    if is_sqlite and isolation_level != "READ COMMITTED":
+        logger.warning(
+            f"SQLite does not fully support '{isolation_level}' isolation level. "
+            "Using default transaction behavior. Consider using a different database for stronger isolation guarantees."
+        )
+
     try:
         with transaction.atomic(using=using, savepoint=savepoint):
-            # Set isolation level at start of transaction
-            set_isolation_level(isolation_level, using=using)
-            logger.debug(f"Started atomic transaction with isolation level: {isolation_level}")
+            # Set isolation level at start of transaction (skipped for SQLite)
+            if not is_sqlite:
+                set_isolation_level(isolation_level, using=using)
+            logger.debug(f"Started atomic transaction with isolation level: {isolation_level} for {db_engine}")
             yield
             logger.debug("Transaction committed successfully")
     except (IntegrityError, OperationalError) as e:
@@ -153,7 +172,7 @@ def transactional(isolation_level="REPEATABLE READ", using="default", retry_dead
     Decorator for automatic transaction wrapping with custom isolation level.
 
     Args:
-        isolation_level (str): MySQL isolation level to use
+        isolation_level (str): Isolation level to use
         using (str): Database alias
         retry_deadlocks (bool): Whether to automatically retry on deadlocks
 
@@ -327,6 +346,12 @@ def get_current_isolation_level(using="default"):
     Returns:
         str: Current isolation level
     """
+    db_engine = settings.DATABASES[using]["ENGINE"]
+
+    if "sqlite" in db_engine:
+        logger.debug("SQLite database detected. Cannot explicitly get isolation level.")
+        return "N/A (SQLite)"
+
     try:
         with connection.cursor() as cursor:
             # Try the newer MySQL 8.0+ variable name first

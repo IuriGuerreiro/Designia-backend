@@ -672,7 +672,11 @@ def stripe_webhook(request):  # noqa: C901
                                 transaction_for_update.status = "released"  # Success status - money released to seller
                                 transaction_for_update.actual_release_date = timezone.now()
                                 transaction_for_update.transfer_id = transfer_id
-                                transaction_for_update.notes = f"{transaction_for_update.notes}\nTransfer succeeded via webhook: {transfer_id} (amount: {amount/100:.2f} {currency.upper()})"
+                                transaction_for_update.notes = (
+                                    f"{transaction_for_update.notes}\nTransfer succeeded via webhook: {transfer_id} (amount: {amount/100:.2f} {currency.upper()})"
+                                    if transaction_for_update.notes
+                                    else f"Transfer succeeded via webhook: {transfer_id} (amount: {amount/100:.2f} {currency.upper()})"
+                                )
                                 transaction_for_update.save(
                                     update_fields=[
                                         "status",
@@ -1393,96 +1397,6 @@ def stripe_webhook_connect(request):  # noqa: C901
     return HttpResponse(status=200, content=f"{event.type} connect webhook successfully processed".encode("utf-8"))
 
 
-# Create PaymentTransaction records for each seller in the order
-def create_payment_transactions(order, session):
-    """Create per-seller PaymentTransaction rows for an order.
-
-    This function groups order items by seller, computes platform/Stripe fees and net
-    amounts, and writes PaymentTransaction records with 30-day hold metadata using
-    READ COMMITTED isolation.
-    """
-    from collections import defaultdict
-    from decimal import Decimal
-
-    with atomic_with_isolation("READ COMMITTED"):
-        with rollback_safe_operation("Create Payment Transactions"):
-            try:
-                print(f"🔄 Creating payment transactions for order {order.id}")
-
-                # Get Stripe session info
-                stripe_payment_intent_id = session.get("payment_intent", "")
-                stripe_checkout_session_id = session.get("id", "")
-                _total_amount = Decimal(session["amount_total"]) / 100  # Convert from cents
-
-                # Group order items by seller
-                sellers_data = defaultdict(
-                    lambda: {"items": [], "total_amount": Decimal("0.00"), "item_count": 0, "item_names": []}
-                )
-
-                for order_item in order.items.all():
-                    seller = order_item.seller
-                    sellers_data[seller]["items"].append(order_item)
-                    sellers_data[seller]["total_amount"] += order_item.total_price
-                    sellers_data[seller]["item_count"] += order_item.quantity
-                    sellers_data[seller]["item_names"].append(order_item.product_name)
-
-                print(f"📊 Found {len(sellers_data)} sellers in order")
-
-                # Create PaymentTransaction for each seller
-                for seller, seller_data in sellers_data.items():
-                    print(f"💰 Creating payment transaction for seller: {seller.username}")
-
-                    # Calculate fees (you can adjust these percentages)
-                    gross_amount = seller_data["total_amount"]
-                    platform_fee_rate = Decimal("0.05")  # 5% platform fee
-                    stripe_fee_rate = Decimal("0.029")  # 2.9% Stripe fee + $0.30
-                    stripe_fixed_fee = Decimal("0.30")
-
-                    platform_fee = gross_amount * platform_fee_rate
-                    stripe_fee = (gross_amount * stripe_fee_rate) + stripe_fixed_fee
-                    net_amount = gross_amount - platform_fee - stripe_fee
-
-                    # Create PaymentTransaction with integrated hold system
-                    payment_transaction = PaymentTransaction.objects.create(
-                        stripe_payment_intent_id=stripe_payment_intent_id,
-                        stripe_checkout_session_id=stripe_checkout_session_id,
-                        order=order,
-                        seller=seller,
-                        buyer=order.buyer,
-                        status="pending",  # Start with pending status (waiting payment processing)
-                        gross_amount=gross_amount,
-                        platform_fee=platform_fee,
-                        stripe_fee=stripe_fee,
-                        net_amount=net_amount,
-                        currency="USD",
-                        item_count=seller_data["item_count"],
-                        item_names=", ".join(seller_data["item_names"]),
-                        payment_received_date=timezone.now(),
-                        # Integrated hold fields - all payments held for 30 days
-                        hold_reason="standard",
-                        days_to_hold=30,  # Standard 30-day hold
-                        hold_start_date=timezone.now(),
-                        hold_notes="Standard 30-day hold period for marketplace transactions",
-                        metadata={
-                            "order_id": str(order.id),
-                            "stripe_session_id": stripe_checkout_session_id,
-                            "seller_id": str(seller.id),
-                            "buyer_id": str(order.buyer.id),
-                        },
-                    )
-
-                    print(
-                        f"  Created payment transaction {payment_transaction.id} for ${net_amount} with pending status (waiting payment processing)"
-                    )
-
-                print(f"  Successfully created payment tracking for order {order.id}")
-
-            except Exception as e:
-                print(f" Error creating payment transactions: {str(e)}")
-                raise
-        raise
-
-
 # Handle successful payment by updating existing order status this is for Stripe Webhook handling
 @financial_transaction
 def handle_sucessfull_checkout(session):  # noqa: C901
@@ -1795,9 +1709,10 @@ def create_checkout_session(request):
     shipping), creates an Order in pending_payment with reserved stock, starts an
     embedded checkout session carrying order/user metadata, and returns clientSecret.
     """
+    print(f"DEBUG: create_checkout_session - User authenticated: {request.user.is_authenticated}")
     try:
         # Get the user's cart
-        cart = Cart.get_or_create_cart(user=request.user)
+        cart, _ = Cart.objects.get_or_create(user=request.user)
         cart_items = cart.items.all()
 
         if not cart_items.exists():
@@ -1912,7 +1827,7 @@ def create_checkout_session(request):
             print(f"  Order {order.id} created successfully with {cart_items.count()} items")
 
             # Clear cart after order creation
-            cart.clear_items()
+            cart.items.all().delete()
             print(f"🛒 Cart cleared for user {request.user.username}")
 
         print(f"🔔 Creating Stripe checkout session for order {order.id}")

@@ -52,6 +52,7 @@ class PaymentServiceTest(TestCase):
             seller=self.seller,
             quantity=1,
             unit_price=Decimal("100.00"),
+            total_price=Decimal("100.00"),  # Explicitly set total_price
             product_name="Test Product",
             product_description="Desc",
         )

@@ -4,7 +4,16 @@ from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from marketplace.models import Category, Order, OrderItem, Product, ProductReview
+from marketplace.models import ProductReview
+from marketplace.tests.factories import (
+    CategoryFactory,
+    OrderFactory,
+    OrderItemFactory,
+    ProductFactory,
+    ProductReviewFactory,
+    SellerFactory,
+    UserFactory,
+)
 
 User = get_user_model()
 
@@ -13,43 +22,27 @@ class ReviewViewIntegrationTest(TestCase):
     def setUp(self):
         self.client = APIClient()
 
-        # Create users
-        self.user = User.objects.create_user(username="user", password="password", email="user@example.com")
-        self.seller = User.objects.create_user(
-            username="seller", password="password", email="seller@example.com", role="seller"
-        )
-        self.other_user = User.objects.create_user(username="other", password="password", email="other@example.com")
+        # Create users using factories
+        self.user = UserFactory(username="user", email="user@example.com")
+        self.seller = SellerFactory(username="seller", email="seller@example.com")
+        self.other_user = UserFactory(username="other", email="other@example.com")
 
-        # Create category
-        self.category = Category.objects.create(name="Electronics", slug="electronics")
+        # Create category using factory
+        self.category = CategoryFactory()
 
-        # Create product
-        self.product = Product.objects.create(
-            name="Test Product",
-            slug="test-product",
-            description="Desc",
-            price=100.00,
-            seller=self.seller,
-            category=self.category,
-            stock_quantity=10,
-            is_active=True,
-        )
+        # Create product using factory
+        self.product = ProductFactory(seller=self.seller, category=self.category, stock_quantity=10)
 
-        # Create verified order for user
-        self.order = Order.objects.create(
-            buyer=self.user,
-            status="delivered",
-            subtotal=100.00,
-            total_amount=100.00,
-            shipping_address={"street": "123 Main St", "city": "Test City", "country": "Test Country"},
-        )
-        OrderItem.objects.create(
+        # Create verified order for user using factories
+        # Ensure OrderFactory and OrderItemFactory create necessary fields
+        self.order = OrderFactory(buyer=self.user, status="delivered")
+        OrderItemFactory(
             order=self.order,
             product=self.product,
-            quantity=1,
-            unit_price=100.00,
-            total_price=100.00,
             seller=self.seller,
+            quantity=1,
+            unit_price=self.product.price,
+            total_price=self.product.price,
         )
 
         self.review_list_url = reverse("marketplace:review-list")
@@ -64,9 +57,8 @@ class ReviewViewIntegrationTest(TestCase):
 
     def test_create_duplicate_review_fail(self):
         self.client.force_authenticate(user=self.user)
-        ProductReview.objects.create(
-            product=self.product, reviewer=self.user, rating=5, title="First", comment="First"
-        )
+        # Create first review using factory
+        ProductReviewFactory(product=self.product, reviewer=self.user, title="First", comment="First")
 
         data = {"product_id": str(self.product.id), "rating": 4, "title": "Second", "comment": "Second"}
         response = self.client.post(self.review_list_url, data)
@@ -75,9 +67,8 @@ class ReviewViewIntegrationTest(TestCase):
 
     def test_update_review_success(self):
         self.client.force_authenticate(user=self.user)
-        review = ProductReview.objects.create(
-            product=self.product, reviewer=self.user, rating=5, title="Old", comment="Old"
-        )
+        # Create review using factory
+        review = ProductReviewFactory(product=self.product, reviewer=self.user, rating=5, title="Old", comment="Old")
 
         url = reverse("marketplace:review-detail", args=[review.id])
         data = {"rating": 4, "title": "New"}
@@ -90,7 +81,8 @@ class ReviewViewIntegrationTest(TestCase):
 
     def test_update_others_review_fail(self):
         self.client.force_authenticate(user=self.other_user)
-        review = ProductReview.objects.create(
+        # Create review using factory
+        review = ProductReviewFactory(
             product=self.product, reviewer=self.user, rating=5, title="User's", comment="User's"
         )
 
@@ -102,9 +94,8 @@ class ReviewViewIntegrationTest(TestCase):
 
     def test_delete_review_success(self):
         self.client.force_authenticate(user=self.user)
-        review = ProductReview.objects.create(
-            product=self.product, reviewer=self.user, rating=5, title="Del", comment="Del"
-        )
+        # Create review using factory
+        review = ProductReviewFactory(product=self.product, reviewer=self.user, rating=5, title="Del", comment="Del")
 
         url = reverse("marketplace:review-detail", args=[review.id])
         response = self.client.delete(url)
@@ -115,7 +106,8 @@ class ReviewViewIntegrationTest(TestCase):
 
     def test_mark_helpful(self):
         self.client.force_authenticate(user=self.other_user)
-        review = ProductReview.objects.create(
+        # Create review using factory
+        review = ProductReviewFactory(
             product=self.product, reviewer=self.user, rating=5, title="Helpful", comment="Helpful"
         )
 
@@ -134,7 +126,8 @@ class ReviewViewIntegrationTest(TestCase):
 
     def test_mark_own_review_helpful_fail(self):
         self.client.force_authenticate(user=self.user)
-        review = ProductReview.objects.create(product=self.product, reviewer=self.user, rating=5)
+        # Create review using factory
+        review = ProductReviewFactory(product=self.product, reviewer=self.user, rating=5)
 
         url = reverse("marketplace:review-mark-helpful", args=[review.id])
         response = self.client.post(url)
@@ -142,8 +135,8 @@ class ReviewViewIntegrationTest(TestCase):
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_list_reviews(self):
-        ProductReview.objects.create(product=self.product, reviewer=self.user, rating=5)
-        ProductReview.objects.create(product=self.product, reviewer=self.other_user, rating=4)
+        ProductReviewFactory(product=self.product, reviewer=self.user, rating=5)
+        ProductReviewFactory(product=self.product, reviewer=self.other_user, rating=4)
 
         response = self.client.get(self.review_list_url, {"product_id": str(self.product.id)})
         self.assertEqual(response.status_code, status.HTTP_200_OK)

@@ -84,14 +84,30 @@ class StripeWebhookTransferCreatedTest(TestCase):
     @patch("stripe.Webhook.construct_event")
     def test_transfer_created_webhook_success(self, mock_construct_event):
         mock_event_data = self._generate_mock_transfer_event()
-        # The event object needs to be accessible via attribute, not dict key
-        mock_event = type(
-            "Event", (), {"type": "transfer.created", "data": {"object": mock_event_data["data"]["object"]}}
-        )()
+
+        # Create a nested object structure for event.data.object
+        class MockStripeObject:
+            def __init__(self, **kwargs):
+                for k, v in kwargs.items():
+                    if isinstance(v, dict):
+                        setattr(self, k, MockStripeObject(**v))
+                    else:
+                        setattr(self, k, v)
+
+            def get(self, key, default=None):
+                return getattr(self, key, default)
+
+        # Reconstruct the transfer object from the dict
+        transfer_dict = mock_event_data["data"]["object"]
+        transfer_obj = MockStripeObject(**transfer_dict)
+
+        # Create the event object
+        mock_event = MockStripeObject(type="transfer.created", data=MockStripeObject(object=transfer_obj))
+
         mock_construct_event.return_value = mock_event
 
         response = self.client.post(
-            reverse("stripe_webhook"),
+            reverse("payment_system:stripe_webhook"),
             data=json.dumps(mock_event_data),
             content_type="application/json",
             HTTP_STRIPE_SIGNATURE="whsec_test_signature",
@@ -114,8 +130,8 @@ class StripeWebhookTransferCreatedTest(TestCase):
 
         # Check if PaymentTransaction was updated
         self.payment_transaction.refresh_from_db()
-        self.assertEqual(self.payment_transaction.status, "completed")
+        self.assertEqual(self.payment_transaction.status, "released")
         self.assertIn(
-            "Transfer completed via webhook: tr_12345",
+            "Transfer succeeded via webhook: tr_12345",
             self.payment_transaction.notes,
         )

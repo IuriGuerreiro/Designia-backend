@@ -5,7 +5,7 @@ Story 4.4
 """
 
 from decimal import Decimal
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -36,17 +36,6 @@ class PayoutServiceTest(TestCase):
         from marketplace.models import Order
 
         order = Order.objects.create(buyer=self.buyer, total_amount=100, subtotal=100, shipping_address={})
-
-        PaymentTransaction.objects.create(
-            seller=self.seller,
-            buyer=self.buyer,
-            order=order,
-            status="completed",
-            payed_out=False,
-            gross_amount=100,
-            net_amount=90,
-            currency="USD",
-        )
 
         # Let's start fresh
         PaymentTransaction.objects.create(
@@ -95,7 +84,7 @@ class PayoutServiceTest(TestCase):
 
         order = Order.objects.create(buyer=self.buyer, total_amount=100, subtotal=100, shipping_address={})
 
-        t1 = PaymentTransaction.objects.create(
+        transaction_to_check_id = PaymentTransaction.objects.create(
             seller=self.seller,
             buyer=self.buyer,
             order=order,
@@ -105,7 +94,7 @@ class PayoutServiceTest(TestCase):
             platform_fee=Decimal("10.00"),  # Net: 90.00
             stripe_payment_intent_id="pi_1",
             stripe_checkout_session_id="cs_1",
-        )
+        ).id
 
         # Mock provider transfer
         self.mock_provider.create_transfer.return_value = {"id": "tr_123"}
@@ -120,8 +109,8 @@ class PayoutServiceTest(TestCase):
         self.assertEqual(payout.stripe_payout_id, "tr_123")
 
         # Verify transaction updated
-        t1.refresh_from_db()
-        self.assertTrue(t1.payed_out)
+        transaction_from_db = PaymentTransaction.objects.get(id=transaction_to_check_id)
+        self.assertTrue(transaction_from_db.payed_out)
 
         # Verify provider called
         self.mock_provider.create_transfer.assert_called_once_with(
@@ -159,3 +148,137 @@ class PayoutServiceTest(TestCase):
 
         self.assertFalse(result.ok)
         self.assertEqual(result.error, ErrorCodes.INVALID_PAYMENT_DATA)
+
+    def test_create_payout_amount_mismatch(self):
+        from marketplace.models import Order
+
+        order = Order.objects.create(buyer=self.buyer, total_amount=100, subtotal=100, shipping_address={})
+        PaymentTransaction.objects.create(
+            seller=self.seller,
+            buyer=self.buyer,
+            order=order,
+            status="completed",
+            payed_out=False,
+            net_amount=Decimal("50.00"),
+            gross_amount=50,
+            stripe_payment_intent_id="pi_1",
+            stripe_checkout_session_id="cs_1",
+        )
+
+        result = self.service.create_payout(self.seller, amount=Decimal("10.00"))
+        self.assertFalse(result.ok)
+        self.assertEqual(result.error, ErrorCodes.INVALID_OPERATION)
+
+    def test_create_payout_provider_error(self):
+        from marketplace.models import Order
+
+        order = Order.objects.create(buyer=self.buyer, total_amount=100, subtotal=100, shipping_address={})
+        PaymentTransaction.objects.create(
+            seller=self.seller,
+            buyer=self.buyer,
+            order=order,
+            status="completed",
+            payed_out=False,
+            net_amount=Decimal("50.00"),
+            gross_amount=50,
+            stripe_payment_intent_id="pi_1",
+            stripe_checkout_session_id="cs_1",
+        )
+
+        self.mock_provider.create_transfer.side_effect = Exception("Provider failed")
+
+        result = self.service.create_payout(self.seller)
+
+        self.assertFalse(result.ok)
+        self.assertEqual(result.error, ErrorCodes.PAYMENT_PROVIDER_ERROR)
+
+    @patch("payment_system.services.payout_service.PayoutService.create_payout")
+    def test_process_pending_payouts(self, mock_create_payout):
+        from marketplace.models import Order
+        from marketplace.services.base import service_ok
+
+        mock_create_payout.return_value = service_ok("payout_obj")
+
+        order = Order.objects.create(buyer=self.buyer, total_amount=100, subtotal=100, shipping_address={})
+
+        # Seller 1
+        PaymentTransaction.objects.create(
+            seller=self.seller,
+            buyer=self.buyer,
+            order=order,
+            status="completed",
+            payed_out=False,
+            net_amount=Decimal("50.00"),
+            gross_amount=50,
+            stripe_payment_intent_id="pi_1",
+            stripe_checkout_session_id="cs_1",
+        )
+
+        # Seller 2
+        seller2 = User.objects.create_user(username="seller2", email="seller2@example.com", password="password")
+        # We don't need stripe_account_id here because we mock create_payout
+        PaymentTransaction.objects.create(
+            seller=seller2,
+            buyer=self.buyer,
+            order=order,
+            status="completed",
+            payed_out=False,
+            net_amount=Decimal("20.00"),
+            gross_amount=20,
+            stripe_payment_intent_id="pi_2",
+            stripe_checkout_session_id="cs_2",
+        )
+
+        result = self.service.process_pending_payouts()
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.value, 2)  # 2 sellers processed
+        self.assertEqual(mock_create_payout.call_count, 2)
+
+    def test_calculate_payout_filtering(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from marketplace.models import Order
+
+        order = Order.objects.create(buyer=self.buyer, total_amount=100, subtotal=100, shipping_address={})
+        now = timezone.now()
+
+        # Transaction 1 (Today)
+        PaymentTransaction.objects.create(
+            seller=self.seller,
+            buyer=self.buyer,
+            order=order,
+            status="completed",
+            payed_out=False,
+            net_amount=Decimal("50.00"),
+            gross_amount=50,
+            stripe_payment_intent_id="pi_1",
+            stripe_checkout_session_id="cs_1",
+            created_at=now,
+        )
+
+        # Transaction 2 (Yesterday)
+        PaymentTransaction.objects.create(
+            seller=self.seller,
+            buyer=self.buyer,
+            order=order,
+            status="completed",
+            payed_out=False,
+            net_amount=Decimal("30.00"),
+            gross_amount=30,
+            stripe_payment_intent_id="pi_2",
+            stripe_checkout_session_id="cs_2",
+            created_at=now - timedelta(days=1),
+        )
+
+        # Filter for today only
+        result = self.service.calculate_payout(self.seller, period_start=now - timedelta(hours=1))
+        self.assertTrue(result.ok)
+        self.assertEqual(result.value, Decimal("50.00"))
+
+        # Filter for yesterday only
+        result = self.service.calculate_payout(self.seller, period_end=now - timedelta(hours=12))
+        self.assertTrue(result.ok)
+        self.assertEqual(result.value, Decimal("30.00"))
