@@ -13,7 +13,6 @@ from django.db import connection, reset_queries
 from django.test import RequestFactory
 
 from marketplace.models import Product
-from marketplace.views.product_views import ProductViewSet
 
 User = get_user_model()
 
@@ -79,19 +78,26 @@ class Command(BaseCommand):
             reset_queries()
             start_time = time.time()
 
-            # Call the optimized view
-            view = ProductViewSet()
-            view.request = request
-            view.format_kwarg = None
+            # Call the service directly
+            from marketplace.services import CatalogService
 
-            # Use the optimized queryset
-            queryset = view.get_queryset()[:product_count]
+            service = CatalogService()
 
-            # Force evaluation and serialization
+            # Use service to list products (this returns a dict with "results" list)
+            result = service.list_products(page_size=product_count)
+
+            if not result.ok:
+                self.stdout.write(self.style.ERROR(f"Service error: {result.error}"))
+                return
+
+            # Results are already model instances (not a queryset), so they are evaluated
+            products_list = result.value["results"]
+
+            # Force serialization to mimic view overhead
             from marketplace.serializers import ProductListSerializer
 
-            serializer = ProductListSerializer(queryset, many=True, context={"request": request})
-            data = serializer.data  # Force evaluation
+            serializer = ProductListSerializer(products_list, many=True, context={"request": request})
+            data = serializer.data
 
             end_time = time.time()
             response_time = (end_time - start_time) * 1000

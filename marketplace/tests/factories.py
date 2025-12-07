@@ -19,6 +19,7 @@ from marketplace.models import (
     ProductImage,
     ProductReview,
 )
+from payment_system.models import ExchangeRate, PaymentTracker, PaymentTransaction, Payout, PayoutItem
 
 User = get_user_model()
 fake = Faker()  # Instantiate Faker once
@@ -208,3 +209,73 @@ class OrderItemFactory(factory.django.DjangoModelFactory):
     product_name = factory.LazyAttribute(lambda o: o.product.name)
     product_description = factory.LazyAttribute(lambda o: o.product.description)
     product_image = ""
+
+
+class PaymentTrackerFactory(factory.django.DjangoModelFactory):
+    class Meta:
+        model = PaymentTracker
+
+    id = factory.LazyFunction(uuid.uuid4)
+    stripe_payment_intent_id = factory.Sequence(lambda n: f"pi_test_{n}")
+    order = factory.SubFactory(OrderFactory)
+    user = factory.SubFactory(UserFactory)
+    transaction_type = "payment"
+    status = "succeeded"
+    amount = factory.LazyAttribute(lambda o: o.order.total_amount)
+    currency = "USD"
+
+
+class PaymentTransactionFactory(factory.django.DjangoModelFactory):
+    class Meta:
+        model = PaymentTransaction
+
+    id = factory.LazyFunction(uuid.uuid4)
+    stripe_payment_intent_id = factory.Sequence(lambda n: f"pi_test_{n}")
+    stripe_checkout_session_id = factory.Sequence(lambda n: f"cs_test_{n}")
+    order = factory.SubFactory(OrderFactory)
+    seller = factory.SubFactory(SellerFactory)
+    buyer = factory.SubFactory(UserFactory)
+    status = "completed"
+    gross_amount = factory.LazyFunction(lambda: Decimal(f"{random.randint(50, 500)}.00"))
+    platform_fee = factory.LazyAttribute(lambda o: o.gross_amount * Decimal("0.10"))
+    stripe_fee = factory.LazyAttribute(lambda o: o.gross_amount * Decimal("0.029") + Decimal("0.30"))
+    net_amount = factory.LazyAttribute(lambda o: o.gross_amount - o.platform_fee - o.stripe_fee)
+    currency = "USD"
+    item_count = 1
+    item_names = "Test Product"
+
+
+class PayoutFactory(factory.django.DjangoModelFactory):
+    class Meta:
+        model = Payout
+
+    id = factory.LazyFunction(uuid.uuid4)
+    stripe_payout_id = factory.Sequence(lambda n: f"po_test_{n}")
+    seller = factory.SubFactory(SellerFactory)
+    status = "paid"
+    amount_cents = factory.LazyAttribute(lambda o: int(o.amount_decimal * 100))
+    amount_decimal = factory.LazyFunction(lambda: Decimal(f"{random.randint(100, 1000)}.00"))
+    currency = "USD"
+    payout_type = "standard"
+
+
+class PayoutItemFactory(factory.django.DjangoModelFactory):
+    class Meta:
+        model = PayoutItem
+
+    id = factory.LazyFunction(uuid.uuid4)
+    payout = factory.SubFactory(PayoutFactory)
+    payment_transfer = factory.SubFactory(PaymentTransactionFactory)
+    transfer_amount = factory.LazyAttribute(lambda o: o.payment_transfer.net_amount)
+    transfer_currency = "USD"
+    transfer_date = factory.LazyFunction(uuid.uuid4)  # Placeholder or timezone.now via LazyFunction if imported
+
+
+class ExchangeRateFactory(factory.django.DjangoModelFactory):
+    class Meta:
+        model = ExchangeRate
+
+    base_currency = "USD"
+    target_currency = factory.Iterator(["EUR", "GBP", "CAD"])
+    rate = factory.LazyFunction(lambda: Decimal(f"{random.uniform(0.5, 1.5):.4f}"))
+    source = "test_factory"

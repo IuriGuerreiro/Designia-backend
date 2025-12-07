@@ -97,7 +97,7 @@ class SearchService(BaseService):
             filters = filters or {}
 
             # Start with base queryset
-            queryset = Product.objects.select_related("seller", "category").prefetch_related("images", "reviews")
+            queryset = Product.objects.select_related("seller", "category").prefetch_related("images")
 
             # Apply search query
             if query:
@@ -288,7 +288,7 @@ class SearchService(BaseService):
         """
         try:
             # Start with base queryset
-            queryset = Product.objects.select_related("seller", "category").prefetch_related("images", "reviews")
+            queryset = Product.objects.select_related("seller", "category").prefetch_related("images")
 
             # Apply filters
             queryset = self._apply_filters(queryset, filters)

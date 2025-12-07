@@ -194,6 +194,11 @@ class OrderService(BaseService):
                 product = item["product"]
                 quantity = item["quantity"]
 
+                # Use prefetched images to avoid DB hit
+                product_images = list(product.images.all())
+                primary_image = product_images[0] if product_images else None
+                image_url = primary_image.get_proxy_url() if primary_image else ""
+
                 OrderItem.objects.create(
                     order=order,
                     product=product,
@@ -203,7 +208,7 @@ class OrderService(BaseService):
                     total_price=quantity * product.price,  # Calculate total_price
                     product_name=product.name,  # Snapshot name
                     product_description=product.description[:500] if product.description else "",  # Truncate
-                    product_image=product.images.first().get_proxy_url() if product.images.exists() else "",
+                    product_image=image_url,
                 )
 
             # Step 5: Clear cart

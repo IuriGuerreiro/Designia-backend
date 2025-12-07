@@ -84,7 +84,7 @@ class PayoutServiceTest(TestCase):
 
         order = Order.objects.create(buyer=self.buyer, total_amount=100, subtotal=100, shipping_address={})
 
-        transaction_to_check_id = PaymentTransaction.objects.create(
+        t1 = PaymentTransaction.objects.create(
             seller=self.seller,
             buyer=self.buyer,
             order=order,
@@ -94,7 +94,7 @@ class PayoutServiceTest(TestCase):
             platform_fee=Decimal("10.00"),  # Net: 90.00
             stripe_payment_intent_id="pi_1",
             stripe_checkout_session_id="cs_1",
-        ).id
+        )
 
         # Mock provider transfer
         self.mock_provider.create_transfer.return_value = {"id": "tr_123"}
@@ -109,8 +109,8 @@ class PayoutServiceTest(TestCase):
         self.assertEqual(payout.stripe_payout_id, "tr_123")
 
         # Verify transaction updated
-        transaction_from_db = PaymentTransaction.objects.get(id=transaction_to_check_id)
-        self.assertTrue(transaction_from_db.payed_out)
+        t1.refresh_from_db()
+        self.assertTrue(t1.payed_out)
 
         # Verify provider called
         self.mock_provider.create_transfer.assert_called_once_with(
@@ -236,49 +236,59 @@ class PayoutServiceTest(TestCase):
         self.assertEqual(mock_create_payout.call_count, 2)
 
     def test_calculate_payout_filtering(self):
-        from datetime import timedelta
+        from datetime import timedelta, timezone
 
-        from django.utils import timezone
+        from django.utils import timezone as django_timezone
 
         from marketplace.models import Order
 
         order = Order.objects.create(buyer=self.buyer, total_amount=100, subtotal=100, shipping_address={})
-        now = timezone.now()
 
-        # Transaction 1 (Today)
-        PaymentTransaction.objects.create(
-            seller=self.seller,
-            buyer=self.buyer,
-            order=order,
-            status="completed",
-            payed_out=False,
-            net_amount=Decimal("50.00"),
-            gross_amount=50,
-            stripe_payment_intent_id="pi_1",
-            stripe_checkout_session_id="cs_1",
-            created_at=now,
-        )
+        # Mock django_timezone.now() to control created_at values for auto_now_add fields
+        with patch("django.utils.timezone.now") as mock_now:
+            base_time = django_timezone.datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+            mock_now.return_value = base_time
 
-        # Transaction 2 (Yesterday)
-        PaymentTransaction.objects.create(
-            seller=self.seller,
-            buyer=self.buyer,
-            order=order,
-            status="completed",
-            payed_out=False,
-            net_amount=Decimal("30.00"),
-            gross_amount=30,
-            stripe_payment_intent_id="pi_2",
-            stripe_checkout_session_id="cs_2",
-            created_at=now - timedelta(days=1),
-        )
+            # Transaction 1 (Today) - actually at base_time
+            PaymentTransaction.objects.create(
+                seller=self.seller,
+                buyer=self.buyer,
+                order=order,
+                status="completed",
+                payed_out=False,
+                net_amount=Decimal("50.00"),
+                gross_amount=50,
+                stripe_payment_intent_id="pi_1",
+                stripe_checkout_session_id="cs_1",
+                # created_at is automatically set by mock_now
+            )
 
-        # Filter for today only
-        result = self.service.calculate_payout(self.seller, period_start=now - timedelta(hours=1))
-        self.assertTrue(result.ok)
-        self.assertEqual(result.value, Decimal("50.00"))
+            mock_now.return_value = base_time - timedelta(days=1)
+            # Transaction 2 (Yesterday)
+            PaymentTransaction.objects.create(
+                seller=self.seller,
+                buyer=self.buyer,
+                order=order,
+                status="completed",
+                payed_out=False,
+                net_amount=Decimal("30.00"),
+                gross_amount=30,
+                stripe_payment_intent_id="pi_2",
+                stripe_checkout_session_id="cs_2",
+                # created_at is automatically set by mock_now
+            )
 
-        # Filter for yesterday only
-        result = self.service.calculate_payout(self.seller, period_end=now - timedelta(hours=12))
-        self.assertTrue(result.ok)
-        self.assertEqual(result.value, Decimal("30.00"))
+            # Reset mock_now for the calculate_payout calls
+            mock_now.return_value = base_time  # Ensure calculate_payout sees 'now' as base_time
+
+            # Filter for today only
+            # period_start = base_time - timedelta(hours=1) -> should only include T1
+            result = self.service.calculate_payout(self.seller, period_start=base_time - timedelta(hours=1))
+            self.assertTrue(result.ok)
+            self.assertEqual(result.value, Decimal("50.00"))
+
+            # Filter for yesterday only
+            # period_end = base_time - timedelta(hours=12) -> should only include T2
+            result = self.service.calculate_payout(self.seller, period_end=base_time - timedelta(hours=12))
+            self.assertTrue(result.ok)
+            self.assertEqual(result.value, Decimal("30.00"))
