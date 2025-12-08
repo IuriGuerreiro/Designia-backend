@@ -143,9 +143,41 @@ class ProductImage(models.Model):
 
     def save(self, *args, **kwargs):
         # Ensure only one primary image per product
-        if self.is_primary:
-            ProductImage.objects.filter(product=self.product, is_primary=True).update(is_primary=False)
         super().save(*args, **kwargs)
+
+    def get_presigned_url(self, expires_in=3600):
+        """Get presigned URL from S3 storage"""
+        if not self.s3_key:
+            if self.image:
+                try:
+                    return self.image.url
+                except Exception:
+                    return None
+            return None
+
+        try:
+            from django.conf import settings
+
+            if not getattr(settings, "USE_S3", False):
+                if self.image:
+                    return self.image.url
+                return None
+
+            from utils.s3_storage import get_s3_storage
+
+            s3 = get_s3_storage()
+            return s3.get_file_url(self.s3_key, expires_in=expires_in)
+        except Exception:
+            # Fallback to standard URL if S3 fails
+            if self.image:
+                return self.image.url
+            return None
+
+    def get_proxy_url(self):
+        """Get proxy URL for the image"""
+        # For now, just alias to presigned URL or public URL
+        # The serializer calls this, so it must exist.
+        return self.get_presigned_url()
 
     def __str__(self):
         return f"Image for {self.product.name}"

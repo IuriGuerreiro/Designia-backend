@@ -33,6 +33,26 @@ class OrderViewSet(viewsets.ViewSet):
 
         return Response(response_data, status=status.HTTP_200_OK)
 
+    @action(detail=False, methods=["get"])
+    def seller_orders(self, request):
+        service = self.get_service()
+
+        status_filter = request.query_params.get("status")
+        page = int(request.query_params.get("page", 1))
+        page_size = int(request.query_params.get("page_size", 20))
+
+        result = service.list_seller_orders(request.user, status_filter, page, page_size)
+
+        if not result.ok:
+            return Response({"detail": result.error_detail}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        # Serialize results
+        orders_data = OrderSerializer(result.value["results"], many=True).data
+        response_data = result.value
+        response_data["results"] = orders_data
+
+        return Response(response_data, status=status.HTTP_200_OK)
+
     def retrieve(self, request, pk=None):
         service = self.get_service()
 

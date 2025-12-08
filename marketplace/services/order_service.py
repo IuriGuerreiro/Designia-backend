@@ -316,6 +316,59 @@ class OrderService(BaseService):
             return service_err(ErrorCodes.INTERNAL_ERROR, str(e))
 
     @BaseService.log_performance
+    def list_seller_orders(
+        self, seller: User, status: Optional[str] = None, page: int = 1, page_size: int = 20
+    ) -> ServiceResult[Dict]:
+        """
+        List orders where the user is a seller.
+
+        Args:
+            seller: User who sold items
+            status: Optional status filter
+            page: Page number
+            page_size: Items per page
+
+        Returns:
+            ServiceResult with paginated order list
+        """
+        try:
+            # Filter orders containing items sold by this seller
+            queryset = (
+                Order.objects.filter(items__seller=seller)
+                .distinct()
+                .select_related("buyer")
+                .prefetch_related("items__product")
+            )
+
+            # Apply filters
+            if status:
+                queryset = queryset.filter(status=status)
+
+            # Order by newest first
+            queryset = queryset.order_by("-created_at")
+
+            # Simple pagination
+            offset = (page - 1) * page_size
+            total_count = queryset.count()
+            orders = list(queryset[offset : offset + page_size])
+
+            result_data = {
+                "results": orders,
+                "count": total_count,
+                "page": page,
+                "page_size": page_size,
+                "num_pages": (total_count + page_size - 1) // page_size,
+            }
+
+            self.logger.info(f"Listed seller orders for user {seller.id}: {total_count} total")
+
+            return service_ok(result_data)
+
+        except Exception as e:
+            self.logger.error(f"Error listing seller orders for user {seller.id}: {e}", exc_info=True)
+            return service_err(ErrorCodes.INTERNAL_ERROR, str(e))
+
+    @BaseService.log_performance
     @transaction.atomic
     def update_shipping(
         self, order_id: str, user: User, tracking_number: str, carrier: str, carrier_code: str = ""
