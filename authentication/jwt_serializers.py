@@ -26,7 +26,7 @@ class CustomRefreshToken(RefreshToken):
     def for_user(cls, user):
         """Create refresh token with custom claims"""
         token = cls()
-        token["user_id"] = user.id
+        token["user_id"] = str(user.id)
         token["role"] = user.role
         token["is_seller"] = user.role == "seller"
         token["is_admin"] = user.role == "admin" or user.is_superuser
