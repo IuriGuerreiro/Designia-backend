@@ -845,6 +845,10 @@ class OrderSerializer(serializers.ModelSerializer):
 class ProductMetricsSerializer(serializers.ModelSerializer):
     """Product metrics serializer"""
 
+    view_to_click_rate = serializers.ReadOnlyField()
+    click_to_cart_rate = serializers.ReadOnlyField()
+    cart_to_purchase_rate = serializers.ReadOnlyField()
+
     class Meta:
         model = ProductMetrics
         fields = [

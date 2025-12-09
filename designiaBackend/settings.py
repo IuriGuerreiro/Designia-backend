@@ -38,7 +38,7 @@ if not SECRET_KEY:
     raise ValueError("SECRET_KEY environment variable must be set in production")
 
 # Parse ALLOWED_HOSTS from environment variable
-ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "192.168.3.2,localhost,127.0.0.1").split(",")
+ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "192.168.3.2,localhost,127.0.0.1,api-designia.testingthing.work").split(",")
 
 # Application definition
 
@@ -218,7 +218,7 @@ SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=60),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
     "ROTATE_REFRESH_TOKENS": True,
-    "TOKEN_OBTAIN_SERIALIZER": "authentication.jwt_serializers.CustomTokenObtainPairSerializer",
+    "TOKEN_OBTAIN_SERIALIZER": "authentication.api.serializers.jwt_serializers.CustomTokenObtainPairSerializer",
 }
 
 # CORS settings - parse from environment variable
@@ -570,3 +570,36 @@ logger.info(f"STORAGE_BACKEND: {INFRASTRUCTURE['STORAGE_BACKEND']}")
 logger.info(f"EMAIL_BACKEND_TYPE: {INFRASTRUCTURE['EMAIL_BACKEND_TYPE']}")
 logger.info(f"PAYMENT_PROVIDER: {INFRASTRUCTURE['PAYMENT_PROVIDER']}")
 logger.info("=" * 30)
+
+# ===============================
+# PHASE 3: OBSERVABILITY & API GATEWAY
+# ===============================
+
+# OpenTelemetry Tracing Configuration
+OTEL_TRACING_ENABLED = os.getenv("OTEL_TRACING_ENABLED", "True").lower() == "true"
+JAEGER_AGENT_HOST = os.getenv("JAEGER_AGENT_HOST", "localhost")
+JAEGER_AGENT_PORT = int(os.getenv("JAEGER_AGENT_PORT", "6831"))
+
+# OpenTelemetry Sampling Configuration
+# For production: reduce sampling rate to avoid overhead (e.g., 0.1 = 10%)
+# For development: use 1.0 (100%) to trace all requests
+OTEL_TRACES_SAMPLER = os.getenv("OTEL_TRACES_SAMPLER", "parentbased_traceidratio")
+OTEL_TRACES_SAMPLER_ARG = float(os.getenv("OTEL_TRACES_SAMPLER_ARG", "1.0"))
+
+# Internal Service URLs (for service-to-service communication)
+# In monolith: points to same Django instance
+# In microservices: points to separate service containers
+AUTHENTICATION_INTERNAL_URL = os.getenv(
+    "AUTHENTICATION_INTERNAL_URL", "http://localhost:8000/internal/auth"  # Default for monolith development
+)
+
+# Kong Gateway Configuration
+KONG_ADMIN_URL = os.getenv("KONG_ADMIN_URL", "http://localhost:8001")
+KONG_PROXY_URL = os.getenv("KONG_PROXY_URL", "http://localhost:8000")
+
+logger.info("=== OBSERVABILITY CONFIGURATION ===")
+logger.info(f"OTEL_TRACING_ENABLED: {OTEL_TRACING_ENABLED}")
+logger.info(f"JAEGER_AGENT_HOST: {JAEGER_AGENT_HOST}")
+logger.info(f"JAEGER_AGENT_PORT: {JAEGER_AGENT_PORT}")
+logger.info(f"AUTHENTICATION_INTERNAL_URL: {AUTHENTICATION_INTERNAL_URL}")
+logger.info("=" * 35)

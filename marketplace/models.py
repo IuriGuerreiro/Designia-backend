@@ -394,5 +394,23 @@ class ProductMetrics(models.Model):
 
     last_updated = models.DateTimeField(auto_now=True)
 
+    @property
+    def view_to_click_rate(self):
+        if self.total_views > 0:
+            return self.total_clicks / self.total_views
+        return 0.0
+
+    @property
+    def click_to_cart_rate(self):
+        if self.total_clicks > 0:
+            return self.total_cart_additions / self.total_clicks
+        return 0.0
+
+    @property
+    def cart_to_purchase_rate(self):
+        if self.total_cart_additions > 0:
+            return self.total_sales / self.total_cart_additions
+        return 0.0
+
     def __str__(self):
         return f"Metrics for {self.product.name}"

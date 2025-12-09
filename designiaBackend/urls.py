@@ -29,7 +29,7 @@ urlpatterns = [
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"),
     path("api/redoc/", SpectacularRedocView.as_view(url_name="schema"), name="redoc"),
-    # API endpoints
+    # API endpoints (public - exposed through Kong Gateway)
     path("api/auth/", include("authentication.urls")),
     path("api/marketplace/", include("marketplace.urls")),
     path("api/activity/", include("activity.urls")),
@@ -37,6 +37,8 @@ urlpatterns = [
     path("api/chat/", include("chat.urls")),
     path("api/system/", include("system_info.urls")),
     path("api/ar/", include("ar.urls")),
+    # Internal API (service-to-service - NOT exposed through gateway)
+    path("internal/auth/", include("authentication.api.urls.internal_urls")),
     path("admin/ar/models/", ProductARModelAdminListView.as_view(), name="admin-ar-models"),
     path(
         "admin/ar/models/<int:pk>/download/",

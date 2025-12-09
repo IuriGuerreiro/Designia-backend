@@ -1,0 +1,35 @@
+# Prometheus Configuration
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'designia-dev'
+    environment: 'development'
+
+# Scrape configurations
+scrape_configs:
+  # Kong Gateway metrics
+  - job_name: 'kong'
+    static_configs:
+      - targets: ['kong:8100']
+        labels:
+          service: 'kong-gateway'
+          component: 'api-gateway'
+
+  # Django Authentication Service metrics
+  - job_name: 'authentication'
+    metrics_path: '/api/auth/metrics'
+    static_configs:
+      - targets: ['django:8000']
+        labels:
+          service: 'authentication'
+          component: 'backend'
+
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          service: 'prometheus'
+          component: 'monitoring'

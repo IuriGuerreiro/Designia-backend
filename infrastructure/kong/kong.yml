@@ -1,0 +1,173 @@
+# Kong Declarative Configuration (DB-less mode alternative)
+# This file can be used for Kong DB-less mode or as reference for API configuration
+
+_format_version: "3.0"
+
+# Services - Backend services Kong will proxy to
+services:
+  # Authentication Service
+  - name: authentication-service
+    url: http://django:8000
+    protocol: http
+    host: django
+    port: 8000
+    path: /
+    retries: 5
+    connect_timeout: 60000
+    write_timeout: 60000
+    read_timeout: 60000
+
+    # Routes for authentication service
+    routes:
+      # Public Routes (No JWT required)
+      - name: auth-login
+        paths:
+          - /api/auth/login
+        methods:
+          - POST
+        strip_path: false
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 5
+              policy: local
+              fault_tolerant: true
+          - name: prometheus
+            config:
+              status_code_metrics: true
+              latency_metrics: true
+
+      - name: auth-register
+        paths:
+          - /api/auth/register
+        methods:
+          - POST
+        strip_path: false
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 3
+              policy: local
+          - name: prometheus
+
+      - name: auth-verify-email
+        paths:
+          - /api/auth/verify-email
+        methods:
+          - POST
+          - GET
+        strip_path: false
+
+      - name: auth-google-oauth
+        paths:
+          - /api/auth/google
+        methods:
+          - POST
+        strip_path: false
+
+      - name: auth-refresh-token
+        paths:
+          - /api/auth/token/refresh
+        methods:
+          - POST
+        strip_path: false
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 10
+              policy: local
+
+      # Protected Routes (JWT required)
+      - name: auth-profile
+        paths:
+          - /api/auth/profile
+        methods:
+          - GET
+          - PUT
+          - PATCH
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: sub
+              secret_is_base64: false
+              claims_to_verify:
+                - exp
+          - name: rate-limiting
+            config:
+              minute: 60
+              policy: local
+          - name: prometheus
+
+      - name: auth-2fa
+        paths:
+          - /api/auth/2fa
+        methods:
+          - POST
+          - GET
+        strip_path: false
+        plugins:
+          - name: jwt
+          - name: rate-limiting
+            config:
+              minute: 10
+              policy: local
+
+      - name: seller-apply
+        paths:
+          - /api/auth/seller/apply
+        methods:
+          - POST
+        strip_path: false
+        plugins:
+          - name: jwt
+          - name: rate-limiting
+            config:
+              hour: 2
+              policy: local
+          - name: prometheus
+
+      - name: seller-status
+        paths:
+          - /api/auth/seller/status
+        methods:
+          - GET
+        strip_path: false
+        plugins:
+          - name: jwt
+          - name: rate-limiting
+            config:
+              minute: 20
+              policy: local
+
+# Global Plugins (applied to all routes)
+plugins:
+  - name: correlation-id
+    config:
+      header_name: X-Correlation-ID
+      generator: uuid
+      echo_downstream: true
+
+  - name: request-id
+    config:
+      header_name: X-Request-ID
+      generator: uuid
+      echo_downstream: true
+
+  # Prometheus metrics collection
+  - name: prometheus
+    config:
+      per_consumer: true
+      status_code_metrics: true
+      latency_metrics: true
+      bandwidth_metrics: true
+      upstream_health_metrics: true
+
+# Consumers (JWT credentials for testing)
+consumers:
+  - username: test-user
+    custom_id: test-user-001
+    jwt_secrets:
+      - key: designia-jwt-key
+        algorithm: HS256
+        secret: your-secret-key-here
