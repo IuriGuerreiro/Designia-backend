@@ -1,0 +1,78 @@
+{
+  "dashboard": {
+    "title": "Authentication Service Metrics",
+    "tags": ["authentication", "designia"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Login Attempts (Total)",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "auth_login_total",
+            "legendFormat": "{{status}} - 2FA={{requires_2fa}}"
+          }
+        ],
+        "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8}
+      },
+      {
+        "id": 2,
+        "title": "Failed Login Rate (5min)",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(auth_login_failed[5m])",
+            "legendFormat": "{{reason}}"
+          }
+        ],
+        "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8}
+      },
+      {
+        "id": 3,
+        "title": "Login Duration (p50, p95, p99)",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, rate(auth_login_duration_seconds_bucket[5m]))",
+            "legendFormat": "p50"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(auth_login_duration_seconds_bucket[5m]))",
+            "legendFormat": "p95"
+          },
+          {
+            "expr": "histogram_quantile(0.99, rate(auth_login_duration_seconds_bucket[5m]))",
+            "legendFormat": "p99"
+          }
+        ],
+        "gridPos": {"x": 0, "y": 8, "w": 12, "h": 8}
+      },
+      {
+        "id": 4,
+        "title": "Pending Seller Applications",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "auth_seller_applications_pending"
+          }
+        ],
+        "gridPos": {"x": 12, "y": 8, "w": 6, "h": 4}
+      },
+      {
+        "id": 5,
+        "title": "JWT Validations",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(auth_jwt_validation_total[5m])",
+            "legendFormat": "{{status}}"
+          }
+        ],
+        "gridPos": {"x": 18, "y": 8, "w": 6, "h": 4}
+      }
+    ],
+    "refresh": "10s",
+    "time": {"from": "now-1h", "to": "now"}
+  }
+}

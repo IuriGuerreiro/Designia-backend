@@ -7,9 +7,9 @@ _format_version: "3.0"
 services:
   # Authentication Service
   - name: authentication-service
-    url: http://django:8000
+    url: http://host.docker.internal:8000
     protocol: http
-    host: django
+    host: host.docker.internal
     port: 8000
     path: /
     retries: 5
