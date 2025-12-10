@@ -109,7 +109,7 @@ class LoginAPIView(APIView):
                         "user_id": result.user_id,
                         "code_already_sent": result.code_already_sent,
                     },
-                    status=status.HTTP_200_OK,
+                    status=status.HTTP_202_ACCEPTED,
                 )
 
             return Response(
