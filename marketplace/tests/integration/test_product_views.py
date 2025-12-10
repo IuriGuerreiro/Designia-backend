@@ -19,7 +19,7 @@ from marketplace.tests.factories import (
 User = get_user_model()
 
 
-@override_settings(FEATURE_FLAGS={"USE_SERVICE_LAYER_PRODUCTS": True})
+@override_settings(FEATURE_FLAGS={})
 class ProductViewIntegrationTest(TestCase):
     def setUp(self):
         self.client = APIClient()

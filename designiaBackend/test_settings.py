@@ -23,12 +23,6 @@ INFRASTRUCTURE["PAYMENT_PROVIDER"] = "mock"  # noqa: F405
 
 STRIPE_SECRET_KEY = "sk_test_mock_key"
 
-# Ensure Feature Flags are set for tests (using new architecture)
-FEATURE_FLAGS["USE_SERVICE_LAYER_PRODUCTS"] = True  # noqa: F405
-FEATURE_FLAGS["USE_SERVICE_LAYER_MARKETPLACE"] = True  # noqa: F405
-FEATURE_FLAGS["USE_SERVICE_LAYER_CART"] = True  # noqa: F405
-FEATURE_FLAGS["USE_SERVICE_LAYER_ORDERS"] = True  # noqa: F405
-
 # Enable SessionAuthentication for tests to support client.force_login()
 if "DEFAULT_AUTHENTICATION_CLASSES" in REST_FRAMEWORK:  # noqa: F405
     REST_FRAMEWORK["DEFAULT_AUTHENTICATION_CLASSES"].append(  # noqa: F405

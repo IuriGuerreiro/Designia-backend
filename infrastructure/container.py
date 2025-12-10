@@ -56,6 +56,7 @@ class ServiceContainer:
             self._review_service = None
             self._search_service = None
             self._order_service = None  # Added order_service
+            self._catalog_service = None
 
             self._initialized = True
             logger.info("Service container initialized")
@@ -160,6 +161,15 @@ class ServiceContainer:
             logger.debug("Created SearchService")
         return self._search_service
 
+    def catalog_service(self):
+        """Get CatalogService instance."""
+        if self._catalog_service is None:
+            from marketplace.services import CatalogService
+
+            self._catalog_service = CatalogService(storage=self.storage())
+            logger.debug("Created CatalogService")
+        return self._catalog_service
+
     def order_service(self):
         """Get OrderService instance."""
         if self._order_service is None:
@@ -188,6 +198,7 @@ class ServiceContainer:
         self._review_service = None
         self._search_service = None
         self._order_service = None  # Added reset
+        self._catalog_service = None
         logger.info("Service container reset")
 
     def configure_for_testing(self):

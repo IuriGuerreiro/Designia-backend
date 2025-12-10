@@ -502,12 +502,6 @@ FEATURE_FLAGS = {
     "USE_NEW_STORAGE": os.getenv("FEATURE_FLAG_USE_NEW_STORAGE", "True").lower() == "true",
     "USE_NEW_EMAIL": os.getenv("FEATURE_FLAG_USE_NEW_EMAIL", "True").lower() == "true",
     "USE_NEW_PAYMENTS": os.getenv("FEATURE_FLAG_USE_NEW_PAYMENTS", "True").lower() == "true",
-    # Service layer - Marketplace (Epic 2)
-    # ✅ COMPLETE - Defaults to TRUE (use new service layer)
-    "USE_SERVICE_LAYER_MARKETPLACE": os.getenv("FEATURE_FLAG_USE_SERVICE_LAYER_MARKETPLACE", "True").lower() == "true",
-    "USE_SERVICE_LAYER_PRODUCTS": os.getenv("FEATURE_FLAG_USE_SERVICE_LAYER_PRODUCTS", "True").lower() == "true",
-    "USE_SERVICE_LAYER_CART": os.getenv("FEATURE_FLAG_USE_SERVICE_LAYER_CART", "True").lower() == "true",
-    "USE_SERVICE_LAYER_ORDERS": os.getenv("FEATURE_FLAG_USE_SERVICE_LAYER_ORDERS", "True").lower() == "true",
     # Service layer - Payments (Epic 4)
     # ⏳ PENDING - Defaults to FALSE (use legacy until Epic 4 complete)
     "USE_SERVICE_LAYER_PAYMENTS": os.getenv("FEATURE_FLAG_USE_SERVICE_LAYER_PAYMENTS", "False").lower() == "true",

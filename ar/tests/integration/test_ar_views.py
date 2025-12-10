@@ -10,7 +10,7 @@ from ar.models import ProductARModelDownload
 from marketplace.tests.factories import CategoryFactory, ProductARModelFactory, ProductFactory, UserFactory
 
 
-@override_settings(FEATURE_FLAGS={"USE_SERVICE_LAYER_PRODUCTS": True})
+@override_settings(FEATURE_FLAGS={})
 class ProductARViewIntegrationTest(TestCase):
     def setUp(self):
         self.client = APIClient()

@@ -14,9 +14,7 @@ from marketplace.tests.factories import CategoryFactory, ProductFactory, SellerF
 User = get_user_model()
 
 
-@override_settings(
-    FEATURE_FLAGS={"USE_SERVICE_LAYER_CART": True}, TAX_RATES={"default": Decimal("0")}
-)  # Assuming a feature flag for cart service migration
+@override_settings(TAX_RATES={"default": Decimal("0")})
 class CartViewIntegrationTest(TestCase):
     def setUp(self):
         self.client = APIClient()

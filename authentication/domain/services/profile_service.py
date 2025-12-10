@@ -60,8 +60,6 @@ class ProfileService:
         try:
             # Define restricted fields
             restricted_fields = [
-                "phone_number",
-                "country_code",
                 "website",
                 "location",
                 "job_title",

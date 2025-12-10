@@ -3,6 +3,7 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly
 from rest_framework.response import Response
 
+from infrastructure.container import container
 from marketplace.models import Product, ProductFavorite
 from marketplace.permissions import IsSellerOrReadOnly, IsSellerUser
 from marketplace.serializers import (
@@ -23,16 +24,7 @@ class ProductViewSet(viewsets.ModelViewSet):
     lookup_field = "slug"
 
     def get_service(self) -> CatalogService:
-        # Note: We are using CatalogService directly instead of container for now
-        # because container support for CatalogService might not be fully set up yet
-        # or we want to match existing pattern if container usage is inconsistent.
-        # But ideally: return container.catalog_service()
-        # Checking container.py... CatalogService is NOT in container.py yet.
-        # So we instantiate it directly or add it to container.
-        # Given previous steps added services to container, we should probably add this one too
-        # or just instantiate it here as done in `views_legacy.py` migration attempts.
-        # Let's instantiate directly for now as `CatalogService` is simple.
-        return CatalogService()
+        return container.catalog_service()
 
     def get_serializer_class(self):
         if self.action in ["create", "update", "partial_update"]:
