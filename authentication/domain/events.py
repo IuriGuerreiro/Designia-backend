@@ -206,6 +206,46 @@ class EventDispatcher:
             logger.error(f"Failed to publish user.login_failed event: {e}")
 
     @staticmethod
+    def dispatch_user_2fa_enabled(user):
+        """Dispatch 2FA enabled event."""
+        import logging
+
+        from authentication.infra.events import get_event_bus
+
+        logger = logging.getLogger(__name__)
+
+        logger.info(f"[EVENT] 2FA enabled: {user.email}")
+
+        # Legacy Signal
+        user_2fa_enabled.send(sender=user.__class__, user=user)
+
+        # Redis Event Bus
+        try:
+            get_event_bus().publish("user.2fa_enabled", {"user_id": str(user.id), "email": user.email})
+        except Exception as e:
+            logger.error(f"Failed to publish user.2fa_enabled event: {e}")
+
+    @staticmethod
+    def dispatch_user_2fa_disabled(user):
+        """Dispatch 2FA disabled event."""
+        import logging
+
+        from authentication.infra.events import get_event_bus
+
+        logger = logging.getLogger(__name__)
+
+        logger.info(f"[EVENT] 2FA disabled: {user.email}")
+
+        # Legacy Signal
+        user_2fa_disabled.send(sender=user.__class__, user=user)
+
+        # Redis Event Bus
+        try:
+            get_event_bus().publish("user.2fa_disabled", {"user_id": str(user.id), "email": user.email})
+        except Exception as e:
+            logger.error(f"Failed to publish user.2fa_disabled event: {e}")
+
+    @staticmethod
     def dispatch_seller_application_submitted(application, is_resubmission: bool):
         """Dispatch seller application submitted event."""
         import logging

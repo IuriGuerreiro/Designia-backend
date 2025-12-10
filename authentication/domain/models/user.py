@@ -6,7 +6,7 @@ from django.db import models
 
 class CustomUser(AbstractUser):
     ROLE_CHOICES = [
-        ("user", "User"),
+        ("customer", "Customer"),
         ("seller", "Seller"),
         ("admin", "Admin"),
     ]
@@ -64,7 +64,7 @@ class CustomUser(AbstractUser):
     avatar = models.ImageField(upload_to="avatars/", blank=True, null=True)
 
     # Role system - simple field
-    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default="user")
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default="customer")
 
     # 2FA fields
     two_factor_enabled = models.BooleanField(default=False)

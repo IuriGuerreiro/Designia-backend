@@ -245,6 +245,72 @@ class AuthService:
             logger.exception(f"2FA verification error for user {user_id}: {e}")
             return LoginResult(success=False, error="An unexpected error occurred during verification.")
 
+    def enable_2fa(self, user, code: str) -> Result:
+        """
+        Enable 2FA for a user.
+
+        Verifies the code sent for 'enable_2fa' purpose.
+
+        Args:
+            user: CustomUser instance
+            code: 6-digit 2FA code
+
+        Returns:
+            Result with success status
+        """
+        try:
+            # Verify code
+            success, message = utils_verify_2fa_code(user, code, "enable_2fa")
+
+            if not success:
+                return Result(success=False, message=message, error="Invalid code")
+
+            # Enable 2FA
+            user.two_factor_enabled = True
+            user.save()
+
+            # Dispatch event
+            EventDispatcher.dispatch_user_2fa_enabled(user)
+
+            return Result(success=True, message="Two-factor authentication enabled successfully.")
+
+        except Exception as e:
+            logger.exception(f"Error enabling 2FA for user {user.id}: {e}")
+            return Result(success=False, message="Failed to enable 2FA.", error=str(e))
+
+    def disable_2fa(self, user, code: str) -> Result:
+        """
+        Disable 2FA for a user.
+
+        Verifies the code sent for 'disable_2fa' purpose (security check).
+
+        Args:
+            user: CustomUser instance
+            code: 6-digit 2FA code
+
+        Returns:
+            Result with success status
+        """
+        try:
+            # Verify code
+            success, message = utils_verify_2fa_code(user, code, "disable_2fa")
+
+            if not success:
+                return Result(success=False, message=message, error="Invalid code")
+
+            # Disable 2FA
+            user.two_factor_enabled = False
+            user.save()
+
+            # Dispatch event
+            EventDispatcher.dispatch_user_2fa_disabled(user)
+
+            return Result(success=True, message="Two-factor authentication disabled successfully.")
+
+        except Exception as e:
+            logger.exception(f"Error disabling 2FA for user {user.id}: {e}")
+            return Result(success=False, message="Failed to disable 2FA.", error=str(e))
+
     @transaction.atomic
     def register(
         self, email: str, username: str, password: str, first_name: str = "", last_name: str = "", request=None

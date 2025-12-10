@@ -4,7 +4,7 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from authentication.api.serializers import ProfileSerializer, PublicUserSerializer
+from authentication.api.serializers import ProfileSerializer, PublicUserSerializer, UserSerializer
 from authentication.api.serializers.response_serializers import (
     ErrorResponseSerializer,
     ProfilePictureDeleteResponseSerializer,
@@ -71,18 +71,19 @@ class ProfileUpdateView(APIView):
         operation_id="profile_get_own",
         summary="Get own profile",
         description="""
-        Retrieve your own complete profile information.
+        Retrieve your own complete user and profile information.
 
         **Includes:**
+        - User fields (username, email, first_name, last_name, role, etc.)
         - All profile fields
         - Profile completion percentage
         - Private fields (phone, email preferences, etc.)
         """,
-        responses={200: OpenApiResponse(response=ProfileSerializer, description="Profile retrieved")},
+        responses={200: OpenApiResponse(response=UserSerializer, description="User profile retrieved")},
         tags=["Profile"],
     )
     def get(self, request):
-        serializer = ProfileSerializer(request.user.profile)
+        serializer = UserSerializer(request.user)
         return Response(serializer.data)
 
     @extend_schema(

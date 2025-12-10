@@ -3,6 +3,8 @@ from rest_framework_simplejwt.views import TokenRefreshView
 
 from authentication.api.views import (
     AccountStatusView,
+    Disable2FAView,
+    Enable2FAView,
     GoogleLoginView,
     LoginAPIView,
     ProfilePictureUploadView,
@@ -12,6 +14,7 @@ from authentication.api.views import (
     ResendVerificationView,
     SellerApplicationAdminView,
     SellerApplicationCreateView,
+    Send2FACodeView,
     TwoFactorLoginVerifyView,
     VerifyEmailView,
     health_views,
@@ -27,6 +30,10 @@ urlpatterns = [
     path("resend-verification/", ResendVerificationView.as_view(), name="resend_verification"),
     path("google/login/", GoogleLoginView.as_view(), name="google_login"),
     path("login/verify-2fa/", TwoFactorLoginVerifyView.as_view(), name="login_verify_2fa"),
+    # 2FA Management
+    path("2fa/send-code/", Send2FACodeView.as_view(), name="send_2fa_code"),
+    path("2fa/enable/", Enable2FAView.as_view(), name="enable_2fa"),
+    path("2fa/disable/", Disable2FAView.as_view(), name="disable_2fa"),
     path("account/status/", AccountStatusView.as_view(), name="account_status"),
     # Profile
     path("profile/", ProfileUpdateView.as_view(), name="profile"),

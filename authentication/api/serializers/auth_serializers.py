@@ -182,6 +182,23 @@ class TwoFactorToggleSerializer(serializers.Serializer):
     enable = serializers.BooleanField()
 
 
+class TwoFactorCodeRequestSerializer(serializers.Serializer):
+    """Serializer for requesting a 2FA code"""
+
+    purpose = serializers.ChoiceField(
+        choices=[
+            ("enable_2fa", "Enable 2FA"),
+            ("disable_2fa", "Disable 2FA"),
+        ]
+    )
+
+
+class TwoFactorConfirmSerializer(serializers.Serializer):
+    """Serializer for confirming 2FA action (enable/disable)"""
+
+    code = serializers.CharField(max_length=6, min_length=6)
+
+
 class TwoFactorVerifySerializer(serializers.Serializer):
     """Serializer for verifying 2FA codes"""
 

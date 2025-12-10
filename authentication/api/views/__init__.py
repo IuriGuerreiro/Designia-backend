@@ -1,9 +1,12 @@
 from .auth_views import (
     AccountStatusView,
+    Disable2FAView,
+    Enable2FAView,
     GoogleLoginView,
     LoginAPIView,
     RegisterAPIView,
     ResendVerificationView,
+    Send2FACodeView,
     TwoFactorLoginVerifyView,
     VerifyEmailView,
 )
@@ -18,6 +21,9 @@ __all__ = [
     "GoogleLoginView",
     "TwoFactorLoginVerifyView",
     "AccountStatusView",
+    "Send2FACodeView",
+    "Enable2FAView",
+    "Disable2FAView",
     "PublicProfileDetailView",
     "ProfileUpdateView",
     "ProfilePictureUploadView",

@@ -22,6 +22,7 @@ class LoginResult:
     error: Optional[str] = None
     user_id: Optional[str] = None  # For 2FA flow
     message: Optional[str] = None
+    data: Optional[Dict[str, Any]] = None
 
 
 @dataclass

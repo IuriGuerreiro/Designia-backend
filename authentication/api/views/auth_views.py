@@ -3,7 +3,12 @@ from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from authentication.api.serializers import UserRegistrationSerializer, UserSerializer
+from authentication.api.serializers import (
+    TwoFactorCodeRequestSerializer,
+    TwoFactorConfirmSerializer,
+    UserRegistrationSerializer,
+    UserSerializer,
+)
 from authentication.api.serializers.response_serializers import (
     AccountStatusResponseSerializer,
     ErrorResponseSerializer,
@@ -373,6 +378,137 @@ class TwoFactorLoginVerifyView(APIView):
             )
 
         return Response({"error": result.error}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class Send2FACodeView(APIView):
+    """Request a 2FA code for a specific purpose (enable/disable)"""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    # ============================================================================
+    # 2FA MANAGEMENT WORKFLOW
+    # ============================================================================
+    #
+    # The 2FA setup/teardown process is designed to be secure and prevent lockouts.
+    #
+    # ENABLE FLOW:
+    # 1. Client requests code: POST /api/auth/2fa/send-code/ { "purpose": "enable_2fa" }
+    # 2. Server checks credentials, generates code, emails it to user.
+    # 3. Client submits code:  POST /api/auth/2fa/enable/ { "code": "123456" }
+    # 4. Server verifies code. If valid, sets user.two_factor_enabled = True.
+    #
+    # DISABLE FLOW:
+    # 1. Client requests code: POST /api/auth/2fa/send-code/ { "purpose": "disable_2fa" }
+    #    (This step ensures a session hijacker cannot disable 2FA without email access)
+    # 2. Server generates code, emails it to user.
+    # 3. Client submits code:  POST /api/auth/2fa/disable/ { "code": "123456" }
+    # 4. Server verifies code. If valid, sets user.two_factor_enabled = False.
+    #
+    # ============================================================================
+
+    @extend_schema(
+        operation_id="auth_send_2fa_code",
+        summary="Send 2FA code",
+        description="""
+        **Step 1 of 2FA Workflow:** Initiate 2FA setup or removal.
+
+        Sends a 6-digit verification code to the user's email address.
+        This code is required to confirm the subsequent 'enable' or 'disable' action.
+
+        **Purposes:**
+        - `enable_2fa`: Request code to turn ON 2FA (verifies you can receive codes)
+        - `disable_2fa`: Request code to turn OFF 2FA (security check)
+        """,
+        request=TwoFactorCodeRequestSerializer,
+        responses={
+            200: OpenApiResponse(description="Code sent successfully"),
+            400: OpenApiResponse(response=ErrorResponseSerializer, description="Invalid purpose or rate limited"),
+        },
+        tags=["Authentication"],
+    )
+    def post(self, request):
+        serializer = TwoFactorCodeRequestSerializer(data=request.data)
+        if serializer.is_valid():
+            purpose = serializer.validated_data["purpose"]
+            service = get_auth_service()
+            result = service.send_2fa_code(request.user, purpose, request)
+
+            if result.success:
+                return Response({"message": result.message}, status=status.HTTP_200_OK)
+            return Response({"error": result.message}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class Enable2FAView(APIView):
+    """Verify code and enable 2FA"""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        operation_id="auth_enable_2fa",
+        summary="Enable 2FA",
+        description="""
+        **Step 2 of Enable Flow:** Finalize 2FA setup.
+
+        Verifies the code received from `send-code` endpoint.
+        If successful, **Two-Factor Authentication will be activated** for this account.
+        Future logins will require a verification code.
+        """,
+        request=TwoFactorConfirmSerializer,
+        responses={
+            200: OpenApiResponse(description="2FA enabled successfully"),
+            400: OpenApiResponse(response=ErrorResponseSerializer, description="Invalid code"),
+        },
+        tags=["Authentication"],
+    )
+    def post(self, request):
+        serializer = TwoFactorConfirmSerializer(data=request.data)
+        if serializer.is_valid():
+            code = serializer.validated_data["code"]
+            service = get_auth_service()
+            result = service.enable_2fa(request.user, code)
+
+            if result.success:
+                return Response({"message": result.message}, status=status.HTTP_200_OK)
+            return Response({"error": result.message}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class Disable2FAView(APIView):
+    """Verify code and disable 2FA"""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        operation_id="auth_disable_2fa",
+        summary="Disable 2FA",
+        description="""
+        **Step 2 of Disable Flow:** Deactivate 2FA.
+
+        Verifies the code received from `send-code` endpoint to ensure security.
+        If successful, **Two-Factor Authentication will be turned OFF**.
+        """,
+        request=TwoFactorConfirmSerializer,
+        responses={
+            200: OpenApiResponse(description="2FA disabled successfully"),
+            400: OpenApiResponse(response=ErrorResponseSerializer, description="Invalid code"),
+        },
+        tags=["Authentication"],
+    )
+    def post(self, request):
+        serializer = TwoFactorConfirmSerializer(data=request.data)
+        if serializer.is_valid():
+            code = serializer.validated_data["code"]
+            service = get_auth_service()
+            result = service.disable_2fa(request.user, code)
+
+            if result.success:
+                return Response({"message": result.message}, status=status.HTTP_200_OK)
+            return Response({"error": result.message}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 class AccountStatusView(APIView):
