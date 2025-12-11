@@ -320,3 +320,24 @@ class ReviewService(BaseService):
         except Exception as e:
             self.logger.error(f"Error listing reviews: {e}", exc_info=True)
             return service_err(ErrorCodes.INTERNAL_ERROR, str(e))
+
+    def get_review(self, review_id: int) -> ServiceResult[ProductReview]:
+        """
+        Get a specific review by ID.
+
+        Args:
+            review_id: Review ID
+
+        Returns:
+            ServiceResult with ProductReview instance
+        """
+        try:
+            review = ProductReview.objects.select_related("reviewer", "product").get(id=review_id, is_active=True)
+            self.logger.info(f"Retrieved review {review_id}")
+            return service_ok(review)
+
+        except ProductReview.DoesNotExist:
+            return service_err(ErrorCodes.NOT_FOUND, f"Review {review_id} not found")
+        except Exception as e:
+            self.logger.error(f"Error getting review {review_id}: {e}", exc_info=True)
+            return service_err(ErrorCodes.INTERNAL_ERROR, str(e))

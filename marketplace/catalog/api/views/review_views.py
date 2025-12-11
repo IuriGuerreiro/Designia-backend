@@ -55,6 +55,19 @@ class ReviewViewSet(viewsets.ViewSet):
 
         return Response(response_data, status=status.HTTP_200_OK)
 
+    def retrieve(self, request, pk=None):
+        """Get a specific review by ID."""
+        service = self.get_service()
+
+        result = service.get_review(pk)
+
+        if not result.ok:
+            if result.error == ErrorCodes.NOT_FOUND:
+                return Response({"detail": result.error_detail}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"detail": result.error_detail}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response(ProductReviewSerializer(result.value).data, status=status.HTTP_200_OK)
+
     def create(self, request):
         service = self.get_service()
 

@@ -37,8 +37,9 @@ urlpatterns = [
     path("api/chat/", include("chat.urls")),
     path("api/system/", include("system_info.urls")),
     path("api/ar/", include("ar.urls")),
-    # Internal API (service-to-service - NOT exposed through gateway)
+    # Internal APIs (service-to-service - NOT exposed through gateway)
     path("internal/auth/", include("authentication.api.urls.internal_urls")),
+    path("internal/marketplace/", include("marketplace.api.urls.internal_urls")),
     path("admin/ar/models/", ProductARModelAdminListView.as_view(), name="admin-ar-models"),
     path(
         "admin/ar/models/<int:pk>/download/",
