@@ -75,7 +75,7 @@ logger = logging.getLogger(__name__)
         ),
         400: OpenApiResponse(response=ErrorResponseSerializer, description="Invalid product ID format"),
     },
-    tags=["Internal APIs"],
+    tags=["Marketplace - Internal"],
 )
 @api_view(["GET"])
 @permission_classes([AllowAny])
@@ -172,7 +172,7 @@ def internal_get_product(request, product_id):
             ],
         ),
     },
-    tags=["Internal APIs"],
+    tags=["Marketplace - Internal"],
 )
 @api_view(["GET"])
 @permission_classes([AllowAny])

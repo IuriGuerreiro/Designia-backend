@@ -1,9 +1,17 @@
+from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from infrastructure.container import container
+from marketplace.api.serializers import (
+    CancelOrderRequestSerializer,
+    CreateOrderRequestSerializer,
+    ErrorResponseSerializer,
+    OrderDetailResponseSerializer,
+    OrderListResponseSerializer,
+)
 from marketplace.serializers import OrderSerializer
 from marketplace.services import ErrorCodes, OrderService
 
@@ -14,6 +22,30 @@ class OrderViewSet(viewsets.ViewSet):
     def get_service(self) -> OrderService:
         return container.order_service()
 
+    @extend_schema(
+        operation_id="orders_list",
+        summary="List user's orders (as buyer)",
+        description="""
+        **What it receives:**
+        - Authentication token
+        - Optional status filter (query param)
+        - Pagination parameters (page, page_size)
+
+        **What it returns:**
+        - Paginated list of orders where user is the buyer
+        - Total count and page information
+        """,
+        parameters=[
+            OpenApiParameter(name="status", type=str, description="Filter by order status"),
+            OpenApiParameter(name="page", type=int, description="Page number (default: 1)"),
+            OpenApiParameter(name="page_size", type=int, description="Items per page (default: 20)"),
+        ],
+        responses={
+            200: OpenApiResponse(response=OrderListResponseSerializer, description="Orders retrieved successfully"),
+            500: OpenApiResponse(response=ErrorResponseSerializer, description="Internal server error"),
+        },
+        tags=["Marketplace - Orders"],
+    )
     def list(self, request):
         service = self.get_service()
 
@@ -33,6 +65,30 @@ class OrderViewSet(viewsets.ViewSet):
 
         return Response(response_data, status=status.HTTP_200_OK)
 
+    @extend_schema(
+        operation_id="orders_seller_orders",
+        summary="List orders where user is the seller",
+        description="""
+        **What it receives:**
+        - Authentication token (user must have products as seller)
+        - Optional status filter (query param)
+        - Pagination parameters (page, page_size)
+
+        **What it returns:**
+        - Paginated list of orders containing items sold by current user
+        - Total count and page information
+        """,
+        parameters=[
+            OpenApiParameter(name="status", type=str, description="Filter by order status"),
+            OpenApiParameter(name="page", type=int, description="Page number (default: 1)"),
+            OpenApiParameter(name="page_size", type=int, description="Items per page (default: 20)"),
+        ],
+        responses={
+            200: OpenApiResponse(response=OrderListResponseSerializer, description="Orders retrieved successfully"),
+            500: OpenApiResponse(response=ErrorResponseSerializer, description="Internal server error"),
+        },
+        tags=["Marketplace - Orders"],
+    )
     @action(detail=False, methods=["get"])
     def seller_orders(self, request):
         service = self.get_service()
@@ -53,6 +109,25 @@ class OrderViewSet(viewsets.ViewSet):
 
         return Response(response_data, status=status.HTTP_200_OK)
 
+    @extend_schema(
+        operation_id="orders_retrieve",
+        summary="Get order details",
+        description="""
+        **What it receives:**
+        - `order_id` (UUID in URL): Order to retrieve
+        - Authentication token (must be order buyer or seller of items)
+
+        **What it returns:**
+        - Complete order details including items, shipping, payment status
+        """,
+        responses={
+            200: OpenApiResponse(response=OrderDetailResponseSerializer, description="Order retrieved successfully"),
+            403: OpenApiResponse(response=ErrorResponseSerializer, description="Not order owner"),
+            404: OpenApiResponse(response=ErrorResponseSerializer, description="Order not found"),
+            500: OpenApiResponse(response=ErrorResponseSerializer, description="Internal server error"),
+        },
+        tags=["Marketplace - Orders"],
+    )
     def retrieve(self, request, pk=None):
         service = self.get_service()
 
@@ -67,6 +142,32 @@ class OrderViewSet(viewsets.ViewSet):
 
         return Response(OrderSerializer(result.value).data, status=status.HTTP_200_OK)
 
+    @extend_schema(
+        operation_id="orders_create",
+        summary="Create order from cart",
+        description="""
+        **What it receives:**
+        - `shipping_address` (object): Delivery address (street, city, country required)
+        - `buyer_notes` (string, optional): Notes for seller
+        - `shipping_cost` (decimal, optional): Override shipping cost
+        - Authentication token
+
+        **What it returns:**
+        - Created order with pending payment status
+        - Cart is cleared after order creation
+        - Stock is reserved for order items
+        """,
+        request=CreateOrderRequestSerializer,
+        responses={
+            201: OpenApiResponse(response=OrderDetailResponseSerializer, description="Order created successfully"),
+            400: OpenApiResponse(response=ErrorResponseSerializer, description="Cart empty or validation error"),
+            409: OpenApiResponse(
+                response=ErrorResponseSerializer, description="Insufficient stock or reservation failed"
+            ),
+            500: OpenApiResponse(response=ErrorResponseSerializer, description="Internal server error"),
+        },
+        tags=["Marketplace - Orders"],
+    )
     def create(self, request):
         service = self.get_service()
 
@@ -105,6 +206,32 @@ class OrderViewSet(viewsets.ViewSet):
 
         return Response(OrderSerializer(result.value).data, status=status.HTTP_201_CREATED)
 
+    @extend_schema(
+        operation_id="orders_update_shipping",
+        summary="Update order shipping information (Seller/Admin only)",
+        description="""
+        **What it receives:**
+        - `order_id` (UUID in URL): Order to update
+        - `tracking_number` (string): Shipment tracking number
+        - `shipping_carrier` (string): Carrier name (e.g., "UPS", "FedEx")
+        - `carrier_code` (string, optional): Carrier code
+        - Authentication token (must be seller of items in order or admin)
+
+        **What it returns:**
+        - Updated order with shipping information
+        - Order status transitions to "shipped"
+        """,
+        responses={
+            200: OpenApiResponse(response=OrderDetailResponseSerializer, description="Shipping updated successfully"),
+            400: OpenApiResponse(
+                response=ErrorResponseSerializer, description="Invalid order state or missing fields"
+            ),
+            403: OpenApiResponse(response=ErrorResponseSerializer, description="Permission denied"),
+            404: OpenApiResponse(response=ErrorResponseSerializer, description="Order not found"),
+            500: OpenApiResponse(response=ErrorResponseSerializer, description="Internal server error"),
+        },
+        tags=["Marketplace - Orders"],
+    )
     @action(detail=True, methods=["patch"])
     def update_shipping(self, request, pk=None):
         service = self.get_service()
@@ -162,6 +289,31 @@ class OrderViewSet(viewsets.ViewSet):
 
         return Response(OrderSerializer(result.value).data, status=status.HTTP_200_OK)
 
+    @extend_schema(
+        operation_id="orders_cancel",
+        summary="Cancel order",
+        description="""
+        **What it receives:**
+        - `order_id` (UUID in URL): Order to cancel
+        - `reason` (string, optional): Cancellation reason
+        - Authentication token (must be order buyer)
+
+        **What it returns:**
+        - Updated order with cancelled status
+        - Reserved stock is released back to inventory
+        """,
+        request=CancelOrderRequestSerializer,
+        responses={
+            200: OpenApiResponse(response=OrderDetailResponseSerializer, description="Order cancelled successfully"),
+            400: OpenApiResponse(
+                response=ErrorResponseSerializer, description="Order cannot be cancelled (already shipped/delivered)"
+            ),
+            403: OpenApiResponse(response=ErrorResponseSerializer, description="Not order owner"),
+            404: OpenApiResponse(response=ErrorResponseSerializer, description="Order not found"),
+            500: OpenApiResponse(response=ErrorResponseSerializer, description="Internal server error"),
+        },
+        tags=["Marketplace - Orders"],
+    )
     @action(detail=True, methods=["post"])
     def cancel(self, request, pk=None):
         service = self.get_service()

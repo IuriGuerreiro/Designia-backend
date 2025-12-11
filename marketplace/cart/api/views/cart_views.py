@@ -1,10 +1,18 @@
 # Designia-backend/marketplace/views/cart_views.py
+from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from infrastructure.container import container  # For DI
+from marketplace.api.serializers import (
+    AddToCartRequestSerializer,
+    CartResponseSerializer,
+    ErrorResponseSerializer,
+    RemoveFromCartRequestSerializer,
+    UpdateCartRequestSerializer,
+)
 from marketplace.serializers import (  # Use CartItemSerializer for input validation
     CartItemSerializer,
     CartServiceOutputSerializer,
@@ -27,6 +35,24 @@ class CartViewSet(viewsets.ViewSet):
         # A serializer for cart output
         return CartServiceOutputSerializer(*args, **kwargs)
 
+    @extend_schema(
+        operation_id="cart_get",
+        summary="Get user's shopping cart",
+        description="""
+        **What it receives:**
+        - Authentication token (header)
+
+        **What it returns:**
+        - Cart items with product details
+        - Totals (subtotal, shipping, tax, total)
+        - Item count
+        """,
+        responses={
+            200: OpenApiResponse(response=CartResponseSerializer, description="Cart retrieved successfully"),
+            500: OpenApiResponse(response=ErrorResponseSerializer, description="Internal server error"),
+        },
+        tags=["Marketplace - Cart"],
+    )
     def list(self, request):
         service = self.get_service()
         result = service.get_cart(request.user)
@@ -38,6 +64,27 @@ class CartViewSet(viewsets.ViewSet):
         output_data = self.get_output_serializer(result.value).data
         return Response(output_data, status=status.HTTP_200_OK)
 
+    @extend_schema(
+        operation_id="cart_add_item",
+        summary="Add item to cart",
+        description="""
+        **What it receives:**
+        - `product_id` (UUID): Product to add
+        - `quantity` (integer, optional): Quantity to add (default: 1)
+
+        **What it returns:**
+        - Updated cart with all items
+        - Updated totals
+        """,
+        request=AddToCartRequestSerializer,
+        responses={
+            200: OpenApiResponse(response=CartResponseSerializer, description="Item added successfully"),
+            400: OpenApiResponse(response=ErrorResponseSerializer, description="Invalid data or insufficient stock"),
+            404: OpenApiResponse(response=ErrorResponseSerializer, description="Product not found"),
+            500: OpenApiResponse(response=ErrorResponseSerializer, description="Internal server error"),
+        },
+        tags=["Marketplace - Cart"],
+    )
     @action(detail=False, methods=["post"])
     def add_item(self, request):
         service = self.get_service()
@@ -64,6 +111,27 @@ class CartViewSet(viewsets.ViewSet):
         output_data = self.get_output_serializer(result.value).data
         return Response(output_data, status=status.HTTP_200_OK)
 
+    @extend_schema(
+        operation_id="cart_update_item",
+        summary="Update item quantity in cart",
+        description="""
+        **What it receives:**
+        - `product_id` (UUID): Product to update
+        - `quantity` (integer): New quantity (0 to remove item)
+
+        **What it returns:**
+        - Updated cart with modified quantities
+        - Updated totals
+        """,
+        request=UpdateCartRequestSerializer,
+        responses={
+            200: OpenApiResponse(response=CartResponseSerializer, description="Item updated successfully"),
+            400: OpenApiResponse(response=ErrorResponseSerializer, description="Invalid data or insufficient stock"),
+            404: OpenApiResponse(response=ErrorResponseSerializer, description="Item not in cart"),
+            500: OpenApiResponse(response=ErrorResponseSerializer, description="Internal server error"),
+        },
+        tags=["Marketplace - Cart"],
+    )
     @action(detail=False, methods=["patch"])
     def update_item(self, request):
         service = self.get_service()
@@ -93,6 +161,26 @@ class CartViewSet(viewsets.ViewSet):
         output_data = self.get_output_serializer(result.value).data
         return Response(output_data, status=status.HTTP_200_OK)
 
+    @extend_schema(
+        operation_id="cart_remove_item",
+        summary="Remove item from cart",
+        description="""
+        **What it receives:**
+        - `product_id` (UUID): Product to remove
+
+        **What it returns:**
+        - Updated cart without the removed item
+        - Updated totals
+        """,
+        request=RemoveFromCartRequestSerializer,
+        responses={
+            200: OpenApiResponse(response=CartResponseSerializer, description="Item removed successfully"),
+            400: OpenApiResponse(response=ErrorResponseSerializer, description="Invalid product_id"),
+            404: OpenApiResponse(response=ErrorResponseSerializer, description="Item not in cart"),
+            500: OpenApiResponse(response=ErrorResponseSerializer, description="Internal server error"),
+        },
+        tags=["Marketplace - Cart"],
+    )
     @action(detail=False, methods=["delete"])
     def remove_item(self, request):
         service = self.get_service()
@@ -111,6 +199,22 @@ class CartViewSet(viewsets.ViewSet):
         output_data = self.get_output_serializer(result.value).data
         return Response(output_data, status=status.HTTP_200_OK)
 
+    @extend_schema(
+        operation_id="cart_clear",
+        summary="Clear all items from cart",
+        description="""
+        **What it receives:**
+        - Authentication token (header)
+
+        **What it returns:**
+        - Success message (204 No Content)
+        """,
+        responses={
+            204: OpenApiResponse(description="Cart cleared successfully"),
+            500: OpenApiResponse(response=ErrorResponseSerializer, description="Internal server error"),
+        },
+        tags=["Marketplace - Cart"],
+    )
     @action(detail=False, methods=["delete"])
     def clear(self, request):
         service = self.get_service()
@@ -121,6 +225,26 @@ class CartViewSet(viewsets.ViewSet):
 
         return Response({"detail": "Cart cleared successfully"}, status=status.HTTP_204_NO_CONTENT)
 
+    @extend_schema(
+        operation_id="cart_status",
+        summary="Get cart status summary",
+        description="""
+        **What it receives:**
+        - Authentication token (header)
+
+        **What it returns:**
+        - Cart ID
+        - Total items count
+        - Total amount
+        - Modifiable status
+        - Last updated timestamp
+        """,
+        responses={
+            200: OpenApiResponse(description="Cart status retrieved successfully"),
+            500: OpenApiResponse(response=ErrorResponseSerializer, description="Internal server error"),
+        },
+        tags=["Marketplace - Cart"],
+    )
     @action(detail=False, methods=["get"])
     def status(self, request):
         service = self.get_service()
@@ -141,6 +265,23 @@ class CartViewSet(viewsets.ViewSet):
         }
         return Response(status_data, status=status.HTTP_200_OK)
 
+    @extend_schema(
+        operation_id="cart_validate_stock",
+        summary="Validate cart items stock availability",
+        description="""
+        **What it receives:**
+        - Authentication token (header)
+
+        **What it returns:**
+        - Validation result (valid: boolean)
+        - List of issues (out_of_stock, inactive, price_changed)
+        """,
+        responses={
+            200: OpenApiResponse(description="Validation completed"),
+            500: OpenApiResponse(response=ErrorResponseSerializer, description="Internal server error"),
+        },
+        tags=["Marketplace - Cart"],
+    )
     @action(detail=False, methods=["post"])
     def validate_stock(self, request):
         service = self.get_service()

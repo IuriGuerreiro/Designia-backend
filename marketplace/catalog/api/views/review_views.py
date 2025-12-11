@@ -1,9 +1,15 @@
+from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly
 from rest_framework.response import Response
 
 from infrastructure.container import container
+from marketplace.api.serializers import (
+    CreateReviewRequestSerializer,
+    ErrorResponseSerializer,
+    ReviewResponseSerializer,
+)
 from marketplace.models import Product
 from marketplace.serializers import ProductReviewSerializer
 from marketplace.services import ErrorCodes, ReviewService
@@ -20,6 +26,32 @@ class ReviewViewSet(viewsets.ViewSet):
             return [IsAuthenticated()]
         return super().get_permissions()
 
+    @extend_schema(
+        operation_id="reviews_list",
+        summary="List product reviews",
+        description="""
+        **What it receives:**
+        - `product_slug` or `product_id` (query param): Product to get reviews for
+        - Pagination parameters (page, page_size)
+        - Ordering parameter
+
+        **What it returns:**
+        - Paginated list of reviews for the product
+        """,
+        parameters=[
+            OpenApiParameter(name="product_slug", type=str, description="Product slug"),
+            OpenApiParameter(name="product_id", type=str, description="Product UUID"),
+            OpenApiParameter(name="page", type=int, description="Page number (default: 1)"),
+            OpenApiParameter(name="page_size", type=int, description="Items per page (default: 20)"),
+            OpenApiParameter(name="ordering", type=str, description="Order by field (default: -created_at)"),
+        ],
+        responses={
+            200: OpenApiResponse(description="Reviews retrieved successfully"),
+            400: OpenApiResponse(response=ErrorResponseSerializer, description="Missing product identifier"),
+            404: OpenApiResponse(response=ErrorResponseSerializer, description="Product not found"),
+        },
+        tags=["Marketplace - Reviews"],
+    )
     def list(self, request):
         service = self.get_service()
 
@@ -55,6 +87,12 @@ class ReviewViewSet(viewsets.ViewSet):
 
         return Response(response_data, status=status.HTTP_200_OK)
 
+    @extend_schema(
+        operation_id="reviews_retrieve",
+        summary="Get review details",
+        responses={200: ReviewResponseSerializer, 404: ErrorResponseSerializer},
+        tags=["Marketplace - Reviews"],
+    )
     def retrieve(self, request, pk=None):
         """Get a specific review by ID."""
         service = self.get_service()
@@ -68,6 +106,13 @@ class ReviewViewSet(viewsets.ViewSet):
 
         return Response(ProductReviewSerializer(result.value).data, status=status.HTTP_200_OK)
 
+    @extend_schema(
+        operation_id="reviews_create",
+        summary="Create product review",
+        request=CreateReviewRequestSerializer,
+        responses={201: ReviewResponseSerializer, 400: ErrorResponseSerializer, 404: ErrorResponseSerializer},
+        tags=["Marketplace - Reviews"],
+    )
     def create(self, request):
         service = self.get_service()
 
@@ -106,6 +151,12 @@ class ReviewViewSet(viewsets.ViewSet):
 
         return Response(ProductReviewSerializer(result.value).data, status=status.HTTP_201_CREATED)
 
+    @extend_schema(
+        operation_id="reviews_update",
+        summary="Update review",
+        responses={200: ReviewResponseSerializer, 403: ErrorResponseSerializer, 404: ErrorResponseSerializer},
+        tags=["Marketplace - Reviews"],
+    )
     def update(self, request, pk=None):
         service = self.get_service()
 
@@ -132,9 +183,21 @@ class ReviewViewSet(viewsets.ViewSet):
 
         return Response(ProductReviewSerializer(result.value).data, status=status.HTTP_200_OK)
 
+    @extend_schema(
+        operation_id="reviews_partial_update",
+        summary="Partially update review",
+        responses={200: ReviewResponseSerializer, 403: ErrorResponseSerializer, 404: ErrorResponseSerializer},
+        tags=["Marketplace - Reviews"],
+    )
     def partial_update(self, request, pk=None):
         return self.update(request, pk)
 
+    @extend_schema(
+        operation_id="reviews_delete",
+        summary="Delete review",
+        responses={204: None, 403: ErrorResponseSerializer, 404: ErrorResponseSerializer},
+        tags=["Marketplace - Reviews"],
+    )
     def destroy(self, request, pk=None):
         service = self.get_service()
 
@@ -149,6 +212,12 @@ class ReviewViewSet(viewsets.ViewSet):
 
         return Response(status=status.HTTP_204_NO_CONTENT)
 
+    @extend_schema(
+        operation_id="reviews_mark_helpful",
+        summary="Mark review as helpful",
+        responses={200: None, 403: ErrorResponseSerializer, 404: ErrorResponseSerializer},
+        tags=["Marketplace - Reviews"],
+    )
     @action(detail=True, methods=["post"])
     def mark_helpful(self, request, pk=None):
         service = self.get_service()

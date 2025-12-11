@@ -1,9 +1,11 @@
+from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly
 from rest_framework.response import Response
 
 from infrastructure.container import container
+from marketplace.api.serializers import ErrorResponseSerializer, ProductListResponseSerializer
 from marketplace.models import Product, ProductFavorite
 from marketplace.permissions import IsSellerOrReadOnly, IsSellerUser
 from marketplace.serializers import (
@@ -40,6 +42,40 @@ class ProductViewSet(viewsets.ModelViewSet):
             return [IsAuthenticated(), IsSellerOrReadOnly()]
         return super().get_permissions()
 
+    @extend_schema(
+        operation_id="products_list",
+        summary="List products with filters",
+        description="""
+        **What it receives:**
+        - Query parameters for filtering (category, seller, price range, condition, brand, stock status)
+        - Pagination parameters (page, page_size)
+        - Ordering parameter
+
+        **What it returns:**
+        - Paginated list of products
+        - Total count and page information
+        """,
+        parameters=[
+            OpenApiParameter(name="category", type=str, description="Filter by category slug"),
+            OpenApiParameter(name="seller", type=int, description="Filter by seller ID"),
+            OpenApiParameter(name="price_min", type=float, description="Minimum price"),
+            OpenApiParameter(name="price_max", type=float, description="Maximum price"),
+            OpenApiParameter(name="condition", type=str, description="Product condition (new, used, etc.)"),
+            OpenApiParameter(name="brand", type=str, description="Filter by brand"),
+            OpenApiParameter(name="in_stock", type=bool, description="Only show in-stock products"),
+            OpenApiParameter(name="is_featured", type=bool, description="Only show featured products"),
+            OpenApiParameter(name="page", type=int, description="Page number (default: 1)"),
+            OpenApiParameter(name="page_size", type=int, description="Items per page (default: 20)"),
+            OpenApiParameter(name="ordering", type=str, description="Order by field (default: -created_at)"),
+        ],
+        responses={
+            200: OpenApiResponse(
+                response=ProductListResponseSerializer, description="Products retrieved successfully"
+            ),
+            500: OpenApiResponse(response=ErrorResponseSerializer, description="Internal server error"),
+        },
+        tags=["Marketplace - Products"],
+    )
     def list(self, request, *args, **kwargs):
         service = self.get_service()
 
@@ -84,6 +120,24 @@ class ProductViewSet(viewsets.ModelViewSet):
         }
         return Response(response_data)
 
+    @extend_schema(
+        operation_id="products_retrieve",
+        summary="Get product details",
+        description="""
+        **What it receives:**
+        - `slug` (string in URL): Product slug identifier
+
+        **What it returns:**
+        - Complete product details including images, reviews summary, seller info
+        - View count is automatically incremented
+        """,
+        responses={
+            200: OpenApiResponse(response=ProductDetailSerializer, description="Product retrieved successfully"),
+            404: OpenApiResponse(response=ErrorResponseSerializer, description="Product not found"),
+            500: OpenApiResponse(response=ErrorResponseSerializer, description="Internal server error"),
+        },
+        tags=["Marketplace - Products"],
+    )
     def retrieve(self, request, slug=None):
         service = self.get_service()
 
@@ -105,6 +159,26 @@ class ProductViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(result.value)
         return Response(serializer.data)
 
+    @extend_schema(
+        operation_id="products_create",
+        summary="Create a new product (Seller only)",
+        description="""
+        **What it receives:**
+        - Product data (name, description, price, category, stock, etc.)
+        - Product images (multipart/form-data)
+        - Authentication token (must be a seller)
+
+        **What it returns:**
+        - Created product with generated ID and slug
+        """,
+        request=ProductCreateUpdateSerializer,
+        responses={
+            201: OpenApiResponse(response=ProductDetailSerializer, description="Product created successfully"),
+            400: OpenApiResponse(response=ErrorResponseSerializer, description="Invalid data"),
+            403: OpenApiResponse(response=ErrorResponseSerializer, description="Permission denied (not a seller)"),
+        },
+        tags=["Marketplace - Products"],
+    )
     def create(self, request):
         service = self.get_service()
 
@@ -128,6 +202,27 @@ class ProductViewSet(viewsets.ModelViewSet):
 
         return Response(self.get_serializer(result.value).data, status=status.HTTP_201_CREATED)
 
+    @extend_schema(
+        operation_id="products_update",
+        summary="Update product (Owner only)",
+        description="""
+        **What it receives:**
+        - `slug` (string in URL): Product to update
+        - Complete product data (all fields required)
+        - Authentication token (must be product owner)
+
+        **What it returns:**
+        - Updated product details
+        """,
+        request=ProductCreateUpdateSerializer,
+        responses={
+            200: OpenApiResponse(response=ProductDetailSerializer, description="Product updated successfully"),
+            400: OpenApiResponse(response=ErrorResponseSerializer, description="Invalid data"),
+            403: OpenApiResponse(response=ErrorResponseSerializer, description="Not product owner"),
+            404: OpenApiResponse(response=ErrorResponseSerializer, description="Product not found"),
+        },
+        tags=["Marketplace - Products"],
+    )
     def update(self, request, slug=None):
         service = self.get_service()
 
@@ -150,6 +245,27 @@ class ProductViewSet(viewsets.ModelViewSet):
 
         return Response(self.get_serializer(result.value).data)
 
+    @extend_schema(
+        operation_id="products_partial_update",
+        summary="Partially update product (Owner only)",
+        description="""
+        **What it receives:**
+        - `slug` (string in URL): Product to update
+        - Partial product data (only fields to update)
+        - Authentication token (must be product owner)
+
+        **What it returns:**
+        - Updated product details
+        """,
+        request=ProductCreateUpdateSerializer,
+        responses={
+            200: OpenApiResponse(response=ProductDetailSerializer, description="Product updated successfully"),
+            400: OpenApiResponse(response=ErrorResponseSerializer, description="Invalid data"),
+            403: OpenApiResponse(response=ErrorResponseSerializer, description="Not product owner"),
+            404: OpenApiResponse(response=ErrorResponseSerializer, description="Product not found"),
+        },
+        tags=["Marketplace - Products"],
+    )
     def partial_update(self, request, slug=None):
         service = self.get_service()
 
@@ -171,6 +287,24 @@ class ProductViewSet(viewsets.ModelViewSet):
 
         return Response(self.get_serializer(result.value).data)
 
+    @extend_schema(
+        operation_id="products_delete",
+        summary="Delete product (Owner only)",
+        description="""
+        **What it receives:**
+        - `slug` (string in URL): Product to delete
+        - Authentication token (must be product owner)
+
+        **What it returns:**
+        - 204 No Content on success
+        """,
+        responses={
+            204: OpenApiResponse(description="Product deleted successfully"),
+            403: OpenApiResponse(response=ErrorResponseSerializer, description="Not product owner"),
+            404: OpenApiResponse(response=ErrorResponseSerializer, description="Product not found"),
+        },
+        tags=["Marketplace - Products"],
+    )
     def destroy(self, request, slug=None):
         service = self.get_service()
 
@@ -188,6 +322,24 @@ class ProductViewSet(viewsets.ModelViewSet):
 
         return Response(status=status.HTTP_204_NO_CONTENT)
 
+    @extend_schema(
+        operation_id="products_my_products",
+        summary="Get current user's products (Seller only)",
+        description="""
+        **What it receives:**
+        - Authentication token (must be a seller)
+
+        **What it returns:**
+        - List of products owned by current user
+        """,
+        responses={
+            200: OpenApiResponse(
+                response=ProductListSerializer(many=True), description="Products retrieved successfully"
+            ),
+            500: OpenApiResponse(response=ErrorResponseSerializer, description="Internal server error"),
+        },
+        tags=["Marketplace - Products"],
+    )
     @action(detail=False, methods=["get"])
     def my_products(self, request):
         """Get current user's products"""
@@ -201,6 +353,24 @@ class ProductViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(result.value["results"], many=True)
         return Response(serializer.data)
 
+    @extend_schema(
+        operation_id="products_favorites",
+        summary="Get user's favorite products",
+        description="""
+        **What it receives:**
+        - Authentication token
+
+        **What it returns:**
+        - List of products marked as favorites by current user
+        """,
+        responses={
+            200: OpenApiResponse(
+                response=ProductFavoriteSerializer(many=True), description="Favorites retrieved successfully"
+            ),
+            401: OpenApiResponse(response=ErrorResponseSerializer, description="Authentication required"),
+        },
+        tags=["Marketplace - Products"],
+    )
     @action(detail=False, methods=["get"])
     def favorites(self, request):
         """Get user's favorite products"""
@@ -211,6 +381,25 @@ class ProductViewSet(viewsets.ModelViewSet):
         serializer = ProductFavoriteSerializer(favorites, many=True, context={"request": request})
         return Response(serializer.data)
 
+    @extend_schema(
+        operation_id="products_toggle_favorite",
+        summary="Toggle product favorite status",
+        description="""
+        **What it receives:**
+        - `slug` (string in URL): Product to favorite/unfavorite
+        - Authentication token
+
+        **What it returns:**
+        - `{"favorited": true}` if product was added to favorites
+        - `{"favorited": false}` if product was removed from favorites
+        """,
+        responses={
+            200: OpenApiResponse(description="Favorite status toggled"),
+            401: OpenApiResponse(response=ErrorResponseSerializer, description="Authentication required"),
+            404: OpenApiResponse(response=ErrorResponseSerializer, description="Product not found"),
+        },
+        tags=["Marketplace - Products"],
+    )
     @action(detail=True, methods=["post"])
     def favorite(self, request, slug=None):
         """Toggle favorite status"""
