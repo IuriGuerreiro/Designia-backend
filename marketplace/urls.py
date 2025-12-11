@@ -87,14 +87,16 @@ urlpatterns = [
     # Manual Category URLs under /products/
     path(
         "products/categories/",
-        CategoryViewSet.as_view({"get": "list", "post": "create"}),
+        CategoryViewSet.as_view({"get": "list"}),
         name="product-category-list",
     ),
     path(
         "products/categories/<slug:slug>/",
-        CategoryViewSet.as_view({"get": "retrieve", "put": "update", "patch": "partial_update", "delete": "destroy"}),
+        CategoryViewSet.as_view({"get": "retrieve"}),
         name="product-category-detail",
     ),
     # Prometheus metrics endpoint
     path("metrics/", prometheus_metrics.marketplace_prometheus_metrics, name="marketplace-metrics"),
 ]
+
+urlpatterns += router.urls
