@@ -139,6 +139,184 @@ services:
             config:
               minute: 20
               policy: local
+  # Marketplace Service (Phase 3)
+  - name: marketplace-service
+    url: http://host.docker.internal:8000
+    protocol: http
+    host: host.docker.internal
+    port: 8000
+    path: /
+    retries: 5
+    connect_timeout: 60000
+    write_timeout: 60000
+    read_timeout: 60000
+    routes:
+      # Public Routes
+      - name: marketplace-products
+        paths:
+          - /api/marketplace/products
+          - /api/marketplace/products/*
+        methods:
+          - GET
+        strip_path: false
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 100
+              policy: local
+          - name: prometheus
+      - name: marketplace-categories
+        paths:
+          - /api/marketplace/categories
+          - /api/marketplace/categories/*
+        methods:
+          - GET
+        strip_path: false
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 100
+              policy: local
+          - name: prometheus
+      - name: marketplace-search
+        paths:
+          - /api/marketplace/products/search
+          - /api/marketplace/products/autocomplete
+          - /api/marketplace/products/filters
+        methods:
+          - GET
+        strip_path: false
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 100
+              policy: local
+          - name: prometheus
+      # Protected Routes (JWT required)
+      - name: marketplace-cart
+        paths:
+          - /api/marketplace/cart
+          - /api/marketplace/cart/*
+        methods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+          - PATCH
+        strip_path: false
+        plugins:
+          - name: jwt
+          - name: rate-limiting
+            config:
+              minute: 60
+              policy: local
+          - name: prometheus
+      - name: marketplace-orders
+        paths:
+          - /api/marketplace/orders
+          - /api/marketplace/orders/*
+        methods:
+          - GET
+          - POST
+          - PUT
+          - PATCH
+          - DELETE
+        strip_path: false
+        plugins:
+          - name: jwt
+          - name: rate-limiting
+            config:
+              minute: 60
+              policy: local
+          - name: prometheus
+      - name: marketplace-reviews
+        paths:
+          - /api/marketplace/reviews
+          - /api/marketplace/reviews/*
+        methods:
+          - GET
+          - POST
+          - PUT
+          - PATCH
+          - DELETE
+        strip_path: false
+        plugins:
+          - name: jwt
+          - name: rate-limiting
+            config:
+              minute: 60
+              policy: local
+          - name: prometheus
+      - name: marketplace-metrics
+        paths:
+          - /api/marketplace/metrics
+          - /api/marketplace/metrics/*
+        methods:
+          - GET
+        strip_path: false
+        plugins:
+          - name: jwt
+          - name: rate-limiting
+            config:
+              minute: 60
+              policy: local
+          - name: prometheus
+      - name: marketplace-profiles
+        paths:
+          - /api/marketplace/profiles
+          - /api/marketplace/profiles/*
+        methods:
+          - GET
+          - POST
+          - PUT
+          - PATCH
+        strip_path: false
+        plugins:
+          - name: jwt
+          - name: rate-limiting
+            config:
+              minute: 60
+              policy: local
+          - name: prometheus
+      - name: marketplace-seller-profile
+        paths:
+          - /api/marketplace/sellers/*
+        methods:
+          - GET
+        strip_path: false
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 100
+              policy: local
+          - name: prometheus
+      # Internal APIs (NOT exposed publicly, but defined for completeness)
+      # These paths should be blocked at a lower level (e.g., Nginx, firewall)
+      # Or protected by a separate internal Kong service if internal APIs are routed differently
+      - name: marketplace-internal-product
+        paths:
+          - /api/marketplace/internal/products/*
+        methods:
+          - GET
+        strip_path: false
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 1000
+              policy: local
+          - name: prometheus
+      - name: marketplace-internal-order
+        paths:
+          - /api/marketplace/internal/orders/*
+        methods:
+          - GET
+        strip_path: false
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 1000
+              policy: local
+          - name: prometheus
 
 # Global Plugins (applied to all routes)
 plugins:

@@ -21,6 +21,16 @@ _tracer: Optional[trace.Tracer] = None
 _initialized = False
 
 
+# Proxy object for tracer to allow import before setup
+class TracerProxy:
+    def __getattr__(self, name):
+        tracer = get_tracer()
+        return getattr(tracer, name)
+
+
+tracer = TracerProxy()
+
+
 def setup_tracing(
     service_name: str = "authentication-service",
     jaeger_host: str = "localhost",
@@ -114,6 +124,7 @@ def get_tracer(name: str = __name__) -> trace.Tracer:
     global _tracer
 
     if _tracer is None:
+        # Return a no-op tracer if not initialized or just the global one
         _tracer = trace.get_tracer(name)
 
     return _tracer

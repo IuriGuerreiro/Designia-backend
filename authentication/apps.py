@@ -22,7 +22,7 @@ class AuthenticationConfig(AppConfig):
         # Register Event Bus Listeners
         try:
             from authentication.infra.events.listeners import register_authentication_listeners
-            from authentication.infra.events.redis_event_bus import get_event_bus
+            from infrastructure.events.redis_event_bus import get_event_bus
 
             # Register listeners
             register_authentication_listeners()

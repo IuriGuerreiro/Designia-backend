@@ -5,8 +5,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from django.db.models import QuerySet
 
+from marketplace.catalog.domain.services.catalog_service import CatalogService, ErrorCodes
 from marketplace.models import Category, Product
-from marketplace.services.catalog_service import CatalogService, ErrorCodes
 
 
 @pytest.fixture
@@ -41,8 +41,8 @@ def mock_product_qs():
 
 @pytest.mark.unit
 class TestCatalogService:
-    @patch("marketplace.services.catalog_service.Product.objects")
-    @patch("marketplace.services.catalog_service.Paginator")
+    @patch("marketplace.catalog.domain.services.catalog_service.Product.objects")
+    @patch("marketplace.catalog.domain.services.catalog_service.Paginator")
     def test_list_products_success(self, mock_paginator, mock_product_objects, catalog_service, mock_product_qs):
         mock_product_objects.select_related.return_value = mock_product_qs
 
@@ -60,7 +60,7 @@ class TestCatalogService:
         assert result.value["count"] == 100
         mock_product_qs.filter.assert_called()
 
-    @patch("marketplace.services.catalog_service.Product.objects")
+    @patch("marketplace.catalog.domain.services.catalog_service.Product.objects")
     def test_get_product_success(self, mock_product_objects, catalog_service, mock_product_qs):
         mock_product = MagicMock(spec=Product, id=uuid.uuid4(), name="Test")
         mock_product_qs.get.return_value = mock_product
@@ -72,7 +72,7 @@ class TestCatalogService:
         assert result.value == mock_product
         mock_product.save.assert_called()  # View count updated
 
-    @patch("marketplace.services.catalog_service.Product.objects")
+    @patch("marketplace.catalog.domain.services.catalog_service.Product.objects")
     def test_get_product_not_found(self, mock_product_objects, catalog_service, mock_product_qs):
         mock_product_qs.get.side_effect = Product.DoesNotExist
         mock_product_objects.select_related.return_value = mock_product_qs
@@ -83,9 +83,9 @@ class TestCatalogService:
         assert result.error == ErrorCodes.PRODUCT_NOT_FOUND
 
     @pytest.mark.django_db
-    @patch("marketplace.services.catalog_service.is_seller")
-    @patch("marketplace.services.catalog_service.Category.objects")
-    @patch("marketplace.services.catalog_service.Product.objects")
+    @patch("marketplace.catalog.domain.services.catalog_service.is_seller")
+    @patch("marketplace.catalog.domain.services.catalog_service.Category.objects")
+    @patch("marketplace.catalog.domain.services.catalog_service.Product.objects")
     def test_create_product_success(
         self, mock_product_objects, mock_category_objects, mock_is_seller, catalog_service
     ):
@@ -107,7 +107,7 @@ class TestCatalogService:
         mock_product_objects.create.assert_called()
 
     @pytest.mark.django_db
-    @patch("marketplace.services.catalog_service.is_seller")
+    @patch("marketplace.catalog.domain.services.catalog_service.is_seller")
     def test_create_product_not_seller(self, mock_is_seller, catalog_service):
         mock_is_seller.return_value = False
         result = catalog_service.create_product({}, MagicMock())
@@ -115,7 +115,7 @@ class TestCatalogService:
         assert result.error == ErrorCodes.PERMISSION_DENIED
 
     @pytest.mark.django_db
-    @patch("marketplace.services.catalog_service.Product.objects")
+    @patch("marketplace.catalog.domain.services.catalog_service.Product.objects")
     def test_update_product_success(self, mock_product_objects, catalog_service):
         mock_product = MagicMock(spec=Product)
         mock_user = MagicMock()
@@ -132,7 +132,7 @@ class TestCatalogService:
         mock_product.save.assert_called()
 
     @pytest.mark.django_db
-    @patch("marketplace.services.catalog_service.Product.objects")
+    @patch("marketplace.catalog.domain.services.catalog_service.Product.objects")
     def test_update_product_permission_denied(self, mock_product_objects, catalog_service):
         mock_product = MagicMock(spec=Product)
         mock_product.seller = MagicMock()  # Different user
@@ -148,7 +148,7 @@ class TestCatalogService:
         assert result.error == ErrorCodes.NOT_PRODUCT_OWNER
 
     @pytest.mark.django_db
-    @patch("marketplace.services.catalog_service.Product.objects")
+    @patch("marketplace.catalog.domain.services.catalog_service.Product.objects")
     def test_delete_product_soft(self, mock_product_objects, catalog_service):
         mock_product = MagicMock(spec=Product)
         mock_user = MagicMock()
@@ -165,7 +165,7 @@ class TestCatalogService:
         mock_product.save.assert_called()
 
     @pytest.mark.django_db
-    @patch("marketplace.services.catalog_service.Product.objects")
+    @patch("marketplace.catalog.domain.services.catalog_service.Product.objects")
     def test_delete_product_hard(self, mock_product_objects, catalog_service):
         mock_product = MagicMock(spec=Product)
         mock_user = MagicMock()
@@ -180,7 +180,7 @@ class TestCatalogService:
         assert result.ok is True
         mock_product.delete.assert_called()
 
-    @patch("marketplace.services.catalog_service.Product.objects")
+    @patch("marketplace.catalog.domain.services.catalog_service.Product.objects")
     def test_search_products(self, mock_product_objects, catalog_service, mock_product_qs):
         mock_product_objects.select_related.return_value = mock_product_qs
 
@@ -190,9 +190,9 @@ class TestCatalogService:
         mock_product_qs.filter.assert_called()
 
     @pytest.mark.django_db
-    @patch("marketplace.services.catalog_service.ProductImage.objects")
-    @patch("marketplace.services.catalog_service.is_seller")
-    @patch("marketplace.services.catalog_service.Product.objects")
+    @patch("marketplace.catalog.domain.services.catalog_service.ProductImage.objects")
+    @patch("marketplace.catalog.domain.services.catalog_service.is_seller")
+    @patch("marketplace.catalog.domain.services.catalog_service.Product.objects")
     def test_create_product_with_images(
         self, mock_product_objects, mock_is_seller, mock_image_objects, catalog_service, mock_storage
     ):
@@ -210,10 +210,10 @@ class TestCatalogService:
         mock_image_objects.create.assert_called()
 
     @pytest.mark.django_db
-    @patch("marketplace.services.catalog_service.Product.objects")
+    @patch("marketplace.catalog.domain.services.catalog_service.Product.objects")
     def test_create_product_image_fail(self, mock_product_objects, catalog_service, mock_storage):
         # We need to setup a product creation flow that fails at image upload
-        with patch("marketplace.services.catalog_service.is_seller", return_value=True):
+        with patch("marketplace.catalog.domain.services.catalog_service.is_seller", return_value=True):
             mock_product = MagicMock(spec=Product)
             mock_product_objects.create.return_value = mock_product
             # Make upload raise exception to trigger service error in _upload_product_images

@@ -1,6 +1,6 @@
 import logging
 
-from authentication.infra.events.redis_event_bus import get_event_bus
+from infrastructure.events.redis_event_bus import get_event_bus
 
 logger = logging.getLogger(__name__)
 

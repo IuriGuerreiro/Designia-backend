@@ -108,10 +108,16 @@ class ServiceContainer:
 
         return self._payment
 
+    def event_bus(self):
+        """Get EventBus instance."""
+        from infrastructure.events import get_event_bus
+
+        return get_event_bus()
+
     def inventory_service(self):
         """Get InventoryService instance."""
         if self._inventory_service is None:
-            from marketplace.services import InventoryService
+            from marketplace.cart.domain.services.inventory_service import InventoryService
 
             self._inventory_service = InventoryService()
             logger.debug("Created InventoryService")
@@ -120,7 +126,7 @@ class ServiceContainer:
     def pricing_service(self):
         """Get PricingService instance."""
         if self._pricing_service is None:
-            from marketplace.services import PricingService
+            from marketplace.cart.domain.services.pricing_service import PricingService
 
             self._pricing_service = PricingService()
             logger.debug("Created PricingService")
@@ -129,7 +135,7 @@ class ServiceContainer:
     def cart_service(self):
         """Get CartService instance."""
         if self._cart_service is None:
-            from marketplace.services import CartService
+            from marketplace.cart.domain.services.cart_service import CartService
 
             # CartService depends on InventoryService and PricingService
             self._cart_service = CartService(
@@ -139,14 +145,14 @@ class ServiceContainer:
         return self._cart_service
 
     def review_metrics_service(self):
-        from marketplace.services import ReviewMetricsService
+        from marketplace.catalog.domain.services.review_metrics_service import ReviewMetricsService
 
         return ReviewMetricsService()
 
     def review_service(self):
         """Get ReviewService instance."""
         if self._review_service is None:
-            from marketplace.services import ReviewService
+            from marketplace.catalog.domain.services.review_service import ReviewService
 
             self._review_service = ReviewService(review_metrics_service=self.review_metrics_service())
             logger.debug("Created ReviewService")
@@ -155,7 +161,7 @@ class ServiceContainer:
     def search_service(self):
         """Get SearchService instance."""
         if self._search_service is None:
-            from marketplace.services import SearchService
+            from marketplace.catalog.domain.services.search_service import SearchService
 
             self._search_service = SearchService()
             logger.debug("Created SearchService")
@@ -164,7 +170,7 @@ class ServiceContainer:
     def catalog_service(self):
         """Get CatalogService instance."""
         if self._catalog_service is None:
-            from marketplace.services import CatalogService
+            from marketplace.catalog.domain.services.catalog_service import CatalogService
 
             self._catalog_service = CatalogService(storage=self.storage())
             logger.debug("Created CatalogService")
@@ -173,7 +179,7 @@ class ServiceContainer:
     def order_service(self):
         """Get OrderService instance."""
         if self._order_service is None:
-            from marketplace.services import OrderService
+            from marketplace.ordering.domain.services.order_service import OrderService
 
             self._order_service = OrderService(
                 cart_service=self.cart_service(),

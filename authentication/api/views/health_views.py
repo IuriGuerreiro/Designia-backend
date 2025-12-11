@@ -89,7 +89,7 @@ def check_event_bus():
         bool: True if event bus is accessible
     """
     try:
-        from authentication.infra.events.redis_event_bus import get_event_bus
+        from infrastructure.events.redis_event_bus import get_event_bus
 
         event_bus = get_event_bus()
         # Ping Redis to check connection

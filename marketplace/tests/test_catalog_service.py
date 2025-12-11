@@ -43,7 +43,7 @@ class CatalogServiceUnitTest(TestCase):
         self.mock_storage = MagicMock()
         self.catalog_service = CatalogService(storage=self.mock_storage)
 
-    @patch("marketplace.services.catalog_service.is_seller", return_value=True)
+    @patch("marketplace.catalog.domain.services.catalog_service.is_seller", return_value=True)
     def test_create_product_success(self, mock_is_seller):
         data = {
             "name": "New Product",
@@ -69,7 +69,7 @@ class CatalogServiceUnitTest(TestCase):
         self.assertTrue(ProductImage.objects.filter(product=result.value).exists())
         self.mock_storage.upload.assert_called_once()
 
-    @patch("marketplace.services.catalog_service.is_seller", return_value=False)
+    @patch("marketplace.catalog.domain.services.catalog_service.is_seller", return_value=False)
     def test_create_product_permission_denied(self, mock_is_seller):
         data = {
             "name": "Unauthorized Product",
@@ -84,7 +84,9 @@ class CatalogServiceUnitTest(TestCase):
         self.assertEqual(result.error, ErrorCodes.PERMISSION_DENIED)
         self.assertEqual(Product.objects.count(), 1)  # No new product created
 
-    @patch("marketplace.services.catalog_service.is_seller", return_value=True)  # Seller is allowed to update
+    @patch(
+        "marketplace.catalog.domain.services.catalog_service.is_seller", return_value=True
+    )  # Seller is allowed to update
     def test_update_product_success(self, mock_is_seller):
         update_data = {"name": "Updated Product Name", "price": "150.00"}
         result = self.catalog_service.update_product(
@@ -106,14 +108,18 @@ class CatalogServiceUnitTest(TestCase):
         self.product.refresh_from_db()
         self.assertNotEqual(self.product.name, "Hacked Product Name")  # Name should not be updated
 
-    @patch("marketplace.services.catalog_service.is_seller", return_value=True)  # Seller is allowed to delete
+    @patch(
+        "marketplace.catalog.domain.services.catalog_service.is_seller", return_value=True
+    )  # Seller is allowed to delete
     def test_delete_product_soft_delete_success(self, mock_is_seller):
         result = self.catalog_service.delete_product(product_id=str(self.product.id), user=self.seller_user)
         self.assertTrue(result.ok)
         self.product.refresh_from_db()
         self.assertFalse(self.product.is_active)  # Product should be soft deleted
 
-    @patch("marketplace.services.catalog_service.is_seller", return_value=True)  # Seller is allowed to delete
+    @patch(
+        "marketplace.catalog.domain.services.catalog_service.is_seller", return_value=True
+    )  # Seller is allowed to delete
     def test_delete_product_hard_delete_success(self, mock_is_seller):
         # Create another product to ensure only one is deleted
         Product.objects.create(

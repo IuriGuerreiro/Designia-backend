@@ -122,7 +122,7 @@ class EventDispatcher:
         """Dispatch user registered event."""
         import logging
 
-        from authentication.infra.events import get_event_bus
+        from infrastructure.events.redis_event_bus import get_event_bus
 
         logger = logging.getLogger(__name__)
 
@@ -145,7 +145,7 @@ class EventDispatcher:
         """Dispatch email verified event."""
         import logging
 
-        from authentication.infra.events import get_event_bus
+        from infrastructure.events.redis_event_bus import get_event_bus
 
         logger = logging.getLogger(__name__)
 
@@ -167,7 +167,7 @@ class EventDispatcher:
         """Dispatch successful login event."""
         import logging
 
-        from authentication.infra.events import get_event_bus
+        from infrastructure.events.redis_event_bus import get_event_bus
 
         logger = logging.getLogger(__name__)
 
@@ -190,7 +190,7 @@ class EventDispatcher:
         """Dispatch failed login event."""
         import logging
 
-        from authentication.infra.events import get_event_bus
+        from infrastructure.events.redis_event_bus import get_event_bus
 
         logger = logging.getLogger(__name__)
 
@@ -210,7 +210,7 @@ class EventDispatcher:
         """Dispatch 2FA enabled event."""
         import logging
 
-        from authentication.infra.events import get_event_bus
+        from infrastructure.events.redis_event_bus import get_event_bus
 
         logger = logging.getLogger(__name__)
 
@@ -230,7 +230,7 @@ class EventDispatcher:
         """Dispatch 2FA disabled event."""
         import logging
 
-        from authentication.infra.events import get_event_bus
+        from infrastructure.events.redis_event_bus import get_event_bus
 
         logger = logging.getLogger(__name__)
 
@@ -250,7 +250,7 @@ class EventDispatcher:
         """Dispatch seller application submitted event."""
         import logging
 
-        from authentication.infra.events import get_event_bus
+        from infrastructure.events.redis_event_bus import get_event_bus
 
         logger = logging.getLogger(__name__)
 
@@ -283,7 +283,7 @@ class EventDispatcher:
         """Dispatch seller application approved event."""
         import logging
 
-        from authentication.infra.events import get_event_bus
+        from infrastructure.events.redis_event_bus import get_event_bus
 
         logger = logging.getLogger(__name__)
 
@@ -316,7 +316,7 @@ class EventDispatcher:
         """Dispatch seller application rejected event."""
         import logging
 
-        from authentication.infra.events import get_event_bus
+        from infrastructure.events.redis_event_bus import get_event_bus
 
         logger = logging.getLogger(__name__)
 
@@ -349,7 +349,7 @@ class EventDispatcher:
         """Dispatch profile updated event."""
         import logging
 
-        from authentication.infra.events import get_event_bus
+        from infrastructure.events.redis_event_bus import get_event_bus
 
         logger = logging.getLogger(__name__)
 
@@ -377,7 +377,7 @@ class EventDispatcher:
         """Dispatch profile picture uploaded event."""
         import logging
 
-        from authentication.infra.events import get_event_bus
+        from infrastructure.events.redis_event_bus import get_event_bus
 
         logger = logging.getLogger(__name__)
 
@@ -397,7 +397,7 @@ class EventDispatcher:
         """Dispatch profile picture deleted event."""
         import logging
 
-        from authentication.infra.events import get_event_bus
+        from infrastructure.events.redis_event_bus import get_event_bus
 
         logger = logging.getLogger(__name__)
 

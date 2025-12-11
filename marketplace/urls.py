@@ -1,6 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
+from .api.views import internal_views, prometheus_metrics
 from .views import (
     CartViewSet,
     CategoryViewSet,
@@ -46,4 +47,11 @@ urlpatterns = [
     ),
     # Seller profile route
     path("sellers/<int:seller_id>/", seller_profile, name="seller-profile"),
+    # Internal APIs (NOT exposed publicly, but defined for completeness)
+    # These paths should be blocked at a lower level (e.g., Nginx, firewall)
+    # Or protected by a separate internal Kong service if internal APIs are routed differently
+    path("internal/products/<uuid:product_id>/", internal_views.internal_get_product, name="internal-get-product"),
+    path("internal/orders/<uuid:order_id>/", internal_views.internal_get_order, name="internal-get-order"),
+    # Prometheus metrics endpoint
+    path("metrics/", prometheus_metrics.marketplace_prometheus_metrics, name="marketplace-metrics"),
 ]
