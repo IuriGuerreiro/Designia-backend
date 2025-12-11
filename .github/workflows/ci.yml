@@ -56,7 +56,7 @@ jobs:
           python --version
           ruff --version
           black --version
-          isort --version
+
 
       - name: Run Ruff (lint)
         run: ruff check .
@@ -64,8 +64,7 @@ jobs:
       - name: Run Black (check)
         run: black --check --line-length=119 .
 
-      - name: Run isort (check)
-        run: isort --profile=black --line-length=119 --check-only .
+
 
       - name: Run pre-commit (all files)
         run: pre-commit run --all-files
