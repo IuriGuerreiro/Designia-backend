@@ -18,6 +18,7 @@ from django.utils import timezone
 from marketplace.models import Category, Order, OrderItem, Product
 from payment_system.models import PaymentTracker, PaymentTransaction, Payout, PayoutItem
 
+
 User = get_user_model()
 
 
@@ -317,9 +318,9 @@ class Command(BaseCommand):
 
         self.stdout.write(f"📦 Products: {len(products)} total")
         self.stdout.write(f"📋 Orders: {Order.objects.count()} total")
-        self.stdout.write(f'   - Completed: {Order.objects.filter(status="completed").count()}')
-        self.stdout.write(f'   - Pending: {Order.objects.filter(status="pending_payment").count()}')
-        self.stdout.write(f'   - Cancelled: {Order.objects.filter(status="cancelled").count()}')
+        self.stdout.write(f"   - Completed: {Order.objects.filter(status='completed').count()}")
+        self.stdout.write(f"   - Pending: {Order.objects.filter(status='pending_payment').count()}")
+        self.stdout.write(f"   - Cancelled: {Order.objects.filter(status='cancelled').count()}")
 
         self.stdout.write(f"\n💰 Transactions: {PaymentTransaction.objects.count()} total")
         self.stdout.write(f"💸 Payouts: {Payout.objects.count()} total\n")

@@ -16,6 +16,7 @@ from utils.rbac import is_admin
 
 from .results import Result
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -145,7 +146,7 @@ class ProfileService:
             if image_file.size > max_size:
                 return Result(
                     success=False,
-                    message=f"Image file too large. Maximum size is {max_size // (1024*1024)}MB",
+                    message=f"Image file too large. Maximum size is {max_size // (1024 * 1024)}MB",
                     error="File too large",
                 )
 
@@ -154,7 +155,7 @@ class ProfileService:
             if hasattr(image_file, "content_type") and image_file.content_type not in allowed_types:
                 return Result(
                     success=False,
-                    message=f'Invalid file type. Allowed types: {", ".join(allowed_types)}',
+                    message=f"Invalid file type. Allowed types: {', '.join(allowed_types)}",
                     error="Invalid file type",
                 )
 
@@ -169,7 +170,10 @@ class ProfileService:
 
             # Upload to S3
             success, file_key_or_error, upload_info = self.storage_provider.upload_file(
-                file=image_file, path=s3_key, public=False, validate_image=True  # Private profile pictures
+                file=image_file,
+                path=s3_key,
+                public=False,
+                validate_image=True,  # Private profile pictures
             )
 
             if not success:

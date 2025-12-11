@@ -1,16 +1,4 @@
 [tool.ruff]
-# Enable lint rules (E, W, F, I)
-# E: pycodestyle errors
-# W: pycodestyle warnings
-# F: Pyflakes
-# I: isort (import sorting)
-select = ["E", "W", "F", "I"]
-ignore = []
-
-# Allow autofix for all enabled rules (when `ruff check --fix` is used).
-fixable = ["ALL"]
-unfixable = []
-
 # Set target Python version to 3.11.
 target-version = "py311"
 
@@ -44,10 +32,23 @@ exclude = [
     "settings", # Django settings files, if any are auto-generated
 ]
 
+[tool.ruff.lint]
+# Enable lint rules (E, W, F, I)
+# E: pycodestyle errors
+# W: pycodestyle warnings
+# F: Pyflakes
+# I: isort (import sorting)
+select = ["E", "W", "F", "I"]
+ignore = ["E501"]
+
+# Allow autofix for all enabled rules (when `ruff check --fix` is used).
+fixable = ["ALL"]
+unfixable = []
+
 # Allow unused variables when underscore-prefixed.
 dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 
-[tool.ruff.isort]
+[tool.ruff.lint.isort]
 # Use `force-single-line = true` if you prefer single line imports like `from foo import bar, baz`.
 # known-first-party = ["marketplace", "payment_system", "infrastructure", "activity"] # Adjust as needed
 # known-local-folder = ["marketplace", "payment_system", "infrastructure", "activity"] # Adjust as needed
@@ -56,26 +57,20 @@ known-third-party = ["django", "rest_framework"] # Add other third-party libs if
 # isort profile to match black
 section-order = ["future", "standard-library", "third-party", "first-party", "local-folder"]
 lines-after-imports = 2
-force-alphabetical-sections = true
 
-[tool.ruff.mccabe]
+
+[tool.ruff.lint.mccabe]
 # Flag errors (`C901`) whenever the complexity score exceeds 10.
 max-complexity = 10
 
-[tool.ruff.flake8-annotations]
-# Allow `int` and `str` as type hints for which to enforce annotations.
-mypy-init-annotations = false
-
-[tool.ruff.pep8-naming]
+[tool.ruff.lint.pep8-naming]
 # Allow single-letter variable names for specific contexts.
 ignore-names = ["i", "j", "k", "v", "e", "f"]
 
-[tool.ruff.pylint]
+[tool.ruff.lint.pylint]
 max-args = 5
-# Forbid variable names that match the given regular expression.
-bad-variable-names = ["foo", "bar", "baz"]
 
-[tool.ruff.per-file-ignores]
+[tool.ruff.lint.per-file-ignores]
 # Ignore `E402` (module level import not at top of file) in `__init__.py` files.
 "__init__.py" = ["E402"]
 

@@ -11,6 +11,7 @@ from utils.s3_storage import S3StorageError, get_s3_storage
 
 from .models import AppVersion
 
+
 logger = logging.getLogger(__name__)
 
 bucket_root_folders = ["furniture", "product-ar-models"]

@@ -11,6 +11,7 @@ from typing import List, Optional
 
 from .interface import EmailMessage, EmailServiceInterface
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -43,9 +44,7 @@ class MockEmailService(EmailServiceInterface):
         Returns:
             Always returns True
         """
-        logger.info(
-            f"[MOCK EMAIL] To: {message.to}, " f"Subject: {message.subject}, " f"Body: {message.body[:100]}..."
-        )
+        logger.info(f"[MOCK EMAIL] To: {message.to}, Subject: {message.subject}, Body: {message.body[:100]}...")
 
         self.sent_messages.append(message)
         return True
@@ -86,7 +85,7 @@ class MockEmailService(EmailServiceInterface):
         Returns:
             Always returns True
         """
-        logger.info(f"[MOCK EMAIL] HTML To: {to}, " f"Subject: {subject}, " f"HTML Length: {len(html_content)} chars")
+        logger.info(f"[MOCK EMAIL] HTML To: {to}, Subject: {subject}, HTML Length: {len(html_content)} chars")
 
         # Create EmailMessage and store
         message = EmailMessage(

@@ -8,6 +8,7 @@ from marketplace.catalog.api.views.review_views import ReviewViewSet
 from marketplace.catalog.api.views.search_views import SearchViewSet
 from marketplace.ordering.api.views.order_views import OrderViewSet
 
+
 __all__ = [
     "CartViewSet",
     "ReviewViewSet",

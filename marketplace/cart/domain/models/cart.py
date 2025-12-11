@@ -3,6 +3,7 @@ from django.db import models
 
 from marketplace.catalog.domain.models.catalog import Product
 
+
 User = get_user_model()
 
 

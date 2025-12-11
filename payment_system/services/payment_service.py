@@ -24,6 +24,7 @@ from marketplace.models import Order
 from marketplace.services.base import BaseService, ErrorCodes, ServiceResult, service_err, service_ok
 from marketplace.services.order_service import OrderService
 
+
 logger = logging.getLogger(__name__)
 
 

@@ -23,6 +23,7 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, Spec
 
 from ar.admin_views import ProductARModelAdminDownloadView, ProductARModelAdminListView
 
+
 urlpatterns = [
     path("admin/", admin.site.urls),
     # API Documentation

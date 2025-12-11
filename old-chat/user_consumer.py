@@ -11,6 +11,7 @@ from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from .models import Chat, Message
 from .serializers import MessageSerializer
 
+
 logger = logging.getLogger(__name__)
 User = get_user_model()
 

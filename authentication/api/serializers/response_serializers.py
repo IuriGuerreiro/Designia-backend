@@ -9,6 +9,7 @@ from rest_framework import serializers
 
 from .auth_serializers import UserSerializer
 
+
 # ===== Authentication Response Serializers =====
 
 

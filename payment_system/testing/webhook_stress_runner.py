@@ -22,6 +22,7 @@ from decimal import Decimal
 
 import django
 
+
 # Django setup
 sys.path.append("/mnt/f/Nigger/Projects/Programmes/WebApps/Desginia/Designia-backend")
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "designia.settings")
@@ -32,6 +33,7 @@ from django.contrib.auth import get_user_model
 from django.test import Client
 
 from marketplace.models import Order
+
 
 User = get_user_model()
 
@@ -292,10 +294,10 @@ class WebhookStressRunner:
 
     def generate_webhook_report(self, results, total_time):  # noqa: C901
         """Generate webhook stress test report"""
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("🎯 EXTREME WEBHOOK STRESS TEST RESULTS")
         print(f"⚡ 50x LOAD: {self.total_threads} CONCURRENT WEBHOOKS")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
 
         total_requests = len(results)
         successful_requests = len([r for r in results if r["success"]])
@@ -305,13 +307,13 @@ class WebhookStressRunner:
         print(f"   • Total Webhook Requests: {total_requests}")
         print(f"   • Successful: {successful_requests}")
         print(f"   • Failed: {failed_requests}")
-        print(f"   • Success Rate: {successful_requests/total_requests*100:.1f}%")
+        print(f"   • Success Rate: {successful_requests / total_requests * 100:.1f}%")
         print(f"   • Total Execution Time: {total_time:.2f}s")
-        print(f"   • Requests/Second: {total_requests/total_time:.2f}")
+        print(f"   • Requests/Second: {total_requests / total_time:.2f}")
 
         if self.deadlock_detections > 0:
             print(f"   • Deadlock Detections: {self.deadlock_detections}")
-            print(f"   • Deadlock Rate: {self.deadlock_detections/total_requests*100:.2f}%")
+            print(f"   • Deadlock Rate: {self.deadlock_detections / total_requests * 100:.2f}%")
 
         # Timing analysis
         if results:
@@ -348,13 +350,13 @@ class WebhookStressRunner:
 
         success_rate = successful_requests / total_requests
         if success_rate >= 0.90:  # Lower threshold for extreme load
-            print(f"   🔥 OUTSTANDING: {success_rate*100:.1f}% success rate under 50x load!")
+            print(f"   🔥 OUTSTANDING: {success_rate * 100:.1f}% success rate under 50x load!")
         elif success_rate >= 0.80:
-            print(f"     EXCELLENT: {success_rate*100:.1f}% success rate under extreme stress")
+            print(f"     EXCELLENT: {success_rate * 100:.1f}% success rate under extreme stress")
         elif success_rate >= 0.70:
-            print(f"   ⚠️  GOOD: {success_rate*100:.1f}% success rate (acceptable for 50x load)")
+            print(f"   ⚠️  GOOD: {success_rate * 100:.1f}% success rate (acceptable for 50x load)")
         else:
-            print(f"    NEEDS TUNING: {success_rate*100:.1f}% success rate under extreme load")
+            print(f"    NEEDS TUNING: {success_rate * 100:.1f}% success rate under extreme load")
 
         if avg_time < 0.1:
             print("     FAST RESPONSE: <100ms average")
@@ -378,9 +380,9 @@ class WebhookStressRunner:
         if self.deadlock_detections > 0:
             print("   • Monitor deadlock patterns in production")
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("  EXTREME WEBHOOK STRESS TEST COMPLETED - 50x LOAD SURVIVED!")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
 
 
 def run_webhook_stress_test(concurrency_multiplier=50):

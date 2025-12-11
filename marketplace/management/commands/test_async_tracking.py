@@ -14,6 +14,7 @@ from django.core.management.base import BaseCommand
 from marketplace.async_tracking import AsyncTracker
 from marketplace.models import Product
 
+
 User = get_user_model()
 
 

@@ -12,8 +12,7 @@ from django.template.loader import render_to_string
 from django.utils import timezone
 
 from authentication.models import EmailVerificationToken, TwoFactorCode
-from authentication.utils import check_email_rate_limit
-from authentication.utils import record_email_attempt as utils_record_email_attempt
+from authentication.utils import check_email_rate_limit, record_email_attempt as utils_record_email_attempt
 from utils.email_utils import send_email
 
 from .email_interface import EmailProvider

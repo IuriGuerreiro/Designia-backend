@@ -16,11 +16,14 @@ from authentication.domain.events import EventDispatcher
 from authentication.infra.auth_providers.base import AuthProvider
 from authentication.infra.mail import EmailProvider
 from authentication.models import EmailVerificationToken, TwoFactorCode
-from authentication.utils import check_unused_codes_exist
-from authentication.utils import verify_2fa_code as utils_verify_2fa_code
-from authentication.utils import verify_email_token as utils_verify_email_token
+from authentication.utils import (
+    check_unused_codes_exist,
+    verify_2fa_code as utils_verify_2fa_code,
+    verify_email_token as utils_verify_email_token,
+)
 
 from .results import LoginResult, RegisterResult, Result
+
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -235,7 +238,9 @@ class AuthService:
 
             # 2FA verified - dispatch final success event
             EventDispatcher.dispatch_user_login_successful(
-                user=user, ip_address=self._get_client_ip(request), required_2fa=False  # 2FA completed
+                user=user,
+                ip_address=self._get_client_ip(request),
+                required_2fa=False,  # 2FA completed
             )
 
             # Generate tokens

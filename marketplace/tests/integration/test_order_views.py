@@ -16,6 +16,7 @@ from marketplace.tests.factories import (
     UserFactory,
 )
 
+
 User = get_user_model()
 
 

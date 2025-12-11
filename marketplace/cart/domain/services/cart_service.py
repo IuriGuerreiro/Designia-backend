@@ -20,6 +20,7 @@ from marketplace.catalog.domain.services.base import BaseService, ErrorCodes, Se
 from .inventory_service import InventoryService
 from .pricing_service import PricingService
 
+
 User = get_user_model()
 logger = logging.getLogger(__name__)
 

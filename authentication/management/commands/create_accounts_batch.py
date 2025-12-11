@@ -123,7 +123,7 @@ class Command(BaseCommand):
         language = account_data.get("language", "en")
         if not self.validate_language(language):
             valid_langs = [choice[0] for choice in CustomUser.LANGUAGE_CHOICES]
-            errors.append(f'Invalid language code: {language}. Valid options: {", ".join(valid_langs)}')
+            errors.append(f"Invalid language code: {language}. Valid options: {', '.join(valid_langs)}")
 
         account_type = account_data.get("account_type", "personal")
         if account_type not in ["personal", "business", "creator"]:
@@ -201,7 +201,7 @@ class Command(BaseCommand):
         for i, account_data in enumerate(accounts_data):
             errors = self.validate_account_data(account_data)
             if errors:
-                validation_errors.append(f'Account {i + 1}: {"; ".join(errors)}')
+                validation_errors.append(f"Account {i + 1}: {'; '.join(errors)}")
 
         if validation_errors:
             self.stdout.write(self.style.ERROR("Validation errors found:"))
@@ -269,7 +269,7 @@ class Command(BaseCommand):
                     created_count += 1
 
                 except Exception as e:
-                    error_msg = f'Account {i + 1} ({account_data.get("username", "unknown")}): {str(e)}'
+                    error_msg = f"Account {i + 1} ({account_data.get('username', 'unknown')}): {str(e)}"
                     self.stdout.write(self.style.ERROR(f"   {error_msg}"))
                     errors_count += 1
 

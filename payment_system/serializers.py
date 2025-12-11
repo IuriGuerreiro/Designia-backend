@@ -3,6 +3,7 @@ from rest_framework import serializers
 
 from .models import PaymentTracker, Payout, PayoutItem
 
+
 User = get_user_model()
 
 

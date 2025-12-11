@@ -30,6 +30,7 @@ from decimal import Decimal
 
 import django
 
+
 # Django setup
 sys.path.append("/mnt/f/Nigger/Projects/Programmes/WebApps/Desginia/Designia-backend")
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "designia.settings")
@@ -55,6 +56,7 @@ from utils.transaction_utils import (
     get_current_isolation_level,
     retry_on_deadlock,
 )
+
 
 User = get_user_model()
 

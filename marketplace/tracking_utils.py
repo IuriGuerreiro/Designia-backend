@@ -17,6 +17,7 @@ from activity.models import UserClick
 # Import transaction utilities
 from utils.transaction_utils import atomic_with_isolation
 
+
 User = get_user_model()
 logger = logging.getLogger(__name__)
 
@@ -225,7 +226,7 @@ class ProductTracker:
                 metrics.total_revenue += Decimal(str(order_amount))
                 metrics.save()
 
-            logger.info(f"Purchase tracked: {quantity}x {product.name} " f"(${order_amount}) by {user.username}")
+            logger.info(f"Purchase tracked: {quantity}x {product.name} (${order_amount}) by {user.username}")
             return True
 
         except Exception as e:

@@ -7,6 +7,7 @@ from marketplace.models import Category, Product, ProductMetrics
 
 from .models import ActivitySummary, UserClick
 
+
 User = get_user_model()
 
 

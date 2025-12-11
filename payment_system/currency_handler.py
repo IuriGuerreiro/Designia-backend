@@ -11,6 +11,7 @@ import stripe
 from django.conf import settings
 from django.utils import timezone
 
+
 logger = logging.getLogger(__name__)
 
 # Configure Stripe
@@ -139,7 +140,7 @@ class CurrencyHandler:
 
             logger.debug("[BALANCE_DEBUG] Final sorted order:")
             for i, curr in enumerate(available_currencies):
-                logger.debug(f"[BALANCE_DEBUG] {i+1}. {curr['currency']}: {curr['amount_formatted']}")
+                logger.debug(f"[BALANCE_DEBUG] {i + 1}. {curr['currency']}: {curr['amount_formatted']}")
 
             return available_currencies
 

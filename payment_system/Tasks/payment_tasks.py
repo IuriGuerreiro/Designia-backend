@@ -15,6 +15,7 @@ from celery import shared_task
 from django.db import transaction
 from django.utils import timezone
 
+
 # Removed unused transaction_utils import
 
 logger = logging.getLogger(__name__)

@@ -4,6 +4,7 @@ from typing import Iterable
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied
 
+
 # Canonical role names
 ROLE_USER = "user"
 ROLE_SELLER = "seller"
@@ -87,5 +88,4 @@ def require_admin(user):
 
 
 def require_seller(user):
-
     require_role(user, [ROLE_SELLER, ROLE_ADMIN])

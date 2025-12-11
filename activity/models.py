@@ -6,6 +6,7 @@ from django.utils import timezone
 
 from marketplace.models import Product
 
+
 User = get_user_model()
 logger = logging.getLogger(__name__)
 

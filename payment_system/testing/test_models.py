@@ -12,6 +12,7 @@ from django.utils import timezone
 from marketplace.models import Order, OrderItem, Product
 from payment_system.models import Payment, PaymentTransaction, RefundRequest, SellerPayout, StripeAccount, WebhookEvent
 
+
 User = get_user_model()
 
 
@@ -345,7 +346,10 @@ class PaymentSecurityTestCase(TestCase):
         # Should raise IntegrityError for duplicate stripe_account_id
         with self.assertRaises(Exception):  # noqa: B017
             StripeAccount.objects.create(
-                user=user2, stripe_account_id="acct_unique123", email=user2.email, country="US"  # Duplicate
+                user=user2,
+                stripe_account_id="acct_unique123",
+                email=user2.email,
+                country="US",  # Duplicate
             )
 
 

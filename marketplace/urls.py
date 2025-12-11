@@ -14,6 +14,7 @@ from marketplace.ordering.api.views.order_views import OrderViewSet
 
 from .api.views import prometheus_metrics
 
+
 # Create the main router
 router = DefaultRouter()
 router.register(r"products", ProductViewSet, basename="product")

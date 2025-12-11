@@ -4,6 +4,7 @@ from django.db import models
 
 from .catalog import Product
 
+
 User = get_user_model()
 
 

@@ -10,6 +10,7 @@ from .profile_service import ProfileService
 from .results import LoginResult, RegisterResult, Result
 from .seller_service import SellerService
 
+
 __all__ = [
     "AuthService",
     "SellerService",

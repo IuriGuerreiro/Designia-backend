@@ -3,6 +3,7 @@ from .seller import SellerApplication, SellerApplicationImage
 from .user import CustomUser
 from .verification import EmailRequestAttempt, EmailVerificationToken, TwoFactorCode
 
+
 __all__ = [
     "CustomUser",
     "Profile",

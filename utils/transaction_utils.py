@@ -32,6 +32,7 @@ from functools import wraps
 from django.conf import settings
 from django.db import IntegrityError, OperationalError, connection, transaction
 
+
 logger = logging.getLogger(__name__)
 
 # MySQL Isolation Levels

@@ -10,6 +10,7 @@ from marketplace.catalog.domain.models import (
 )
 from marketplace.ordering.domain.models import Order, OrderItem, OrderShipping
 
+
 __all__ = [
     "Category",
     "Product",

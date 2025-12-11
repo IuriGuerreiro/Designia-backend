@@ -19,6 +19,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from marketplace.models import Cart, CartItem, Category, Order, OrderItem, Product
 from payment_system.models import PaymentTransaction, Payout, PayoutItem
 
+
 User = get_user_model()
 
 
@@ -62,7 +63,7 @@ class TestDataFactory:
 
         product = Product.objects.create(
             name=name,
-            slug=f'{name.lower().replace(" ", "-")}-{uuid4().hex[:8]}',
+            slug=f"{name.lower().replace(' ', '-')}-{uuid4().hex[:8]}",
             description=f"Description for {name}",
             price=Decimal(price),
             seller=seller,
@@ -691,7 +692,9 @@ class EdgeCaseAndErrorHandlingTests(BaseAuthTestCase):
         url = reverse("payment_system:create_stripe_account_session")
 
         response = self.client.post(
-            url, data='{"amount": "not-a-number", "currency": }', content_type="application/json"  # Invalid JSON
+            url,
+            data='{"amount": "not-a-number", "currency": }',
+            content_type="application/json",  # Invalid JSON
         )
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)

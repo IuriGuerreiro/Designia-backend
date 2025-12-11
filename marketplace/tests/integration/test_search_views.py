@@ -8,6 +8,7 @@ from rest_framework.test import APIClient
 
 from marketplace.tests.factories import CategoryFactory, ProductFactory, SellerFactory
 
+
 User = get_user_model()
 
 

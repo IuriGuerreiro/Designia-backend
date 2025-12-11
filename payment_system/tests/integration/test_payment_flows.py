@@ -25,6 +25,7 @@ from payment_system.services.checkout_service import CheckoutService
 from payment_system.services.payout_service import PayoutService
 from payment_system.services.webhook_service import WebhookService
 
+
 User = get_user_model()
 
 
@@ -764,7 +765,7 @@ class PaymentIntegrationTest(TestCase):
         self.assertEqual(payment_transaction.status, "released")  # Status should be released
         self.assertEqual(payment_transaction.transfer_id, transfer_id)
         expected_notes_prefix = (
-            f"Transfer succeeded via webhook: {transfer_id} (amount: {amount/100:.2f} {currency.upper()})"
+            f"Transfer succeeded via webhook: {transfer_id} (amount: {amount / 100:.2f} {currency.upper()})"
         )
         print(f"Actual notes: '{payment_transaction.notes}'")  # Debugging print
         self.assertTrue(payment_transaction.notes.endswith(expected_notes_prefix))

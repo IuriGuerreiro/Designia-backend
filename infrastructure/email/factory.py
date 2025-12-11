@@ -14,6 +14,7 @@ from .interface import EmailServiceInterface
 from .mock_service import MockEmailService
 from .smtp_service import SMTPEmailService
 
+
 logger = logging.getLogger(__name__)
 
 EmailBackend = Literal["smtp", "mock"]
@@ -60,7 +61,7 @@ class EmailFactory:
         elif backend_type == "mock":
             return MockEmailService()
         else:
-            raise ValueError(f"Invalid email backend: {backend_type}. " f"Must be 'smtp' or 'mock'")
+            raise ValueError(f"Invalid email backend: {backend_type}. Must be 'smtp' or 'mock'")
 
     @staticmethod
     def create_smtp() -> SMTPEmailService:

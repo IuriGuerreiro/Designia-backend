@@ -12,6 +12,7 @@ from marketplace.tests.factories import CategoryFactory, ProductFactory, UserFac
 from marketplace.views.product_views import ProductViewSet as NewProductViewSet
 from marketplace.views_legacy import ProductViewSet as LegacyProductViewSet
 
+
 User = get_user_model()
 
 

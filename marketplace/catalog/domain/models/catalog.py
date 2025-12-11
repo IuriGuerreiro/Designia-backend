@@ -7,6 +7,7 @@ from django.utils.text import slugify
 
 from .category import Category
 
+
 User = get_user_model()
 
 

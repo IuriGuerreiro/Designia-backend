@@ -2,6 +2,7 @@ from django.urls import path
 
 from . import views
 
+
 urlpatterns = [
     # Chat endpoints
     path("", views.ChatListView.as_view(), name="chat_list"),

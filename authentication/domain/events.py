@@ -13,6 +13,7 @@ from typing import Any, Optional
 
 from django.dispatch import Signal
 
+
 # ===== Event Signals =====
 
 # Authentication Events
@@ -354,8 +355,7 @@ class EventDispatcher:
         logger = logging.getLogger(__name__)
 
         logger.info(
-            f"[EVENT] Profile updated: {user.email} "
-            f"(fields={len(updated_fields)}, completion={profile_completion}%)"
+            f"[EVENT] Profile updated: {user.email} (fields={len(updated_fields)}, completion={profile_completion}%)"
         )
 
         # Legacy Signal

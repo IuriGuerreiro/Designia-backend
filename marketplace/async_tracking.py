@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 from django.contrib.auth import get_user_model
 from django.http import HttpRequest
 
+
 User = get_user_model()
 logger = logging.getLogger(__name__)
 

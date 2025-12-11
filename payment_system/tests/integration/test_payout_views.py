@@ -9,6 +9,7 @@ from rest_framework.test import APIClient
 from marketplace.tests.factories import UserFactory
 from payment_system.models import Payout
 
+
 User = get_user_model()
 
 

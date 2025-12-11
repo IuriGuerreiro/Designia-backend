@@ -2,9 +2,11 @@
 """
 Check webhook events received by Django server
 """
+
 import os
 import sys
 from datetime import datetime, timedelta
+
 
 # Add the project root to Python path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
@@ -13,6 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "designiaBackend.settings")
 
 import django
+
 
 django.setup()
 

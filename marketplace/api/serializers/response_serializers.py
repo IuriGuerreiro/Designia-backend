@@ -7,6 +7,7 @@ They are NOT used for data validation, only for documentation in Swagger/ReDoc.
 
 from rest_framework import serializers
 
+
 # ===== Common Response Serializers =====
 
 

@@ -1,5 +1,6 @@
 from prometheus_client import Counter, Gauge, Histogram
 
+
 # Order Metrics
 orders_placed_total = Counter("marketplace_orders_placed_total", "Total orders placed", ["status"])
 order_value = Histogram(

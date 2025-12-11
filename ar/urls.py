@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 
 from .views import ProductARModelDownloadViewSet, ProductARModelViewSet
 
+
 router = DefaultRouter()
 router.register(r"models", ProductARModelViewSet, basename="ar-model")
 router.register(r"downloads", ProductARModelDownloadViewSet, basename="ar-model-download")

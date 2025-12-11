@@ -12,6 +12,7 @@ from django.utils.text import slugify
 
 from marketplace.models import Category, Product
 
+
 User = get_user_model()
 
 

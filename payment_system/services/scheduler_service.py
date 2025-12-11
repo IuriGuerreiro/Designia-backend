@@ -13,6 +13,7 @@ from typing import Dict
 
 from .celery_scheduler_service import CelerySchedulerService
 
+
 logger = logging.getLogger(__name__)
 
 # Deprecation warning

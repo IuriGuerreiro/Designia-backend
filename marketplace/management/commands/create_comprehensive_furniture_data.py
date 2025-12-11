@@ -50,6 +50,7 @@ from marketplace.models import (
     ProductReview,
 )
 
+
 User = get_user_model()
 
 
@@ -1218,7 +1219,9 @@ class Command(BaseCommand):
 
         # Add price variations based on condition and features
         condition = random.choices(
-            ["new", "like_new", "good", "fair"], weights=[60, 25, 12, 3], k=1  # Weighted toward better conditions
+            ["new", "like_new", "good", "fair"],
+            weights=[60, 25, 12, 3],
+            k=1,  # Weighted toward better conditions
         )[0]
 
         condition_multipliers = {
@@ -1262,7 +1265,9 @@ class Command(BaseCommand):
         # Generate realistic stock
         if condition == "new":
             stock = random.choices(
-                range(1, 101), weights=[max(1, 50 - i) for i in range(100)], k=1  # Weighted toward lower stock
+                range(1, 101),
+                weights=[max(1, 50 - i) for i in range(100)],
+                k=1,  # Weighted toward lower stock
             )[0]
         else:
             stock = random.randint(1, 5)  # Used items typically have lower stock
@@ -1320,10 +1325,10 @@ class Command(BaseCommand):
                     product=product,
                     s3_key=f"products/{product.id}/{uuid.uuid4()}.jpg",
                     s3_bucket="desginia-product-images",
-                    original_filename=f"{slugify(product.name)}_{i+1}.jpg",
+                    original_filename=f"{slugify(product.name)}_{i + 1}.jpg",
                     file_size=random.randint(50000, 500000),  # 50KB to 500KB
                     content_type="image/jpeg",
-                    alt_text=f"{product.name} - Image {i+1}",
+                    alt_text=f"{product.name} - Image {i + 1}",
                     is_primary=(i == 0),
                     order=i,
                 )
@@ -1389,7 +1394,9 @@ class Command(BaseCommand):
 
             # Generate rating with realistic distribution (skewed toward positive)
             rating = random.choices(
-                [1, 2, 3, 4, 5], weights=[5, 8, 15, 35, 37], k=1  # Skewed toward positive reviews
+                [1, 2, 3, 4, 5],
+                weights=[5, 8, 15, 35, 37],
+                k=1,  # Skewed toward positive reviews
             )[0]
 
             comment = random.choice(review_templates[rating])
@@ -1550,9 +1557,9 @@ COMPREHENSIVE FURNITURE DATA CREATION COMPLETE!
 │ USERS                                   │
 ├─────────────────────────────────────────┤
 │ Total Users:            {len(users):>3}            │
-│ - Personal:             {user_types.get('personal', 0):>3}            │
-│ - Business:             {user_types.get('business', 0):>3}            │
-│ - Creator:              {user_types.get('creator', 0):>3}            │
+│ - Personal:             {user_types.get("personal", 0):>3}            │
+│ - Business:             {user_types.get("business", 0):>3}            │
+│ - Creator:              {user_types.get("creator", 0):>3}            │
 ├─────────────────────────────────────────┤
 │ PRODUCTS                                │
 ├─────────────────────────────────────────┤

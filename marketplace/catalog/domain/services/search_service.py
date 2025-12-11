@@ -19,6 +19,7 @@ from marketplace.catalog.domain.models.catalog import Product
 from marketplace.catalog.domain.models.category import Category
 from marketplace.catalog.domain.services.base import BaseService, ErrorCodes, ServiceResult, service_err, service_ok
 
+
 logger = logging.getLogger(__name__)
 
 

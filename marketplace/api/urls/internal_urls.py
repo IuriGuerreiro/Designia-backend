@@ -19,6 +19,7 @@ from django.urls import path
 
 from marketplace.api.views import internal_views
 
+
 # Internal API - NOT exposed through gateway
 urlpatterns = [
     # Get product info (for Payment, Notification services)

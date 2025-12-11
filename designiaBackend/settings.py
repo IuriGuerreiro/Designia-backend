@@ -18,6 +18,7 @@ from pathlib import Path
 import pymysql
 from dotenv import load_dotenv
 
+
 # Install PyMySQL as MySQLdb (compatibility with Django's MySQL backend)
 pymysql.install_as_MySQLdb()
 
@@ -584,7 +585,8 @@ OTEL_TRACES_SAMPLER_ARG = float(os.getenv("OTEL_TRACES_SAMPLER_ARG", "1.0"))
 # In monolith: points to same Django instance
 # In microservices: points to separate service containers
 AUTHENTICATION_INTERNAL_URL = os.getenv(
-    "AUTHENTICATION_INTERNAL_URL", "http://localhost:8000/internal/auth"  # Default for monolith development
+    "AUTHENTICATION_INTERNAL_URL",
+    "http://localhost:8000/internal/auth",  # Default for monolith development
 )
 
 # Kong Gateway Configuration

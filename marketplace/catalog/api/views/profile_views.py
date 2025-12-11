@@ -6,6 +6,7 @@ from rest_framework.response import Response
 
 from marketplace.serializers import UserSerializer
 
+
 User = get_user_model()
 
 

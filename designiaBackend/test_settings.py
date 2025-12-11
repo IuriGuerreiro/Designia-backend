@@ -1,9 +1,11 @@
 import os
 
+
 # Mock SECRET_KEY for tests BEFORE importing settings to bypass validation
 os.environ.setdefault("SECRET_KEY", "django-insecure-test-key-for-unit-tests-only")
 
 from .settings import *  # noqa: F403
+
 
 # Override Database to use SQLite for tests
 DATABASES = {

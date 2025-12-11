@@ -14,6 +14,7 @@ from django.test import RequestFactory
 
 from marketplace.models import Product
 
+
 User = get_user_model()
 
 
@@ -107,7 +108,7 @@ class Command(BaseCommand):
             optimized_queries.append(query_count)
 
             if show_queries and i == 0:  # Show queries for first run only
-                self.stdout.write(f"\n📊 Query Details (Run {i+1}):")
+                self.stdout.write(f"\n📊 Query Details (Run {i + 1}):")
                 for idx, query in enumerate(connection.queries, 1):
                     self.stdout.write(f"  {idx}. {query['sql'][:100]}...")
 

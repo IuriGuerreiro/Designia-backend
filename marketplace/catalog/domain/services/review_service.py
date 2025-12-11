@@ -20,6 +20,7 @@ from marketplace.ordering.domain.models.order import OrderItem  # OrderItem is i
 
 from .review_metrics_service import ReviewMetricsService
 
+
 User = get_user_model()
 logger = logging.getLogger(__name__)
 

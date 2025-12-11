@@ -2,6 +2,7 @@ import logging
 
 from infrastructure.events import get_event_bus
 
+
 logger = logging.getLogger(__name__)
 
 

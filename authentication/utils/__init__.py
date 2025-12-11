@@ -9,6 +9,7 @@ from .common import (
 )
 from .email import send_2fa_code, send_verification_email
 
+
 __all__ = [
     "check_unused_codes_exist",
     "check_email_rate_limit",

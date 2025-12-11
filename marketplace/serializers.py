@@ -20,6 +20,7 @@ from marketplace.ordering.api.serializers.order_serializers import (
     OrderShippingSerializer,
 )
 
+
 __all__ = [
     "CartItemSerializer",
     "CartServiceOutputSerializer",

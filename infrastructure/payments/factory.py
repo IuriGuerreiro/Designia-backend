@@ -13,6 +13,7 @@ from django.conf import settings
 from .interface import PaymentProviderInterface
 from .stripe_provider import StripeProvider
 
+
 logger = logging.getLogger(__name__)
 
 PaymentBackend = Literal["stripe"]
@@ -53,7 +54,7 @@ class PaymentFactory:
         if backend_type == "stripe":
             return StripeProvider()
         else:
-            raise ValueError(f"Invalid payment provider: {backend_type}. " f"Currently only 'stripe' is supported")
+            raise ValueError(f"Invalid payment provider: {backend_type}. Currently only 'stripe' is supported")
 
     @staticmethod
     def create_stripe() -> StripeProvider:

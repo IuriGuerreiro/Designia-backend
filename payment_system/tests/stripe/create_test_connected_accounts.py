@@ -38,6 +38,7 @@ from typing import Dict, List, Optional
 import stripe
 from dotenv import load_dotenv
 
+
 # Load environment variables
 load_dotenv()
 

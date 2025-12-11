@@ -18,6 +18,7 @@ from utils.rbac import is_seller
 
 from .results import Result
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -320,7 +321,7 @@ class SellerService:
             application.rejection_reason = reason
             application.save()
 
-            logger.info(f"Seller application {application_id} rejected by admin {admin_user.id}. " f"Reason: {reason}")
+            logger.info(f"Seller application {application_id} rejected by admin {admin_user.id}. Reason: {reason}")
 
             # Dispatch event
             EventDispatcher.dispatch_seller_application_rejected(

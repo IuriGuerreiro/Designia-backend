@@ -55,14 +55,14 @@ jobs:
         run: |
           python --version
           ruff --version
-          black --version
+
 
 
       - name: Run Ruff (lint)
         run: ruff check .
 
-      - name: Run Black (check)
-        run: black --check --line-length=119 .
+      - name: Run Ruff Format (check)
+        run: ruff format --check .
 
 
 

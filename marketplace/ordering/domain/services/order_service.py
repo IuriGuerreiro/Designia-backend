@@ -25,6 +25,7 @@ from marketplace.catalog.domain.services.base import BaseService, ErrorCodes, Se
 from marketplace.infra.observability.metrics import order_value, orders_placed_total
 from marketplace.ordering.domain.models.order import Order, OrderItem
 
+
 User = get_user_model()
 logger = logging.getLogger(__name__)
 
@@ -206,8 +207,7 @@ class OrderService(BaseService):
                 order_value.observe(float(order.total_amount))
 
                 self.logger.info(
-                    f"Created order {order.id} for user {user.id}: "
-                    f"{len(cart_items)} items, total ${totals['total']}"
+                    f"Created order {order.id} for user {user.id}: {len(cart_items)} items, total ${totals['total']}"
                 )
 
                 span.set_attribute("order.id", str(order.id))

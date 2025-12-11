@@ -14,6 +14,7 @@ from django.urls import path
 
 from authentication.api.views import internal_views
 
+
 # Internal API - NOT exposed through gateway
 urlpatterns = [
     # Get user by ID

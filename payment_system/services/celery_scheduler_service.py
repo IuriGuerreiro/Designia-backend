@@ -11,6 +11,7 @@ from typing import Dict
 from django.utils import timezone
 from django_celery_beat.models import CrontabSchedule, IntervalSchedule, PeriodicTask
 
+
 logger = logging.getLogger(__name__)
 
 

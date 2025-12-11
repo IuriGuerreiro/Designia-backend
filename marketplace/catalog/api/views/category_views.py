@@ -13,6 +13,7 @@ from marketplace.catalog.domain.models.catalog import Product
 from marketplace.catalog.domain.models.category import Category
 from marketplace.filters import ProductFilter
 
+
 logger = logging.getLogger(__name__)
 
 

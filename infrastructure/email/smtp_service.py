@@ -14,6 +14,7 @@ from django.core.mail import EmailMultiAlternatives, send_mail, send_mass_mail
 
 from .interface import EmailException, EmailMessage, EmailServiceInterface
 
+
 logger = logging.getLogger(__name__)
 
 

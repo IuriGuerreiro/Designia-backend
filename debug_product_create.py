@@ -9,6 +9,7 @@ import os
 
 import django
 
+
 # Setup Django
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "designiaBackend.settings")
 django.setup()
@@ -18,6 +19,7 @@ from django.test import RequestFactory  # noqa: E402
 
 from marketplace.models import Category  # noqa: E402
 from marketplace.serializers import ProductCreateUpdateSerializer  # noqa: E402
+
 
 # Set up logging to see our debug output
 logging.basicConfig(level=logging.INFO)

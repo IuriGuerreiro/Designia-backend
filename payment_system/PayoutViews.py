@@ -29,6 +29,7 @@ from utils.transaction_utils import atomic_with_isolation, financial_transaction
 from .models import PaymentTransaction, Payout, PayoutItem
 from .serializers import PayoutSerializer, PayoutSummarySerializer
 
+
 # Set the Stripe API key from Django settings
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
@@ -619,7 +620,7 @@ def payout_analytics_dashboard(request):
                 "performance_metrics": {
                     "average_processing_time_ms": round(avg_processing_time_ms, 2),
                     "average_processing_time_formatted": (
-                        f"{avg_processing_time_ms/1000:.1f}s"
+                        f"{avg_processing_time_ms / 1000:.1f}s"
                         if avg_processing_time_ms > 1000
                         else f"{avg_processing_time_ms:.0f}ms"
                     ),
@@ -679,9 +680,7 @@ def payout_performance_report(request):  # noqa: C901
             # Get payouts with performance data
             payouts_with_metrics = Payout.objects.filter(seller=user, performance_metrics__isnull=False).order_by(
                 "-created_at"
-            )[
-                :100
-            ]  # Last 100 with metrics
+            )[:100]  # Last 100 with metrics
 
             performance_data = {
                 "processing_times": [],
@@ -852,7 +851,7 @@ def update_payout_reconciliation(request, payout_id):
             return Response(
                 {
                     "error": "INVALID_RECONCILIATION_STATUS",
-                    "detail": f'Status must be one of: {", ".join(valid_statuses)}',
+                    "detail": f"Status must be one of: {', '.join(valid_statuses)}",
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )

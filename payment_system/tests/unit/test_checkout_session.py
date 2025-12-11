@@ -9,6 +9,7 @@ from rest_framework.test import force_authenticate
 from marketplace.tests.factories import CartFactory, CartItemFactory, ProductFactory, UserFactory
 from payment_system.views import create_checkout_session
 
+
 User = get_user_model()
 
 

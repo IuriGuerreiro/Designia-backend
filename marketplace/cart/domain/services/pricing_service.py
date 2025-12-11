@@ -16,6 +16,7 @@ from django.conf import settings
 from marketplace.catalog.domain.models.catalog import Product
 from marketplace.catalog.domain.services.base import BaseService, ErrorCodes, ServiceResult, service_err, service_ok
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -286,8 +287,7 @@ class PricingService(BaseService):
             }
 
             self.logger.info(
-                f"Order total calculated: items={cart_total['items_count']}, "
-                f"shipping=${shipping_cost}, total=${total}"
+                f"Order total calculated: items={cart_total['items_count']}, shipping=${shipping_cost}, total=${total}"
             )
 
             return service_ok(order_total)

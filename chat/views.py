@@ -13,6 +13,7 @@ from .models import Chat, Message
 from .serializers import ChatCreateSerializer, ChatSerializer, MessageCreateSerializer, MessageSerializer
 from .user_consumer import UserConsumer
 
+
 User = get_user_model()
 
 
@@ -196,7 +197,7 @@ def upload_chat_image(request):
         max_size = 10 * 1024 * 1024  # 10MB
         if image_file.size > max_size:
             return Response(
-                {"error": f"Image file too large. Maximum size is {max_size // (1024*1024)}MB"},
+                {"error": f"Image file too large. Maximum size is {max_size // (1024 * 1024)}MB"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -204,7 +205,7 @@ def upload_chat_image(request):
         allowed_types = ["image/jpeg", "image/jpg", "image/png", "image/webp"]
         if hasattr(image_file, "content_type") and image_file.content_type not in allowed_types:
             return Response(
-                {"error": f'Invalid file type. Allowed types: {", ".join(allowed_types)}'},
+                {"error": f"Invalid file type. Allowed types: {', '.join(allowed_types)}"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -326,9 +327,7 @@ def search_users(request):
             | Q(email__icontains=query)
             | Q(first_name__icontains=query)
             | Q(last_name__icontains=query)
-        ).exclude(id=request.user.id)[
-            :20
-        ]  # Limit to 20 results
+        ).exclude(id=request.user.id)[:20]  # Limit to 20 results
 
         from .serializers import ChatUserSerializer
 

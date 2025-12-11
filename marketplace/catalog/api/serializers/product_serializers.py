@@ -14,6 +14,7 @@ from .category_serializers import CategorySerializer, MinimalCategorySerializer
 from .image_serializers import ProductImageSerializer
 from .user_serializers import MinimalSellerSerializer, UserSerializer
 
+
 logger = logging.getLogger(__name__)
 User = get_user_model()
 

@@ -11,6 +11,7 @@ import logging
 from .interface import StorageInterface
 from .s3_adapter import S3StorageAdapter
 
+
 logger = logging.getLogger(__name__)
 
 

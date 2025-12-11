@@ -25,6 +25,7 @@ from .domain.events import (
     user_registered,
 )
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -127,8 +128,7 @@ def handle_seller_application_submitted(sender, application, is_resubmission, **
     - Trigger review workflow
     """
     logger.info(
-        f"[SIGNAL] Seller application {'resubmitted' if is_resubmission else 'submitted'}: "
-        f"{application.user.email}"
+        f"[SIGNAL] Seller application {'resubmitted' if is_resubmission else 'submitted'}: {application.user.email}"
     )
 
     # Example: Send confirmation email to applicant
@@ -208,7 +208,7 @@ def handle_profile_updated(sender, user, updated_fields, profile_completion, **k
     - Trigger recommendations based on profile data
     """
     logger.info(
-        f"[SIGNAL] Profile updated: {user.email} - " f"{len(updated_fields)} fields (completion={profile_completion}%)"
+        f"[SIGNAL] Profile updated: {user.email} - {len(updated_fields)} fields (completion={profile_completion}%)"
     )
 
     # Example: Send milestone email for profile completion

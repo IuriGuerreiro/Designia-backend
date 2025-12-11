@@ -8,6 +8,7 @@ from marketplace.catalog.domain.services.review_service import ReviewService
 from marketplace.catalog.domain.services.search_service import SearchService
 from marketplace.ordering.domain.services.order_service import OrderService
 
+
 __all__ = [
     # Base classes
     "BaseService",

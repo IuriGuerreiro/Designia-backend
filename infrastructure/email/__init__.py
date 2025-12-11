@@ -10,6 +10,7 @@ from .interface import EmailException, EmailMessage, EmailServiceInterface
 from .mock_service import MockEmailService
 from .smtp_service import SMTPEmailService
 
+
 __all__ = [
     "EmailServiceInterface",
     "EmailMessage",

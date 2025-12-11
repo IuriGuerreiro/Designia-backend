@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional
 
 from .base import AuthProvider
 
+
 logger = logging.getLogger(__name__)
 
 

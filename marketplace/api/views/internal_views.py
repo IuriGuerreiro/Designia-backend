@@ -14,6 +14,7 @@ from marketplace.api.serializers import (
 )
 from marketplace.infra.observability.metrics import internal_api_calls_total
 
+
 logger = logging.getLogger(__name__)
 
 # Security Note: In a real environment, these internal APIs should be protected

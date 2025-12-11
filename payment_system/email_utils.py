@@ -10,6 +10,7 @@ from authentication.models import EmailRequestAttempt
 from authentication.utils import get_client_ip
 from utils.email_utils import send_email
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -156,7 +157,7 @@ def send_order_status_update_email(order, previous_status, new_status, request=N
             {
                 "emoji": "📋",
                 "title": "Order Status Updated",
-                "message": f'Your order status has been updated to {new_status.replace("_", " ").title()}.',
+                "message": f"Your order status has been updated to {new_status.replace('_', ' ').title()}.",
             },
         )
 
@@ -167,14 +168,14 @@ def send_order_status_update_email(order, previous_status, new_status, request=N
         text_content = f"""
 Hello {user.first_name or user.username},
 
-{status_info['emoji']} {status_info['title']}
+{status_info["emoji"]} {status_info["title"]}
 
-{status_info['message']}
+{status_info["message"]}
 
 Order Details:
 - Order Number: #{str(order.id)[:8]}
 - Total: ${order.total_amount}
-- Status: {new_status.replace('_', ' ').title()}
+- Status: {new_status.replace("_", " ").title()}
 
 Track your order: {frontend_url}/my-orders/{order.id}
 
@@ -308,7 +309,7 @@ Issue Details:
 - Order Total: ${order.total_amount}
 - Refund Amount: ${refund_amount or order.total_amount}
 - Failure Reason: {failure_reason}
-- Date: {timezone.now().strftime('%B %d, %Y at %I:%M %p')}
+- Date: {timezone.now().strftime("%B %d, %Y at %I:%M %p")}
 
 📞 IMMEDIATE ACTION REQUIRED
 

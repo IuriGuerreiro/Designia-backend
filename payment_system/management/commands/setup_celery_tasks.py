@@ -88,9 +88,9 @@ class Command(BaseCommand):
 
         for task_name, success in results.items():
             if success:
-                self.stdout.write(f'    {task_name.replace("_", " ").title()}: ' f'{self.style.SUCCESS("Configured")}')
+                self.stdout.write(f"    {task_name.replace('_', ' ').title()}: {self.style.SUCCESS('Configured')}")
             else:
-                self.stdout.write(f'   {task_name.replace("_", " ").title()}: ' f'{self.style.ERROR("Failed")}')
+                self.stdout.write(f"   {task_name.replace('_', ' ').title()}: {self.style.ERROR('Failed')}")
 
     def show_task_status(self):
         """Show current status of all tasks."""
@@ -100,12 +100,12 @@ class Command(BaseCommand):
             status = CelerySchedulerService.get_task_status()
 
             if "error" in status:
-                self.stdout.write(f'   Error getting status: {self.style.ERROR(status["error"])}')
+                self.stdout.write(f"   Error getting status: {self.style.ERROR(status['error'])}")
                 return
 
-            self.stdout.write(f'  📈 Total tasks: {status["total_tasks"]}')
-            self.stdout.write(f'    Enabled tasks: {status["enabled_tasks"]}')
-            self.stdout.write(f'   Disabled tasks: {status["disabled_tasks"]}')
+            self.stdout.write(f"  📈 Total tasks: {status['total_tasks']}")
+            self.stdout.write(f"    Enabled tasks: {status['enabled_tasks']}")
+            self.stdout.write(f"   Disabled tasks: {status['disabled_tasks']}")
 
             # Show individual task details
             if status["tasks"]:
@@ -115,10 +115,10 @@ class Command(BaseCommand):
                     last_run = task["last_run_at"] or "Never"
 
                     self.stdout.write(
-                        f'  {status_icon} {task["name"]}:\n'
-                        f'      Schedule: {task.get("schedule", "Unknown")}\n'
+                        f"  {status_icon} {task['name']}:\n"
+                        f"      Schedule: {task.get('schedule', 'Unknown')}\n"
                         f"      Last run: {last_run}\n"
-                        f'      Run count: {task["total_run_count"]}'
+                        f"      Run count: {task['total_run_count']}"
                     )
             else:
                 self.stdout.write("  No tasks found.")

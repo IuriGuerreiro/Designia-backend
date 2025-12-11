@@ -21,6 +21,7 @@ from marketplace.models import (
 )
 from payment_system.models import ExchangeRate, PaymentTracker, PaymentTransaction, Payout, PayoutItem
 
+
 User = get_user_model()
 fake = Faker()  # Instantiate Faker once
 

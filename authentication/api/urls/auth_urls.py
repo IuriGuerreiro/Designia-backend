@@ -21,6 +21,7 @@ from authentication.api.views import (
     metrics_views,
 )
 
+
 urlpatterns = [
     # Auth
     path("register/", RegisterAPIView.as_view(), name="register"),

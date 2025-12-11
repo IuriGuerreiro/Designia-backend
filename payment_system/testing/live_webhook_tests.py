@@ -2,6 +2,7 @@
 """
 Live webhook testing with Stripe CLI integration
 """
+
 import os
 import signal
 import subprocess
@@ -11,6 +12,7 @@ from datetime import datetime
 
 import requests
 
+
 # Add the project root to Python path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
@@ -19,11 +21,13 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "designiaBackend.settings")
 
 import django
 
+
 django.setup()
 
 from django.contrib.auth import get_user_model
 
 from payment_system.models import WebhookEvent
+
 
 User = get_user_model()
 

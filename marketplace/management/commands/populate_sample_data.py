@@ -14,6 +14,7 @@ from django.core.management.base import BaseCommand
 
 from marketplace.models import Category, Product, ProductImage
 
+
 User = get_user_model()
 
 
@@ -62,7 +63,7 @@ class Command(BaseCommand):
                 f"Successfully populated database with sample data!\n"
                 f"- {len(categories)} categories\n"
                 f"- {len(sellers)} sellers\n"
-                f'- {options["products"]} products'
+                f"- {options['products']} products"
             )
         )
 

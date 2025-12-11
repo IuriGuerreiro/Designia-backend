@@ -15,6 +15,7 @@ from django.utils import timezone
 from marketplace.models import Category, Order, OrderItem, Product
 from payment_system.models import PaymentTransaction
 
+
 User = get_user_model()
 
 
@@ -177,7 +178,7 @@ class Command(BaseCommand):
         self.stdout.write(f"   Orders: {Order.objects.filter(buyer=buyer).count()}")
         self.stdout.write(f"   Transactions: {transaction_count}")
         self.stdout.write(
-            f'   Total Available: ${PaymentTransaction.objects.filter(seller=seller, status="completed").aggregate(total=models.Sum("net_amount"))["total"] or 0}'
+            f"   Total Available: ${PaymentTransaction.objects.filter(seller=seller, status='completed').aggregate(total=models.Sum('net_amount'))['total'] or 0}"
         )
 
         self.stdout.write("\n" + "=" * 60)

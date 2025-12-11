@@ -87,7 +87,7 @@ class Command(BaseCommand):
 
         if not self.validate_language(language):
             valid_langs = [choice[0] for choice in CustomUser.LANGUAGE_CHOICES]
-            raise CommandError(f'Invalid language code: {language}. Valid options: {", ".join(valid_langs)}')
+            raise CommandError(f"Invalid language code: {language}. Valid options: {', '.join(valid_langs)}")
 
         if len(username) < 3:
             raise CommandError("Username must be at least 3 characters long")
@@ -153,8 +153,8 @@ class Command(BaseCommand):
                         f"   Account Type: {account_type}\n"
                         f"   Email Verified: Yes\n"
                         f"   Active: Yes\n"
-                        f'   Staff: {"Yes" if user.is_staff else "No"}\n'
-                        f'   Superuser: {"Yes" if user.is_superuser else "No"}\n'
+                        f"   Staff: {'Yes' if user.is_staff else 'No'}\n"
+                        f"   Superuser: {'Yes' if user.is_superuser else 'No'}\n"
                         f"   User ID: {user.id}"
                     )
                 )

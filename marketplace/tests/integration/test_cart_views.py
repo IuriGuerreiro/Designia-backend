@@ -11,6 +11,7 @@ from rest_framework.test import APIClient
 from marketplace.models import CartItem
 from marketplace.tests.factories import CategoryFactory, ProductFactory, SellerFactory, UserFactory
 
+
 User = get_user_model()
 
 

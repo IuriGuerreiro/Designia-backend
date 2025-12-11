@@ -8,6 +8,7 @@ from django.conf import settings
 
 from .event_bus_interface import EventBus
 
+
 logger = logging.getLogger(__name__)
 
 

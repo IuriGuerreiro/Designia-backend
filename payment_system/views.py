@@ -38,6 +38,7 @@ from .models import PaymentTracker, PaymentTransaction, Payout, PayoutItem
 from .security import PaymentAuditLogger
 from .services import stripe_events
 
+
 # Set the Stripe API key from Django settings
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
@@ -280,7 +281,7 @@ def stripe_webhook(request):  # noqa: C901
                                     status="success_refund",
                                     amount=refund_amount,
                                     currency="USD",
-                                    notes=f'Refund succeeded: {refund_metadata.get("reason", "Order cancelled")}',
+                                    notes=f"Refund succeeded: {refund_metadata.get('reason', 'Order cancelled')}",
                                 )
                                 logger.info(f"  Created new success_refund tracker for refund {refund_id}")
                         except Exception as tracker_error:
@@ -673,9 +674,9 @@ def stripe_webhook(request):  # noqa: C901
                                 transaction_for_update.actual_release_date = timezone.now()
                                 transaction_for_update.transfer_id = transfer_id
                                 transaction_for_update.notes = (
-                                    f"{transaction_for_update.notes}\nTransfer succeeded via webhook: {transfer_id} (amount: {amount/100:.2f} {currency.upper()})"
+                                    f"{transaction_for_update.notes}\nTransfer succeeded via webhook: {transfer_id} (amount: {amount / 100:.2f} {currency.upper()})"
                                     if transaction_for_update.notes
-                                    else f"Transfer succeeded via webhook: {transfer_id} (amount: {amount/100:.2f} {currency.upper()})"
+                                    else f"Transfer succeeded via webhook: {transfer_id} (amount: {amount / 100:.2f} {currency.upper()})"
                                 )
                                 transaction_for_update.save(
                                     update_fields=[
@@ -691,7 +692,7 @@ def stripe_webhook(request):  # noqa: C901
                                     f"[SUCCESS] Payment transaction {transaction_id} status updated: {old_status} -> released"
                                 )
                                 logger.info(f"  Transfer {transfer_id} SUCCESS - payment released to seller")
-                                logger.info(f"   Amount: {amount/100:.2f} {currency.upper()}")
+                                logger.info(f"   Amount: {amount / 100:.2f} {currency.upper()}")
                                 logger.info(f"   Status: {old_status} -> released (SUCCESS)")
 
                                 # Then update PaymentTracker status (PaymentTracker model - second in same isolation)
@@ -3019,7 +3020,8 @@ def handle_payment_intent_succeeded(payment_intent):  # noqa: C901
 
             # STEP 3: Update PaymentTransaction records for this order - set to 'held' (follows required ordering)
             payment_transactions = PaymentTransaction.objects.filter(
-                order=order, status="pending"  # Only update pending transactions
+                order=order,
+                status="pending",  # Only update pending transactions
             ).select_for_update()
 
             for txn in payment_transactions:

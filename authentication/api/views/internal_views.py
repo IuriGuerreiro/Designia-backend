@@ -24,6 +24,7 @@ from rest_framework.response import Response
 
 from authentication.domain.models import CustomUser
 
+
 logger = logging.getLogger(__name__)
 
 

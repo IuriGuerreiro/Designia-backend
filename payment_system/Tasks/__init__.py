@@ -10,6 +10,7 @@ from .exchange_rate_tasks import update_exchange_rates_task
 # Import essential tasks to ensure they are registered with Celery
 from .payment_tasks import cancel_expired_order, check_payment_timeouts_task
 
+
 # Export essential tasks for easy importing
 __all__ = [
     # Payment tasks

@@ -2,6 +2,7 @@ from django.urls import path
 
 from . import AdminPayoutViews, PayoutViews, views
 
+
 app_name = "payment_system"
 
 urlpatterns = [

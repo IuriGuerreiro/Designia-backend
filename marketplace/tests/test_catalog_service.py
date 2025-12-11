@@ -8,6 +8,7 @@ from django.test import TestCase
 from marketplace.models import Category, Product, ProductImage
 from marketplace.services import CatalogService, ErrorCodes
 
+
 User = get_user_model()
 
 

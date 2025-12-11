@@ -18,6 +18,7 @@ from marketplace.catalog.domain.models.catalog import Product
 from marketplace.catalog.domain.services.base import BaseService, ErrorCodes, ServiceResult, service_err, service_ok
 from marketplace.infra.observability.metrics import stock_reservation_failures
 
+
 logger = logging.getLogger(__name__)
 
 

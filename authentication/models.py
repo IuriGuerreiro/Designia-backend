@@ -3,6 +3,7 @@ from authentication.domain.models.seller import SellerApplication, SellerApplica
 from authentication.domain.models.user import CustomUser
 from authentication.domain.models.verification import EmailRequestAttempt, EmailVerificationToken, TwoFactorCode
 
+
 __all__ = [
     "CustomUser",
     "Profile",

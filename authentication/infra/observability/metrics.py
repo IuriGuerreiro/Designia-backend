@@ -7,6 +7,7 @@ Metrics are exposed at /api/auth/metrics for Prometheus scraping.
 
 from prometheus_client import Counter, Gauge, Histogram
 
+
 # ===== Login Metrics =====
 
 login_total = Counter("auth_login_total", "Total login attempts", ["status", "requires_2fa"])

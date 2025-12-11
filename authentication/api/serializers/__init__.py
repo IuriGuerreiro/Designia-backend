@@ -17,6 +17,7 @@ from .seller_serializers import (
     UserRoleSerializer,
 )
 
+
 __all__ = [
     "UserSerializer",
     "UserRegistrationSerializer",

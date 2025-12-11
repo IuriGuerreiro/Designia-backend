@@ -13,6 +13,7 @@ from django.test import TestCase
 
 from infrastructure.payments.stripe_provider import StripeProvider
 
+
 User = get_user_model()
 
 
