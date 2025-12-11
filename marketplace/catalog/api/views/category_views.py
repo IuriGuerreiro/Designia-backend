@@ -1,18 +1,22 @@
 import logging
 
 from django.db import models
+from drf_spectacular.utils import extend_schema_view
 from rest_framework import filters, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from activity.models import UserClick
+from marketplace.catalog.api.serializers.category_serializers import CategorySerializer
+from marketplace.catalog.api.serializers.product_serializers import ProductListSerializer
+from marketplace.catalog.domain.models.catalog import Product
+from marketplace.catalog.domain.models.category import Category
 from marketplace.filters import ProductFilter
-from marketplace.models import Category, Product
-from marketplace.serializers import CategorySerializer, ProductListSerializer
 
 logger = logging.getLogger(__name__)
 
 
+@extend_schema_view(tags=["Marketplace - Products"])
 class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
     """
     ViewSet for categories - read-only operations

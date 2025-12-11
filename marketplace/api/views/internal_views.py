@@ -63,19 +63,9 @@ logger = logging.getLogger(__name__)
                 )
             ],
         ),
-        404: OpenApiResponse(
-            response=ErrorResponseSerializer,
-            description="Product not found or inactive",
-            examples=[
-                OpenApiExample(
-                    "Not Found",
-                    value={"error": "product_not_found", "message": "Product not found or inactive"},
-                )
-            ],
-        ),
         400: OpenApiResponse(response=ErrorResponseSerializer, description="Invalid product ID format"),
     },
-    tags=["Marketplace - Internal"],
+    tags=["Internal"],
 )
 @api_view(["GET"])
 @permission_classes([AllowAny])
@@ -172,7 +162,7 @@ def internal_get_product(request, product_id):
             ],
         ),
     },
-    tags=["Marketplace - Internal"],
+    tags=["Internal"],
 )
 @api_view(["GET"])
 @permission_classes([AllowAny])

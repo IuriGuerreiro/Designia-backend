@@ -1,36 +1,26 @@
-from django.urls import include, path
+from django.urls import path
 from rest_framework.routers import DefaultRouter
 
+from marketplace.api.views import internal_views
+from marketplace.cart.api.views.cart_views import CartViewSet
+from marketplace.catalog.api.views.category_views import CategoryViewSet
+from marketplace.catalog.api.views.image_views import ProductImageViewSet
+from marketplace.catalog.api.views.metric_views import ProductMetricsViewSet
+from marketplace.catalog.api.views.product_views import ProductViewSet
+from marketplace.catalog.api.views.profile_views import UserProfileViewSet, seller_profile
+from marketplace.catalog.api.views.review_views import ReviewViewSet
+from marketplace.catalog.api.views.search_views import SearchViewSet
+from marketplace.ordering.api.views.order_views import OrderViewSet
+
 from .api.views import prometheus_metrics
-from .views import (
-    CartViewSet,
-    CategoryViewSet,
-    OrderViewSet,
-    ProductImageViewSet,
-    ProductMetricsViewSet,
-    ProductViewSet,
-    ReviewViewSet,
-    SearchViewSet,
-    UserProfileViewSet,
-    seller_profile,
-)
 
-# Create routers for different resource groups
+# Create the main router
 router = DefaultRouter()
-
-# Categories - Top level
-router.register(r"categories", CategoryViewSet, basename="category")
-
-# Products - Main resource
 router.register(r"products", ProductViewSet, basename="product")
-
-# Cart - Top level resource
+router.register(r"reviews", ReviewViewSet, basename="review")
 router.register(r"cart", CartViewSet, basename="cart")
-
-# Orders - Top level resource
 router.register(r"orders", OrderViewSet, basename="order")
-
-# User Profiles - Top level resource
+router.register(r"metrics", ProductMetricsViewSet, basename="metrics")
 router.register(r"profiles", UserProfileViewSet, basename="profile")
 
 app_name = "marketplace"
@@ -93,7 +83,18 @@ urlpatterns = [
     # ==================== USER PROFILES ====================
     # Handled by router: /profiles/
     # ==================== METRICS (Prometheus) ====================
+    path("internal/orders/<uuid:order_id>/", internal_views.internal_get_order, name="internal-get-order"),
+    # Manual Category URLs under /products/
+    path(
+        "products/categories/",
+        CategoryViewSet.as_view({"get": "list", "post": "create"}),
+        name="product-category-list",
+    ),
+    path(
+        "products/categories/<slug:slug>/",
+        CategoryViewSet.as_view({"get": "retrieve", "put": "update", "patch": "partial_update", "delete": "destroy"}),
+        name="product-category-detail",
+    ),
+    # Prometheus metrics endpoint
     path("metrics/", prometheus_metrics.marketplace_prometheus_metrics, name="marketplace-metrics"),
-    # Include router URLs
-    path("", include(router.urls)),
 ]
