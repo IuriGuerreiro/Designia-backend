@@ -242,6 +242,13 @@ class ProductCreateUpdateSerializer(serializers.ModelSerializer):
     images = ProductImageSerializer(many=True, read_only=True)
     colors = FlexibleJSONField(required=False)
     tags = FlexibleJSONField(required=False)
+    # Add this for documentation and input
+    uploaded_images = serializers.ListField(
+        child=serializers.ImageField(max_length=100000, allow_empty_file=False, use_url=False),
+        write_only=True,
+        required=False,
+        help_text="List of images to upload",
+    )
 
     class Meta:
         model = Product
@@ -267,6 +274,7 @@ class ProductCreateUpdateSerializer(serializers.ModelSerializer):
             "is_featured",
             "is_digital",
             "images",
+            "uploaded_images",
         ]
         read_only_fields = ["id", "images"]
 

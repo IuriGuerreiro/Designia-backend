@@ -19,8 +19,9 @@ from django.db.models import Avg, Count, OuterRef, Q, Subquery
 # Phase 3: Observability
 from authentication.infra.observability.tracing import tracer
 from infrastructure.container import container
-from marketplace.catalog.domain.models.catalog import Product, ProductImage, ProductReview
+from marketplace.catalog.domain.models.catalog import Product, ProductImage
 from marketplace.catalog.domain.models.category import Category
+from marketplace.catalog.domain.models.interaction import ProductReview
 from marketplace.catalog.domain.services.base import BaseService, ErrorCodes, ServiceResult, service_err, service_ok
 from utils.rbac import is_seller
 

@@ -24,6 +24,7 @@ class ProductViewSet(viewsets.ModelViewSet):
 
     permission_classes = [IsAuthenticatedOrReadOnly]
     lookup_field = "slug"
+    queryset = Product.objects.all()
 
     def get_service(self) -> CatalogService:
         return container.catalog_service()
