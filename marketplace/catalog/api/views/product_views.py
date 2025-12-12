@@ -166,11 +166,25 @@ class ProductViewSet(viewsets.ModelViewSet):
         description="""
         **What it receives:**
         - Product data (name, description, price, category, stock, etc.)
-        - Product images (multipart/form-data)
+        - Product images via multipart/form-data (any field name, e.g., 'uploaded_images', 'images', etc.)
+        - Optional `image_metadata` (JSON string) with format:
+          ```json
+          {
+            "filename.jpg": {
+              "alt_text": "Image description",
+              "is_primary": true,
+              "order": 0
+            }
+          }
+          ```
         - Authentication token (must be a seller)
 
         **What it returns:**
         - Created product with generated ID and slug
+        - All uploaded images with their metadata (alt_text, is_primary, order)
+
+        **Example:**
+        Upload images with metadata to control display order and primary image selection.
         """,
         request=ProductCreateUpdateSerializer,
         responses={
@@ -181,6 +195,8 @@ class ProductViewSet(viewsets.ModelViewSet):
         tags=["Marketplace - Products"],
     )
     def create(self, request):
+        import json
+
         service = self.get_service()
 
         # Validate input using serializer (partial validation mostly for fields)
@@ -189,12 +205,26 @@ class ProductViewSet(viewsets.ModelViewSet):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         data = serializer.validated_data
+
         # Handle images from request.FILES
         images = []
         for key in request.FILES:
             images.extend(request.FILES.getlist(key))
 
-        result = service.create_product(data, request.user, images)
+        # Parse image metadata from request1
+        # Format: image_metadata (JSON string or dict) with {filename: {alt_text, is_primary, order}}
+        image_metadata = {}
+        if "image_metadata" in request.data:
+            metadata_raw = request.data.get("image_metadata")
+            try:
+                if isinstance(metadata_raw, str):
+                    image_metadata = json.loads(metadata_raw)
+                elif isinstance(metadata_raw, dict):
+                    image_metadata = metadata_raw
+            except json.JSONDecodeError:
+                pass  # Ignore invalid JSON, use defaults
+
+        result = service.create_product(data, request.user, images, image_metadata)
 
         if not result.ok:
             if result.error == ErrorCodes.PERMISSION_DENIED:

@@ -2180,9 +2180,17 @@ paths:
     post:
       operationId: products_create
       description: "\n        **What it receives:**\n        - Product data (name,\
-        \ description, price, category, stock, etc.)\n        - Product images (multipart/form-data)\n\
-        \        - Authentication token (must be a seller)\n\n        **What it returns:**\n\
-        \        - Created product with generated ID and slug\n        "
+        \ description, price, category, stock, etc.)\n        - Product images via\
+        \ multipart/form-data (any field name, e.g., 'uploaded_images', 'images',\
+        \ etc.)\n        - Optional `image_metadata` (JSON string) with format:\n\
+        \          ```json\n          {\n            \"filename.jpg\": {\n       \
+        \       \"alt_text\": \"Image description\",\n              \"is_primary\"\
+        : true,\n              \"order\": 0\n            }\n          }\n        \
+        \  ```\n        - Authentication token (must be a seller)\n\n        **What\
+        \ it returns:**\n        - Created product with generated ID and slug\n  \
+        \      - All uploaded images with their metadata (alt_text, is_primary, order)\n\
+        \n        **Example:**\n        Upload images with metadata to control display\
+        \ order and primary image selection.\n        "
       summary: Create a new product (Seller only)
       tags:
       - Marketplace - Products
@@ -5070,13 +5078,10 @@ components:
           type: boolean
         is_digital:
           type: boolean
-        uploaded_images:
-          type: array
-          items:
-            type: string
-            format: binary
+        image_metadata:
           writeOnly: true
-          description: List of images to upload
+          description: 'Metadata for uploaded images. Format: {"filename.jpg": {"alt_text":
+            "Description", "is_primary": true, "order": 0}}'
     PatchedProfileRequest:
       type: object
       properties:
@@ -5425,13 +5430,10 @@ components:
           type: boolean
         is_digital:
           type: boolean
-        uploaded_images:
-          type: array
-          items:
-            type: string
-            format: binary
+        image_metadata:
           writeOnly: true
-          description: List of images to upload
+          description: 'Metadata for uploaded images. Format: {"filename.jpg": {"alt_text":
+            "Description", "is_primary": true, "order": 0}}'
       required:
       - description
       - name

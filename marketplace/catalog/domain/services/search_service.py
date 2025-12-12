@@ -397,13 +397,15 @@ class SearchService(BaseService):
         elif sort == "relevance":
             # Fallback relevance: view count
             return queryset.order_by("-view_count", "-favorite_count")
-        elif sort == "price_asc":
+        elif sort in ["price_asc", "price_low"]:
             return queryset.order_by("price", "-created_at")
-        elif sort == "price_desc":
+        elif sort in ["price_desc", "price_high"]:
             return queryset.order_by("-price", "-created_at")
         elif sort == "rating":
             # Sort by average rating
-            return queryset.annotate(avg_rating=Avg("reviews__rating")).order_by("-avg_rating", "-view_count")
+            return queryset.annotate(avg_rating=Avg("reviews__rating")).order_by(
+                F("avg_rating").desc(nulls_last=True), "-view_count"
+            )
         elif sort == "newest":
             return queryset.order_by("-created_at")
         elif sort == "popular":

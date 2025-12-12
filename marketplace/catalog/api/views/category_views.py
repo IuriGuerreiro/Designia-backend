@@ -17,7 +17,14 @@ from marketplace.filters import ProductFilter
 logger = logging.getLogger(__name__)
 
 
-@extend_schema_view(tags=["Marketplace - Products"])
+@extend_schema_view(
+    summary="Get products from category",
+    description="""
+    Retrieve a list of products within the specified category.
+    This endpoint supports filtering and searching of products.
+    """,
+    tags=["Marketplace - Products"],
+)
 class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
     """
     ViewSet for categories - read-only operations

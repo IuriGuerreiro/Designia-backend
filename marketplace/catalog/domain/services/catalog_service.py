@@ -220,7 +220,11 @@ class CatalogService(BaseService):
     @BaseService.log_performance
     @transaction.atomic
     def create_product(
-        self, data: Dict[str, Any], user: User, images: Optional[List] = None
+        self,
+        data: Dict[str, Any],
+        user: User,
+        images: Optional[List] = None,
+        image_metadata: Optional[Dict[str, Any]] = None,
     ) -> ServiceResult[Product]:
         """
         Create a new product (seller only).
@@ -229,6 +233,8 @@ class CatalogService(BaseService):
             data: Product data dict
             user: User creating the product (must be seller)
             images: Optional list of image files to upload
+            image_metadata: Optional dict with metadata per image
+                           Format: {filename: {"alt_text": "...", "is_primary": bool, "order": int}}
 
         Returns:
             ServiceResult with created Product
@@ -243,7 +249,8 @@ class CatalogService(BaseService):
             ...         "stock_quantity": 10
             ...     },
             ...     user=seller_user,
-            ...     images=[image_file1, image_file2]
+            ...     images=[image_file1, image_file2],
+            ...     image_metadata={"image1.jpg": {"alt_text": "Front view", "is_primary": True, "order": 0}}
             ... )
         """
         try:
@@ -284,7 +291,7 @@ class CatalogService(BaseService):
 
             # Handle image uploads if provided
             if images:
-                image_upload_result = self._upload_product_images(product, images)
+                image_upload_result = self._upload_product_images(product, images, image_metadata)
                 if not image_upload_result.ok:
                     # Rollback product creation
                     product.delete()
@@ -472,23 +479,32 @@ class CatalogService(BaseService):
             self.logger.error(f"Error searching products: {e}", exc_info=True)
             return service_err(ErrorCodes.INTERNAL_ERROR, str(e))
 
-    def _upload_product_images(self, product: Product, images: List) -> ServiceResult[List[ProductImage]]:
+    def _upload_product_images(
+        self, product: Product, images: List, image_metadata: Optional[Dict[str, Any]] = None
+    ) -> ServiceResult[List[ProductImage]]:
         """
         Upload product images using storage abstraction.
 
         Args:
             product: Product instance
             images: List of uploaded file objects
+            image_metadata: Optional dict with metadata per image (alt_text, is_primary, order)
+                           Format: {filename: {"alt_text": "...", "is_primary": bool, "order": int}}
 
         Returns:
             ServiceResult with list of created ProductImage instances
         """
         try:
             created_images = []
+            image_metadata = image_metadata or {}
 
             for idx, image_file in enumerate(images):
+                # Get metadata for this specific image
+                filename = getattr(image_file, "name", f"image_{idx}")
+                metadata = image_metadata.get(filename, {})
+
                 # Generate S3 key
-                s3_key = f"products/{product.id}/{image_file.name}"
+                s3_key = f"products/{product.id}/{filename}"
 
                 # Upload to storage
                 upload_result = self.storage.upload(
@@ -498,19 +514,20 @@ class CatalogService(BaseService):
                 )
 
                 if not upload_result.get("ok"):
-                    self.logger.error(f"Failed to upload image {image_file.name}: {upload_result.get('error')}")
+                    self.logger.error(f"Failed to upload image {filename}: {upload_result.get('error')}")
                     continue
 
-                # Create ProductImage record
+                # Create ProductImage record with metadata
                 product_image = ProductImage.objects.create(
                     product=product,
                     s3_key=s3_key,
                     s3_bucket=settings.AWS_STORAGE_BUCKET_NAME,
-                    original_filename=image_file.name,
+                    original_filename=filename,
                     file_size=image_file.size if hasattr(image_file, "size") else None,
                     content_type=image_file.content_type if hasattr(image_file, "content_type") else "image/jpeg",
-                    is_primary=(idx == 0),  # First image is primary
-                    order=idx,
+                    alt_text=metadata.get("alt_text", ""),
+                    is_primary=metadata.get("is_primary", idx == 0),  # Use metadata or default to first
+                    order=metadata.get("order", idx),  # Use metadata or default to index
                 )
 
                 created_images.append(product_image)

@@ -107,6 +107,16 @@ class DesigniaAPIUploader:
                 logger.error(f"No categories available to map '{category_term}'. skipping.")
                 return None
 
+        # Build image metadata for each image
+        image_metadata = {}
+        for idx, img_path in enumerate(images_paths):
+            filename = os.path.basename(img_path)
+            image_metadata[filename] = {
+                "alt_text": f"{name} - Image {idx + 1}",
+                "is_primary": idx == 0,  # First image is primary
+                "order": idx,
+            }
+
         # Prepare payload as data (form fields)
         data = {
             "name": name,
@@ -117,6 +127,7 @@ class DesigniaAPIUploader:
             "category": str(category_id),
             "condition": "new",
             "is_featured": "false",
+            "image_metadata": json.dumps(image_metadata),  # Send as JSON string
         }
 
         # Prepare files
