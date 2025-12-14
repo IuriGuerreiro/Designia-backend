@@ -1,7 +1,26 @@
 from rest_framework import serializers
 
-from marketplace.catalog.api.serializers.user_serializers import UserSerializer
+from marketplace.catalog.api.serializers.user_serializers import MinimalSellerSerializer, UserSerializer
 from marketplace.catalog.domain.models.interaction import ProductReview
+
+
+class MinimalProductReviewSerializer(serializers.ModelSerializer):
+    """Minimal review info for product detail - no sensitive user data"""
+
+    reviewer = MinimalSellerSerializer(read_only=True)
+
+    class Meta:
+        model = ProductReview
+        fields = [
+            "id",
+            "reviewer",
+            "rating",
+            "title",
+            "comment",
+            "is_verified_purchase",
+            "created_at",
+        ]
+        read_only_fields = ["id", "reviewer", "is_verified_purchase", "created_at"]
 
 
 class ProductReviewSerializer(serializers.ModelSerializer):

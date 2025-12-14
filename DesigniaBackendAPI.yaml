@@ -5465,6 +5465,102 @@ components:
       - description
       - name
       - price
+    ProductDetailSeller:
+      type: object
+      description: Minimal seller info for product detail endpoint
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        username:
+          type: string
+          readOnly: true
+        seller_rating:
+          type: string
+          nullable: true
+          readOnly: true
+      required:
+      - id
+      - username
+    ProductDetailCategory:
+      type: object
+      description: Minimal category info for product detail endpoint
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 100
+        slug:
+          type: string
+          readOnly: true
+        description:
+          type: string
+      required:
+      - id
+      - name
+      - slug
+    ProductDetailImage:
+      type: object
+      description: Minimal image info for product detail endpoint
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        image:
+          type: string
+          description: Original filename
+          readOnly: true
+        alt_text:
+          type: string
+          maxLength: 200
+        is_primary:
+          type: boolean
+        order:
+          type: integer
+          minimum: 0
+        url:
+          type: string
+          description: Proxy URL for the image
+          readOnly: true
+      required:
+      - id
+      - url
+    MinimalProductReview:
+      type: object
+      description: Minimal review info for product detail - no sensitive user data
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        reviewer:
+          allOf:
+          - $ref: '#/components/schemas/MinimalSeller'
+          readOnly: true
+        rating:
+          type: integer
+          maximum: 5
+          minimum: 1
+        title:
+          type: string
+          maxLength: 200
+        comment:
+          type: string
+        is_verified_purchase:
+          type: boolean
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - id
+      - is_verified_purchase
+      - rating
+      - reviewer
     ProductDetail:
       type: object
       properties:
@@ -5486,11 +5582,11 @@ components:
           maxLength: 300
         seller:
           allOf:
-          - $ref: '#/components/schemas/User'
+          - $ref: '#/components/schemas/ProductDetailSeller'
           readOnly: true
         category:
           allOf:
-          - $ref: '#/components/schemas/Category'
+          - $ref: '#/components/schemas/ProductDetailCategory'
           readOnly: true
         price:
           type: string
@@ -5545,8 +5641,6 @@ components:
           description: Materials used
         tags:
           description: Product tags
-        is_active:
-          type: boolean
         is_featured:
           type: boolean
         is_digital:
@@ -5554,15 +5648,14 @@ components:
         images:
           type: array
           items:
-            $ref: '#/components/schemas/ProductImage'
+            $ref: '#/components/schemas/ProductDetailImage'
           readOnly: true
         reviews:
-          type: string
+          type: array
+          items:
+            $ref: '#/components/schemas/MinimalProductReview'
           readOnly: true
         average_rating:
-          type: string
-          readOnly: true
-        review_count:
           type: string
           readOnly: true
         is_in_stock:
@@ -5577,19 +5670,8 @@ components:
         is_favorited:
           type: string
           readOnly: true
-        seller_product_count:
-          type: string
-          readOnly: true
         has_ar_model:
           type: string
-          readOnly: true
-        created_at:
-          type: string
-          format: date-time
-          readOnly: true
-        updated_at:
-          type: string
-          format: date-time
           readOnly: true
         view_count:
           type: integer
@@ -5604,7 +5686,6 @@ components:
       - average_rating
       - category
       - click_count
-      - created_at
       - description
       - discount_percentage
       - favorite_count
@@ -5616,12 +5697,9 @@ components:
       - is_on_sale
       - name
       - price
-      - review_count
       - reviews
       - seller
-      - seller_product_count
       - slug
-      - updated_at
       - view_count
     ProductFavorite:
       type: object
@@ -5713,7 +5791,7 @@ components:
           format: int64
     ProductList:
       type: object
-      description: Minimal product serializer for lists with query optimization
+      description: Minimal product serializer for list/search - just the essentials for product cards
       properties:
         id:
           type: string
@@ -5729,14 +5807,6 @@ components:
         short_description:
           type: string
           maxLength: 300
-        seller:
-          allOf:
-          - $ref: '#/components/schemas/MinimalSeller'
-          readOnly: true
-        category:
-          allOf:
-          - $ref: '#/components/schemas/MinimalCategory'
-          readOnly: true
         price:
           type: string
           format: decimal
@@ -5759,12 +5829,6 @@ components:
         primary_image:
           type: string
           readOnly: true
-        is_featured:
-          type: boolean
-        is_digital:
-          type: boolean
-        is_active:
-          type: boolean
         average_rating:
           type: string
           readOnly: true
@@ -5783,22 +5847,9 @@ components:
         is_favorited:
           type: string
           readOnly: true
-        created_at:
-          type: string
-          format: date-time
-          readOnly: true
-        view_count:
-          type: integer
-          readOnly: true
-        favorite_count:
-          type: integer
-          readOnly: true
       required:
       - average_rating
-      - category
-      - created_at
       - discount_percentage
-      - favorite_count
       - id
       - is_favorited
       - is_in_stock
@@ -5807,9 +5858,7 @@ components:
       - price
       - primary_image
       - review_count
-      - seller
       - slug
-      - view_count
     ProductListRequest:
       type: object
       description: Minimal product serializer for lists with query optimization
@@ -5874,9 +5923,8 @@ components:
         results:
           type: array
           items:
-            type: object
-            additionalProperties: {}
-          description: List of products (see ProductListSerializer schema)
+            $ref: '#/components/schemas/ProductList'
+          description: List of products
       required:
       - count
       - has_next

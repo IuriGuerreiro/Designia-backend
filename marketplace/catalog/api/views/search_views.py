@@ -1,9 +1,11 @@
-from rest_framework import status, viewsets
+from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema, inline_serializer
+from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 from infrastructure.container import container
+from marketplace.api.serializers import ErrorResponseSerializer
 from marketplace.serializers import ProductListSerializer
 from marketplace.services import SearchService
 
@@ -19,6 +21,47 @@ class SearchViewSet(viewsets.ViewSet):
     def get_service(self) -> SearchService:
         return container.search_service()
 
+    @extend_schema(
+        operation_id="products_search",
+        summary="Search products",
+        description="Search for products with filters and pagination",
+        parameters=[
+            OpenApiParameter(name="q", type=str, description="Search query"),
+            OpenApiParameter(name="category", type=str, description="Filter by category (can be multiple)", many=True),
+            OpenApiParameter(
+                name="condition", type=str, description="Filter by condition (can be multiple)", many=True
+            ),
+            OpenApiParameter(name="price_min", type=float, description="Minimum price"),
+            OpenApiParameter(name="price_max", type=float, description="Maximum price"),
+            OpenApiParameter(name="seller", type=str, description="Filter by seller ID"),
+            OpenApiParameter(name="min_rating", type=float, description="Minimum rating"),
+            OpenApiParameter(name="in_stock", type=bool, description="Only show in-stock products"),
+            OpenApiParameter(name="is_featured", type=bool, description="Only show featured products"),
+            OpenApiParameter(name="brand", type=str, description="Filter by brand"),
+            OpenApiParameter(name="page", type=int, description="Page number (default: 1)"),
+            OpenApiParameter(name="page_size", type=int, description="Items per page (default: 20)"),
+            OpenApiParameter(name="sort", type=str, description="Sort by (relevance, price, newest, popular)"),
+        ],
+        responses={
+            200: OpenApiResponse(
+                response=inline_serializer(
+                    name="ProductSearchPaginatedResponse",
+                    fields={
+                        "count": serializers.IntegerField(),
+                        "page": serializers.IntegerField(),
+                        "page_size": serializers.IntegerField(),
+                        "num_pages": serializers.IntegerField(),
+                        "has_next": serializers.BooleanField(),
+                        "has_previous": serializers.BooleanField(),
+                        "results": ProductListSerializer(many=True),
+                    },
+                ),
+                description="Search results",
+            ),
+            500: OpenApiResponse(response=ErrorResponseSerializer, description="Internal server error"),
+        },
+        tags=["Marketplace - Search"],
+    )
     @action(detail=False, methods=["get"])
     def search(self, request):
         service = self.get_service()

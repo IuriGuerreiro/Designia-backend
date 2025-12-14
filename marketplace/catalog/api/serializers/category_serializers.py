@@ -10,6 +10,15 @@ class MinimalCategorySerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "slug"]
 
 
+class ProductDetailCategorySerializer(serializers.ModelSerializer):
+    """Minimal category info for product detail endpoint"""
+
+    class Meta:
+        model = Category
+        fields = ["id", "name", "slug", "description"]
+        read_only_fields = ["id", "slug"]
+
+
 class CategorySerializer(serializers.ModelSerializer):
     subcategories = serializers.SerializerMethodField()
     product_count = serializers.SerializerMethodField()

@@ -4,6 +4,33 @@ from rest_framework import serializers
 from marketplace.catalog.domain.models.catalog import ProductImage
 
 
+class ProductDetailImageSerializer(serializers.ModelSerializer):
+    """Minimal image info for product detail endpoint"""
+
+    image = serializers.SerializerMethodField()
+    url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProductImage
+        fields = [
+            "id",
+            "image",
+            "alt_text",
+            "is_primary",
+            "order",
+            "url",
+        ]
+        read_only_fields = ["id"]
+
+    def get_image(self, obj):
+        """Return original filename for reference"""
+        return obj.original_filename or ""
+
+    def get_url(self, obj):
+        """Return proxy URL for the image"""
+        return obj.get_proxy_url()
+
+
 class ProductImageSerializer(serializers.ModelSerializer):
     presigned_url = serializers.SerializerMethodField()
     proxy_url = serializers.SerializerMethodField()

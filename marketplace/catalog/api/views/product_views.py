@@ -1,11 +1,11 @@
-from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
-from rest_framework import status, viewsets
+from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema, inline_serializer
+from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly
 from rest_framework.response import Response
 
 from infrastructure.container import container
-from marketplace.api.serializers import ErrorResponseSerializer, ProductListResponseSerializer
+from marketplace.api.serializers import ErrorResponseSerializer
 from marketplace.models import Product, ProductFavorite
 from marketplace.permissions import IsSellerOrReadOnly, IsSellerUser
 from marketplace.serializers import (
@@ -71,7 +71,19 @@ class ProductViewSet(viewsets.ModelViewSet):
         ],
         responses={
             200: OpenApiResponse(
-                response=ProductListResponseSerializer, description="Products retrieved successfully"
+                response=inline_serializer(
+                    name="ProductListPaginatedResponse",
+                    fields={
+                        "count": serializers.IntegerField(),
+                        "page": serializers.IntegerField(),
+                        "page_size": serializers.IntegerField(),
+                        "num_pages": serializers.IntegerField(),
+                        "has_next": serializers.BooleanField(),
+                        "has_previous": serializers.BooleanField(),
+                        "results": ProductListSerializer(many=True),
+                    },
+                ),
+                description="Products retrieved successfully",
             ),
             500: OpenApiResponse(response=ErrorResponseSerializer, description="Internal server error"),
         },
@@ -129,11 +141,16 @@ class ProductViewSet(viewsets.ModelViewSet):
         - `slug` (string in URL): Product slug identifier
 
         **What it returns:**
-        - Complete product details including images, reviews summary, seller info
+        - Complete product details including:
+          - Full product information
+          - Array of images with proxy URLs
+          - Array of reviews with reviewer info
+          - Seller info (id, username, rating)
+          - Category info
         - View count is automatically incremented
         """,
         responses={
-            200: OpenApiResponse(response=ProductDetailSerializer, description="Product retrieved successfully"),
+            200: ProductDetailSerializer,
             404: OpenApiResponse(response=ErrorResponseSerializer, description="Product not found"),
             500: OpenApiResponse(response=ErrorResponseSerializer, description="Internal server error"),
         },

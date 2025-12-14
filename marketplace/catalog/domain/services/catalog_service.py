@@ -199,7 +199,7 @@ class CatalogService(BaseService):
         try:
             product = (
                 Product.objects.select_related("seller", "category")
-                .prefetch_related("images")
+                .prefetch_related("images", "reviews", "reviews__reviewer")
                 .get(id=product_id, is_active=True)
             )
 

@@ -10,9 +10,10 @@ from marketplace.catalog.domain.models.catalog import Product
 from marketplace.catalog.domain.models.interaction import ProductFavorite, ProductMetrics
 from marketplace.catalog.domain.services.review_metrics_service import ReviewMetricsService
 
-from .category_serializers import CategorySerializer, MinimalCategorySerializer
-from .image_serializers import ProductImageSerializer
-from .user_serializers import MinimalSellerSerializer, UserSerializer
+from .category_serializers import ProductDetailCategorySerializer
+from .image_serializers import ProductDetailImageSerializer, ProductImageSerializer
+from .review_serializers import MinimalProductReviewSerializer
+from .user_serializers import ProductDetailSellerSerializer
 
 
 logger = logging.getLogger(__name__)
@@ -55,14 +56,12 @@ class ImageDataSerializer(serializers.Serializer):
 
 
 class ProductListSerializer(serializers.ModelSerializer):
-    """Minimal product serializer for lists with query optimization"""
+    """Minimal product serializer for list/search - just the essentials for product cards"""
 
-    seller = MinimalSellerSerializer(read_only=True)
-    category = MinimalCategorySerializer(read_only=True)
     primary_image = serializers.SerializerMethodField()
     is_favorited = serializers.SerializerMethodField()
-    review_count = serializers.SerializerMethodField()
     average_rating = serializers.SerializerMethodField()
+    review_count = serializers.SerializerMethodField()
     is_on_sale = serializers.SerializerMethodField()
     discount_percentage = serializers.SerializerMethodField()
     is_in_stock = serializers.SerializerMethodField()
@@ -74,28 +73,20 @@ class ProductListSerializer(serializers.ModelSerializer):
             "name",
             "slug",
             "short_description",
-            "seller",
-            "category",
             "price",
             "original_price",
             "stock_quantity",
             "condition",
             "brand",
             "primary_image",
-            "is_featured",
-            "is_digital",
-            "is_active",
             "average_rating",
             "review_count",
             "is_in_stock",
             "is_on_sale",
             "discount_percentage",
             "is_favorited",
-            "created_at",
-            "view_count",
-            "favorite_count",
         ]
-        read_only_fields = ["id", "slug", "seller", "created_at", "view_count", "favorite_count"]
+        read_only_fields = ["id", "slug"]
 
     def get_primary_image(self, obj):
         images = getattr(obj, "_prefetched_objects_cache", {}).get("images", obj.images.all())
@@ -123,15 +114,15 @@ class ProductListSerializer(serializers.ModelSerializer):
             return ProductFavorite.objects.filter(user=request.user, product=obj).exists()
         return False
 
-    def get_review_count(self, obj):
-        if hasattr(obj, "calculated_review_count"):
-            return obj.calculated_review_count or 0
-        return ReviewMetricsService().get_review_count(str(obj.id)).value
-
     def get_average_rating(self, obj):
         if hasattr(obj, "calculated_avg_rating"):
             return obj.calculated_avg_rating or 0
         return ReviewMetricsService().calculate_average_rating(str(obj.id)).value
+
+    def get_review_count(self, obj):
+        if hasattr(obj, "calculated_review_count"):
+            return obj.calculated_review_count or 0
+        return ReviewMetricsService().get_review_count(str(obj.id)).value
 
     def get_is_on_sale(self, obj):
         return PricingService().is_on_sale(obj).value
@@ -144,23 +135,17 @@ class ProductListSerializer(serializers.ModelSerializer):
 
 
 class ProductDetailSerializer(serializers.ModelSerializer):
-    seller = UserSerializer(read_only=True)
-    category = CategorySerializer(read_only=True)
-    images = ProductImageSerializer(many=True, read_only=True)
-    # Using 'reviews' relation directly might cause circular import if ProductReviewSerializer imports ProductDetailSerializer
-    # So we handle review serializer separately or import it inside method if needed, but DRF handles string references too.
-    # For simplicity, we assume ProductReviewSerializer is available or we define it in a separate file.
-    # To break circular dependency, we will use string reference if possible or import inside.
-    # Let's import ReviewSerializer at top if it's in same package or ...
-    # We will put ReviewSerializer in its own file.
-    reviews = serializers.SerializerMethodField()
+    """Simplified product detail serializer with minimal nested data"""
+
+    seller = ProductDetailSellerSerializer(read_only=True)
+    category = ProductDetailCategorySerializer(read_only=True)
+    images = ProductDetailImageSerializer(many=True, read_only=True)
+    reviews = MinimalProductReviewSerializer(many=True, read_only=True)
 
     is_favorited = serializers.SerializerMethodField()
-    seller_product_count = serializers.SerializerMethodField()
     is_on_sale = serializers.SerializerMethodField()
     discount_percentage = serializers.SerializerMethodField()
     average_rating = serializers.SerializerMethodField()
-    review_count = serializers.SerializerMethodField()
     is_in_stock = serializers.SerializerMethodField()
     has_ar_model = serializers.SerializerMethodField()
 
@@ -187,21 +172,16 @@ class ProductDetailSerializer(serializers.ModelSerializer):
             "colors",
             "materials",
             "tags",
-            "is_active",
             "is_featured",
             "is_digital",
             "images",
             "reviews",
             "average_rating",
-            "review_count",
             "is_in_stock",
             "is_on_sale",
             "discount_percentage",
             "is_favorited",
-            "seller_product_count",
             "has_ar_model",
-            "created_at",
-            "updated_at",
             "view_count",
             "click_count",
             "favorite_count",
@@ -210,27 +190,16 @@ class ProductDetailSerializer(serializers.ModelSerializer):
             "id",
             "slug",
             "seller",
-            "seller_product_count",
-            "created_at",
-            "updated_at",
             "view_count",
             "click_count",
             "favorite_count",
         ]
-
-    def get_reviews(self, obj):
-        from .review_serializers import ProductReviewSerializer
-
-        return ProductReviewSerializer(obj.reviews.all(), many=True).data
 
     def get_is_favorited(self, obj):
         request = self.context.get("request")
         if request and request.user.is_authenticated:
             return ProductFavorite.objects.filter(user=request.user, product=obj).exists()
         return False
-
-    def get_seller_product_count(self, obj):
-        return obj.seller.products.filter(is_active=True).count()
 
     def get_has_ar_model(self, obj):
         return ARService().has_3d_model(str(obj.id)).value
@@ -243,9 +212,6 @@ class ProductDetailSerializer(serializers.ModelSerializer):
 
     def get_average_rating(self, obj):
         return ReviewMetricsService().calculate_average_rating(str(obj.id)).value
-
-    def get_review_count(self, obj):
-        return ReviewMetricsService().get_review_count(str(obj.id)).value
 
     def get_is_in_stock(self, obj):
         return InventoryService().is_in_stock(str(obj.id)).value
