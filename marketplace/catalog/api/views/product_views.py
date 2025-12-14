@@ -195,34 +195,71 @@ class ProductViewSet(viewsets.ModelViewSet):
         tags=["Marketplace - Products"],
     )
     def create(self, request):
-        import json
+        import base64
+        import io
+        import logging
 
+        from django.core.files.uploadedfile import InMemoryUploadedFile
+
+        logger = logging.getLogger(__name__)
         service = self.get_service()
 
-        # Validate input using serializer (partial validation mostly for fields)
+        # Validate input using serializer
         serializer = self.get_serializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         data = serializer.validated_data
 
-        # Handle images from request.FILES
+        # Handle base64-encoded images from image_data
         images = []
-        for key in request.FILES:
-            images.extend(request.FILES.getlist(key))
-
-        # Parse image metadata from request1
-        # Format: image_metadata (JSON string or dict) with {filename: {alt_text, is_primary, order}}
         image_metadata = {}
-        if "image_metadata" in request.data:
-            metadata_raw = request.data.get("image_metadata")
+
+        image_data_list = data.pop("image_data", [])
+        for img_data in image_data_list:
             try:
-                if isinstance(metadata_raw, str):
-                    image_metadata = json.loads(metadata_raw)
-                elif isinstance(metadata_raw, dict):
-                    image_metadata = metadata_raw
-            except json.JSONDecodeError:
-                pass  # Ignore invalid JSON, use defaults
+                # Extract base64 content (remove data URI prefix if present)
+                image_content = img_data.get("image_content", "")
+                if "," in image_content:
+                    # Format: "data:image/png;base64,iVBORw0KGgo..."
+                    header, encoded = image_content.split(",", 1)
+                else:
+                    encoded = image_content
+
+                # Decode base64
+                image_bytes = base64.b64decode(encoded)
+
+                # Determine content type
+                content_type = "image/jpeg"  # Default
+                if "data:" in image_content:
+                    # Extract from data URI
+                    parts = image_content.split(";")[0].split(":")
+                    if len(parts) > 1:
+                        content_type = parts[1]
+
+                # Create in-memory file
+                filename = img_data.get("filename", f"image_{len(images)}.jpg")
+                image_file = InMemoryUploadedFile(
+                    file=io.BytesIO(image_bytes),
+                    field_name="image",
+                    name=filename,
+                    content_type=content_type,
+                    size=len(image_bytes),
+                    charset=None,
+                )
+
+                images.append(image_file)
+
+                # Build metadata
+                image_metadata[filename] = {
+                    "alt_text": img_data.get("alt_text", ""),
+                    "is_primary": img_data.get("is_primary", False),
+                    "order": img_data.get("order", len(images) - 1),
+                }
+
+            except Exception as e:
+                logger.error(f"Error decoding image: {e}")
+                continue
 
         result = service.create_product(data, request.user, images, image_metadata)
 

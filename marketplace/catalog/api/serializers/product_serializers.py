@@ -41,6 +41,19 @@ class FlexibleJSONField(serializers.Field):
         return value if value is not None else []
 
 
+class ImageDataSerializer(serializers.Serializer):
+    """Serializer for base64-encoded image uploads with metadata"""
+
+    image_content = serializers.CharField(
+        required=True,
+        help_text="Base64-encoded image data (e.g., 'data:image/png;base64,iVBORw0KGgo...')",
+    )
+    filename = serializers.CharField(required=True, max_length=255, help_text="Image filename")
+    alt_text = serializers.CharField(required=False, default="", max_length=200, help_text="Alt text for the image")
+    is_primary = serializers.BooleanField(required=False, default=False, help_text="Whether this is the primary image")
+    order = serializers.IntegerField(required=False, default=0, help_text="Display order of the image")
+
+
 class ProductListSerializer(serializers.ModelSerializer):
     """Minimal product serializer for lists with query optimization"""
 
@@ -96,7 +109,7 @@ class ProductListSerializer(serializers.ModelSerializer):
                 break
         target_image = primary_image or first_image
         if target_image:
-            return ProductImageSerializer(target_image).data
+            return target_image.get_proxy_url()
         return None
 
     def get_is_favorited(self, obj):
@@ -242,11 +255,9 @@ class ProductCreateUpdateSerializer(serializers.ModelSerializer):
     images = ProductImageSerializer(many=True, read_only=True)
     colors = FlexibleJSONField(required=False)
     tags = FlexibleJSONField(required=False)
-    # Image metadata for each uploaded image
-    image_metadata = serializers.JSONField(
-        write_only=True,
-        required=False,
-        help_text='Metadata for uploaded images. Format: {"filename.jpg": {"alt_text": "Description", "is_primary": true, "order": 0}}',
+    # Base64 encoded images with metadata
+    image_data = ImageDataSerializer(
+        many=True, write_only=True, required=False, help_text="Array of base64-encoded images with metadata"
     )
 
     class Meta:
@@ -270,10 +281,9 @@ class ProductCreateUpdateSerializer(serializers.ModelSerializer):
             "colors",
             "materials",
             "tags",
-            "is_featured",
             "is_digital",
             "images",
-            "image_metadata",
+            "image_data",
         ]
         read_only_fields = ["id", "images"]
 

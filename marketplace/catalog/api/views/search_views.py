@@ -27,8 +27,14 @@ class SearchViewSet(viewsets.ViewSet):
 
         # Extract filters
         filters = {}
-        if request.query_params.get("category"):
-            filters["category"] = request.query_params.get("category")
+        categories = request.query_params.getlist("category")
+        if categories:
+            filters["category"] = categories
+
+        conditions = request.query_params.getlist("condition")
+        if conditions:
+            filters["condition"] = conditions
+
         if request.query_params.get("price_min"):
             filters["price_min"] = request.query_params.get("price_min")
         if request.query_params.get("price_max"):
@@ -43,8 +49,6 @@ class SearchViewSet(viewsets.ViewSet):
             filters["is_featured"] = request.query_params.get("is_featured").lower() == "true"
         if request.query_params.get("brand"):
             filters["brand"] = request.query_params.get("brand")
-        if request.query_params.get("condition"):
-            filters["condition"] = request.query_params.get("condition")
 
         # Pagination and sorting
         page = int(request.query_params.get("page", 1))
@@ -89,8 +93,14 @@ class SearchViewSet(viewsets.ViewSet):
 
         # Extract filters (same as search)
         filters = {}
-        if request.query_params.get("category"):
-            filters["category"] = request.query_params.get("category")
+        categories = request.query_params.getlist("category")
+        if categories:
+            filters["category"] = categories
+
+        conditions = request.query_params.getlist("condition")
+        if conditions:
+            filters["condition"] = conditions
+
         if request.query_params.get("price_min"):
             filters["price_min"] = request.query_params.get("price_min")
         if request.query_params.get("price_max"):

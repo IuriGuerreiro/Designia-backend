@@ -24,7 +24,33 @@ class DesigniaAPIUploader:
         self.password = "admin"
         self.token = None
         self.headers = {}
-        self.category_map = {}  # Name -> ID
+        self.category_map = {}  # Store {lower_case_name_or_slug: id}
+        self.category_names_to_id = {}  # Store {lower_case_name: id} for fuzzy matching
+        self.category_slugs_to_id = {}  # Store {lower_case_slug: id} for fuzzy matching
+
+        # Hardcoded mapping for known IKEA search terms to Designia category slugs
+        self.term_mapping = {
+            "armchair": "armchair",
+            "armchairs": "armchair",
+            "bed": "bed",
+            "beds": "bed",
+            "double bed": "bed",
+            "bookshelf": "bookshelf",
+            "bookcase": "bookshelf",
+            "shelving unit": "bookshelf",
+            "desk": "desk",
+            "desks": "desk",
+            "computer desk": "desk",
+            "dining table": "dining-table",
+            "dining tables": "dining-table",
+            "floor lamp": "floor-lamp",
+            "floor lamps": "floor-lamp",
+            "rug": "rug",
+            "rugs": "rug",
+            "sofa": "sofa",
+            "sofas": "sofa",
+            "couch": "sofa",
+        }
 
     def login(self) -> bool:
         """Authenticates and retrieves JWT token."""
@@ -67,10 +93,14 @@ class DesigniaAPIUploader:
                     categories = results
 
                 for cat in categories:
+                    # Store exact matches
                     self.category_map[cat["name"].lower()] = cat["id"]
                     self.category_map[cat["slug"].lower()] = cat["id"]
+                    # Store for fuzzy matching
+                    self.category_names_to_id[cat["name"].lower()] = cat["id"]
+                    self.category_slugs_to_id[cat["slug"].lower()] = cat["id"]
 
-                logger.info(f"Fetched {len(self.category_map)} categories.")
+                logger.info(f"Fetched {len(self.category_names_to_id)} categories.")
             else:
                 logger.warning(f"Failed to fetch categories: {response.status_code}")
         except Exception as e:
@@ -78,8 +108,12 @@ class DesigniaAPIUploader:
 
     def upload_product(self, item: Dict, images_paths: List[str]) -> Optional[str]:
         """
-        Creates a product and returns its slug. Uploads images in the same request.
+        Creates a product and returns its slug. Uploads images as base64 encoded JSON.
         """
+        import base64
+
+        logger.info(f"Uploading product '{item.get('name')}' with {len(images_paths)} image paths provided.")
+
         url = f"{self.base_url}/api/marketplace/products/"
 
         name = item.get("name")
@@ -96,72 +130,109 @@ class DesigniaAPIUploader:
         price = float(clean_price) if clean_price else 0.0
 
         # Map Category
-        category_term = item.get("category_search_term", "").lower()
-        category_id = self.category_map.get(category_term)
+        # Prioritize matched_category_slug from the miner if available
+        category_term_raw = item.get("matched_category_slug")
+        if not category_term_raw:
+            # Fallback to category_search_term if matched_category_slug is not provided
+            category_term_raw = item.get("category_search_term", "")
+
+        category_term = category_term_raw.lower().strip()  # Clean input
+
+        category_id = None
+
+        # 0. Check Hardcoded Mapping
+        mapped_slug = self.term_mapping.get(category_term)
+        if mapped_slug:
+            category_id = self.category_map.get(mapped_slug)
+            if category_id:
+                logger.info(f"Mapped term '{category_term}' to hardcoded slug '{mapped_slug}' (ID: {category_id})")
+
+        # 1. Try exact match on name or slug
+        if not category_id:
+            category_id = self.category_map.get(category_term)
+
+        # 2. If no exact match, try fuzzy matching (contains)
+        if not category_id:
+            for name_lower, cat_id in self.category_names_to_id.items():
+                if category_term in name_lower or name_lower in category_term:
+                    category_id = cat_id
+                    logger.info(f"Fuzzy matched '{category_term_raw}' to category name '{name_lower}' (ID: {cat_id})")
+                    break
 
         if not category_id:
-            if self.category_map:
-                category_id = list(self.category_map.values())[0]
-                logger.warning(f"Category '{category_term}' not found. Using fallback ID: {category_id}")
-            else:
-                logger.error(f"No categories available to map '{category_term}'. skipping.")
-                return None
+            for slug_lower, cat_id in self.category_slugs_to_id.items():
+                if category_term in slug_lower or slug_lower in category_term:
+                    category_id = cat_id
+                    logger.info(f"Fuzzy matched '{category_term_raw}' to category slug '{slug_lower}' (ID: {cat_id})")
+                    break
 
-        # Build image metadata for each image
-        image_metadata = {}
+        if not category_id:
+            logger.error(
+                f"Category '{category_term_raw}' not found for product '{name}'. "
+                f"Please ensure categories like 'Sofa, Bed, Dining Table, Desk, Floor Lamp, Rug, Armchair, Bookshelf' "
+                f"exist in your backend. Skipping product."
+            )
+            return None
+
+        # Build image_data array with base64-encoded images
+        image_data = []
         for idx, img_path in enumerate(images_paths):
-            filename = os.path.basename(img_path)
-            image_metadata[filename] = {
-                "alt_text": f"{name} - Image {idx + 1}",
-                "is_primary": idx == 0,  # First image is primary
-                "order": idx,
-            }
+            exists = os.path.exists(img_path)
+            logger.info(f"Checking image path: {img_path} (Exists: {exists})")
+            if exists:
+                try:
+                    # Read and encode image as base64
+                    with open(img_path, "rb") as img_file:
+                        image_bytes = img_file.read()
+                        image_base64 = base64.b64encode(image_bytes).decode("utf-8")
 
-        # Prepare payload as data (form fields)
-        data = {
+                        # Determine MIME type
+                        mime_type, _ = mimetypes.guess_type(img_path)
+                        if not mime_type:
+                            mime_type = "image/jpeg"
+
+                        # Create data URI
+                        image_content = f"data:{mime_type};base64,{image_base64}"
+
+                        filename = os.path.basename(img_path)
+                        image_data.append(
+                            {
+                                "image_content": image_content,
+                                "filename": filename,
+                                "alt_text": f"{name} - Image {idx + 1}",
+                                "is_primary": idx == 0,  # First image is primary
+                                "order": idx,
+                            }
+                        )
+                except Exception as e:
+                    logger.warning(f"Failed to encode image {img_path}: {e}")
+                    continue
+            else:
+                logger.warning(f"Image file not found: {img_path}")
+
+        # Prepare payload as JSON
+        payload = {
             "name": name,
             "description": item.get("description", "") + "\n\nSource: IKEA Demo Data",
             "short_description": item.get("description", "")[:150],
             "price": str(price),
-            "stock_quantity": str(10),
-            "category": str(category_id),
+            "stock_quantity": 10,
+            "category": category_id,
             "condition": "new",
-            "is_featured": "false",
-            "image_metadata": json.dumps(image_metadata),  # Send as JSON string
+            "is_digital": False,
+            "image_data": image_data,
         }
 
-        # Prepare files
-        files = []
-        open_files = []
+        # Send JSON request
         try:
-            for img_path in images_paths:
-                if os.path.exists(img_path):
-                    f = open(img_path, "rb")
-                    open_files.append(f)
-                    filename = os.path.basename(img_path)
-                    mime_type, _ = mimetypes.guess_type(img_path)
-                    if not mime_type:
-                        mime_type = "application/octet-stream"
-                    # 'uploaded_images' matches the new serializer field
-                    files.append(("uploaded_images", (filename, f, mime_type)))
-                else:
-                    logger.warning(f"Image not found: {img_path}")
-
-            # Also support standard 'images' key if backend supports multiple keys or standard DRF behavior
-            # The backend loops over request.FILES, so key name actually doesn't matter much for the loop,
-            # but for serializer validation it matters. We added 'uploaded_images'.
-            # Just in case, let's duplicate or stick to one. The view iterates all request.FILES.
-            # But the serializer validation will check 'uploaded_images'.
-
             headers = self.headers.copy()
-            if "Content-Type" in headers:
-                del headers["Content-Type"]  # Allow multipart/form-data boundary
+            headers["Content-Type"] = "application/json"
 
-            response = requests.post(url, data=data, files=files, headers=headers)
+            response = requests.post(url, json=payload, headers=headers)
 
             if response.status_code == 201:
                 product_data = response.json()
-                logger.info(f"Created product: {name} with {len(files)} images")
+                logger.info(f"Created product: {name} with {len(image_data)} images")
                 return product_data.get("slug")
             elif response.status_code == 202:
                 logger.warning(f"Product creation accepted (202): {name}. Unexpected.")
@@ -173,9 +244,6 @@ class DesigniaAPIUploader:
         except Exception as e:
             logger.error(f"Error creating product '{name}': {e}")
             return None
-        finally:
-            for f in open_files:
-                f.close()
 
     def upload_image(self, product_slug: str, image_path: str, is_primary: bool = False):
         """

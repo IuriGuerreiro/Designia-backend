@@ -32,6 +32,27 @@ class IkeaDataMiner:
         self.headless = headless
         self.data: List[Dict] = []
 
+        self.canonical_category_slugs = {
+            "sofa": "sofa",
+            "bed": "bed",
+            "dining table": "dining-table",
+            "desk": "desk",
+            "floor lamp": "floor-lamp",
+            "rug": "rug",
+            "armchair": "armchair",
+            "bookshelf": "bookshelf",
+            # Add common variants if scraper search terms differ
+            "sofas": "sofa",
+            "beds": "bed",
+            "armchairs": "armchair",
+            "floor lamps": "floor-lamp",
+            "desks": "desk",
+            "dining tables": "dining-table",
+            "bookcases": "bookshelf",
+            "shelving units": "bookshelf",
+            "chairs": "armchair",  # Assuming chairs can map to armchair category
+        }
+
         # Ensure output directories exist
         logger.info(f"Ensuring output directory exists at: {self.OUTPUT_DIR}")
         os.makedirs(self.IMAGES_DIR, exist_ok=True)
@@ -129,7 +150,10 @@ class IkeaDataMiner:
                     if count >= max_items_per_category:
                         break
                     try:
-                        p_data = {"category_search_term": category}
+                        p_data = {
+                            "category_search_term": category,
+                            "matched_category_slug": self.canonical_category_slugs.get(category.lower(), ""),
+                        }
 
                         name_el = card.locator(
                             ".plp-price-module__product-name, .pip-header-section__title--small"

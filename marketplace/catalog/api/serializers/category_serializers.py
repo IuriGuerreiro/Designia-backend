@@ -35,4 +35,6 @@ class CategorySerializer(serializers.ModelSerializer):
         return []
 
     def get_product_count(self, obj):
+        if hasattr(obj, "product_count"):
+            return obj.product_count
         return obj.products.filter(is_active=True).count()

@@ -19,6 +19,7 @@ from django.db.models import Avg, Count, OuterRef, Q, Subquery
 # Phase 3: Observability
 from authentication.infra.observability.tracing import tracer
 from infrastructure.container import container
+from infrastructure.storage.interface import StorageException
 from marketplace.catalog.domain.models.catalog import Product, ProductImage
 from marketplace.catalog.domain.models.category import Category
 from marketplace.catalog.domain.models.interaction import ProductReview
@@ -218,6 +219,48 @@ class CatalogService(BaseService):
             return service_err(ErrorCodes.INTERNAL_ERROR, str(e))
 
     @BaseService.log_performance
+    def list_categories(self, active_only: bool = True) -> ServiceResult[List[Category]]:
+        """
+        List all product categories.
+
+        Args:
+            active_only: If True, return only active categories
+
+        Returns:
+            ServiceResult with list of Category objects
+        """
+        try:
+            queryset = Category.objects.annotate(product_count=Count("products", filter=Q(products__is_active=True)))
+            if active_only:
+                queryset = queryset.filter(is_active=True)
+
+            categories = list(queryset.order_by("name"))
+            return service_ok(categories)
+        except Exception as e:
+            self.logger.error(f"Error listing categories: {e}", exc_info=True)
+            return service_err(ErrorCodes.INTERNAL_ERROR, str(e))
+
+    @BaseService.log_performance
+    def get_category(self, slug: str) -> ServiceResult[Category]:
+        """
+        Get category by slug.
+
+        Args:
+            slug: Category slug
+
+        Returns:
+            ServiceResult with Category object
+        """
+        try:
+            category = Category.objects.get(slug=slug, is_active=True)
+            return service_ok(category)
+        except Category.DoesNotExist:
+            return service_err(ErrorCodes.NOT_FOUND, f"Category {slug} not found")
+        except Exception as e:
+            self.logger.error(f"Error getting category {slug}: {e}", exc_info=True)
+            return service_err(ErrorCodes.INTERNAL_ERROR, str(e))
+
+    @BaseService.log_performance
     @transaction.atomic
     def create_product(
         self,
@@ -259,11 +302,12 @@ class CatalogService(BaseService):
                 return service_err(ErrorCodes.PERMISSION_DENIED, "User is not a seller")
 
             # Get or validate category
-            category = None
-            if "category_id" in data:
+            category = data.get("category")
+            if not category and "category_id" in data:
                 try:
                     category = Category.objects.get(id=data["category_id"], is_active=True)
                 except Category.DoesNotExist:
+                    self.logger.error(f"Category {data['category_id']} not found for product creation")
                     return service_err(ErrorCodes.INVALID_INPUT, f"Category {data['category_id']} not found")
 
             # Create product
@@ -503,34 +547,36 @@ class CatalogService(BaseService):
                 filename = getattr(image_file, "name", f"image_{idx}")
                 metadata = image_metadata.get(filename, {})
 
-                # Generate S3 key
-                s3_key = f"products/{product.id}/{filename}"
+                # Generate S3 key (use furniture path for proxy compatibility)
+                s3_key = f"furniture/{product.seller.id}/{product.id}/{filename}"
 
-                # Upload to storage
-                upload_result = self.storage.upload(
-                    file_obj=image_file,
-                    path=s3_key,
-                    content_type=image_file.content_type if hasattr(image_file, "content_type") else "image/jpeg",
-                )
+                try:
+                    # Upload to storage
+                    self.storage.upload(
+                        file=image_file,
+                        path=s3_key,
+                        content_type=image_file.content_type if hasattr(image_file, "content_type") else "image/jpeg",
+                    )
 
-                if not upload_result.get("ok"):
-                    self.logger.error(f"Failed to upload image {filename}: {upload_result.get('error')}")
+                    # Create ProductImage record with metadata
+                    product_image = ProductImage.objects.create(
+                        product=product,
+                        s3_key=s3_key,
+                        s3_bucket=settings.AWS_STORAGE_BUCKET_NAME,
+                        original_filename=filename,
+                        image=image_file,  # Save to local storage/ImageField for fallback
+                        file_size=image_file.size if hasattr(image_file, "size") else None,
+                        content_type=image_file.content_type if hasattr(image_file, "content_type") else "image/jpeg",
+                        alt_text=metadata.get("alt_text", ""),
+                        is_primary=metadata.get("is_primary", idx == 0),  # Use metadata or default to first
+                        order=metadata.get("order", idx),  # Use metadata or default to index
+                    )
+
+                    created_images.append(product_image)
+
+                except StorageException as e:
+                    self.logger.error(f"Failed to upload image {filename}: {e}")
                     continue
-
-                # Create ProductImage record with metadata
-                product_image = ProductImage.objects.create(
-                    product=product,
-                    s3_key=s3_key,
-                    s3_bucket=settings.AWS_STORAGE_BUCKET_NAME,
-                    original_filename=filename,
-                    file_size=image_file.size if hasattr(image_file, "size") else None,
-                    content_type=image_file.content_type if hasattr(image_file, "content_type") else "image/jpeg",
-                    alt_text=metadata.get("alt_text", ""),
-                    is_primary=metadata.get("is_primary", idx == 0),  # Use metadata or default to first
-                    order=metadata.get("order", idx),  # Use metadata or default to index
-                )
-
-                created_images.append(product_image)
 
             self.logger.info(f"Uploaded {len(created_images)} images for product {product.id}")
 

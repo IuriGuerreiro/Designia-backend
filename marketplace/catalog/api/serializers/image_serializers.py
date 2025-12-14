@@ -7,13 +7,12 @@ from marketplace.catalog.domain.models.catalog import ProductImage
 class ProductImageSerializer(serializers.ModelSerializer):
     presigned_url = serializers.SerializerMethodField()
     proxy_url = serializers.SerializerMethodField()
-    image_url = serializers.ReadOnlyField()
+    image_url = serializers.SerializerMethodField()
 
     class Meta:
         model = ProductImage
         fields = [
             "id",
-            "image",
             "alt_text",
             "is_primary",
             "order",
@@ -33,4 +32,7 @@ class ProductImageSerializer(serializers.ModelSerializer):
         return obj.get_presigned_url(expires_in=3600)
 
     def get_proxy_url(self, obj):
+        return obj.get_proxy_url()
+
+    def get_image_url(self, obj):
         return obj.get_proxy_url()

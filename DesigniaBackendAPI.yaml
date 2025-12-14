@@ -2850,19 +2850,14 @@ paths:
   /api/marketplace/products/categories/:
     get:
       operationId: marketplace_products_categories_list
-      description: ViewSet for categories - read-only operations
-      parameters:
-      - name: search
-        required: false
-        in: query
-        description: A search term.
-        schema:
-          type: string
+      description: Retrieve a list of all active product categories.
+      summary: List all categories
       tags:
       - marketplace
       security:
       - jwtAuth: []
       - Bearer: []
+      - {}
       responses:
         '200':
           content:
@@ -2875,7 +2870,8 @@ paths:
   /api/marketplace/products/categories/{slug}/:
     get:
       operationId: marketplace_products_categories_retrieve
-      description: ViewSet for categories - read-only operations
+      description: Retrieve details of a specific category by slug.
+      summary: Get category details
       parameters:
       - in: path
         name: slug
@@ -2887,6 +2883,7 @@ paths:
       security:
       - jwtAuth: []
       - Bearer: []
+      - {}
       responses:
         '200':
           content:
@@ -4360,6 +4357,36 @@ components:
           description: Google OAuth token from frontend
       required:
       - token
+    ImageDataRequest:
+      type: object
+      description: Serializer for base64-encoded image uploads with metadata
+      properties:
+        image_content:
+          type: string
+          minLength: 1
+          description: Base64-encoded image data (e.g., 'data:image/png;base64,iVBORw0KGgo...')
+        filename:
+          type: string
+          minLength: 1
+          description: Image filename
+          maxLength: 255
+        alt_text:
+          type: string
+          minLength: 1
+          default: ''
+          description: Alt text for the image
+          maxLength: 200
+        is_primary:
+          type: boolean
+          default: false
+          description: Whether this is the primary image
+        order:
+          type: integer
+          default: 0
+          description: Display order of the image
+      required:
+      - filename
+      - image_content
     ImageTypeEnum:
       enum:
       - workshop
@@ -5074,14 +5101,14 @@ components:
           description: Materials used
         tags:
           type: string
-        is_featured:
-          type: boolean
         is_digital:
           type: boolean
-        image_metadata:
+        image_data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ImageDataRequest'
           writeOnly: true
-          description: 'Metadata for uploaded images. Format: {"filename.jpg": {"alt_text":
-            "Description", "is_primary": true, "order": 0}}'
+          description: Array of base64-encoded images with metadata
     PatchedProfileRequest:
       type: object
       properties:
@@ -5426,14 +5453,14 @@ components:
           description: Materials used
         tags:
           type: string
-        is_featured:
-          type: boolean
         is_digital:
           type: boolean
-        image_metadata:
+        image_data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ImageDataRequest'
           writeOnly: true
-          description: 'Metadata for uploaded images. Format: {"filename.jpg": {"alt_text":
-            "Description", "is_primary": true, "order": 0}}'
+          description: Array of base64-encoded images with metadata
       required:
       - description
       - name

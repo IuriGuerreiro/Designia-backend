@@ -338,7 +338,10 @@ class SearchService(BaseService):
         """
         # Category filter
         if "category" in filters:
-            queryset = queryset.filter(category__slug=filters["category"])
+            if isinstance(filters["category"], list):
+                queryset = queryset.filter(category__slug__in=filters["category"])
+            else:
+                queryset = queryset.filter(category__slug=filters["category"])
 
         # Price range filters
         if "price_min" in filters:
@@ -363,7 +366,10 @@ class SearchService(BaseService):
 
         # Condition filter
         if "condition" in filters:
-            queryset = queryset.filter(condition=filters["condition"])
+            if isinstance(filters["condition"], list):
+                queryset = queryset.filter(condition__in=filters["condition"])
+            else:
+                queryset = queryset.filter(condition=filters["condition"])
 
         # Brand filter
         if "brand" in filters:
