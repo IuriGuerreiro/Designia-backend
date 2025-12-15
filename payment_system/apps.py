@@ -42,7 +42,7 @@ class PaymentSystemConfig(AppConfig):
 
         def update_on_startup():
             try:
-                from .services.exchange_rate_service import ExchangeRateService
+                from .domain.services.exchange_rate_service import ExchangeRateService
 
                 logger.info("[UPDATE] Starting server startup exchange rate update...")
 
@@ -74,7 +74,7 @@ class PaymentSystemConfig(AppConfig):
 
         def start_scheduler():
             try:
-                from .services.scheduler_service import SchedulerService
+                from .domain.services.scheduler_service import SchedulerService
 
                 logger.info("[SCHEDULER] Starting daily exchange rate scheduler...")
 

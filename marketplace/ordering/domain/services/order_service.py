@@ -24,16 +24,85 @@ from marketplace.cart.domain.services.pricing_service import PricingService
 from marketplace.catalog.domain.services.base import BaseService, ErrorCodes, ServiceResult, service_err, service_ok
 from marketplace.infra.observability.metrics import order_value, orders_placed_total
 from marketplace.ordering.domain.models.order import Order, OrderItem
+from payment_system.domain.services.email_utils import (
+    send_failed_refund_notification_email,
+    send_order_cancellation_receipt_email,
+)
 
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
 
 
+# ... (existing imports)
+
+
 class OrderService(BaseService):
-    """
-    Service for managing order lifecycle.
-    """
+    # ... (existing methods)
+
+    @BaseService.log_performance
+    @transaction.atomic
+    def process_refund_success(self, order_id: str, amount: Decimal, reason: str = "") -> ServiceResult[Order]:
+        """
+        Process a successful refund confirmation from payment system.
+        """
+        try:
+            order = Order.objects.select_for_update().prefetch_related("items__product").get(id=order_id)
+
+            order.status = "refunded"
+            order.payment_status = "refunded"
+            order.save(update_fields=["status", "payment_status"])
+
+            # Restock items
+            for item in order.items.all():
+                product = item.product
+                product.stock_quantity += item.quantity
+                product.save(update_fields=["stock_quantity"])
+
+            self.logger.info(f"Processed refund success for order {order_id}")
+
+            # Send notification
+            try:
+                send_order_cancellation_receipt_email(order, reason or "Order cancelled", float(amount))
+            except Exception as e:
+                self.logger.error(f"Failed to send refund receipt email: {e}")
+
+            return service_ok(order)
+
+        except Order.DoesNotExist:
+            return service_err(ErrorCodes.ORDER_NOT_FOUND, f"Order {order_id} not found")
+        except Exception as e:
+            self.logger.error(f"Error processing refund success for order {order_id}: {e}", exc_info=True)
+            return service_err(ErrorCodes.INTERNAL_ERROR, str(e))
+
+    @BaseService.log_performance
+    @transaction.atomic
+    def process_refund_failure(self, order_id: str, reason: str, amount: Decimal = None) -> ServiceResult[Order]:
+        """
+        Process a failed refund attempt from payment system.
+        """
+        try:
+            order = Order.objects.select_for_update().get(id=order_id)
+
+            order.status = "cancelled"
+            order.payment_status = "failed_refund"
+            order.save(update_fields=["status", "payment_status"])
+
+            self.logger.warning(f"Processed refund failure for order {order_id}: {reason}")
+
+            # Send notification
+            try:
+                send_failed_refund_notification_email(order, reason, float(amount) if amount else 0.0)
+            except Exception as e:
+                self.logger.error(f"Failed to send refund failure email: {e}")
+
+            return service_ok(order)
+
+        except Order.DoesNotExist:
+            return service_err(ErrorCodes.ORDER_NOT_FOUND, f"Order {order_id} not found")
+        except Exception as e:
+            self.logger.error(f"Error processing refund failure for order {order_id}: {e}", exc_info=True)
+            return service_err(ErrorCodes.INTERNAL_ERROR, str(e))
 
     def __init__(
         self,
@@ -517,20 +586,19 @@ class OrderService(BaseService):
 
     @BaseService.log_performance
     @transaction.atomic
-    def confirm_payment(self, order_id: str) -> ServiceResult[Order]:
+    def confirm_payment(self, order_id: str, shipping_details: Dict = None) -> ServiceResult[Order]:
         """
         Confirm payment for an order (called by payment webhook).
 
         Transitions order from pending_payment → payment_confirmed.
+        Updates shipping address if provided.
 
         Args:
             order_id: Order UUID
+            shipping_details: Optional shipping address details from payment provider
 
         Returns:
             ServiceResult with updated Order
-
-        Example:
-            >>> result = order_service.confirm_payment(order_id)
         """
         try:
             order = Order.objects.select_for_update().get(id=order_id)
@@ -546,12 +614,22 @@ class OrderService(BaseService):
                     f"Cannot confirm payment for order in status '{order.status}'",
                 )
 
+            # Update shipping address if provided
+            if shipping_details:
+                order.shipping_address = shipping_details
+                # Logic to extract country/city for individual fields if needed
+                # For now assume shipping_address JSON field stores the whole dict
+
             # Update payment and order status
             order.payment_status = "paid"
             order.status = "payment_confirmed"
             order.processed_at = timezone.now()
 
-            order.save(update_fields=["payment_status", "status", "processed_at"])
+            update_fields = ["payment_status", "status", "processed_at"]
+            if shipping_details:
+                update_fields.append("shipping_address")
+
+            order.save(update_fields=update_fields)
 
             self.logger.info(f"Confirmed payment for order {order_id}")
 

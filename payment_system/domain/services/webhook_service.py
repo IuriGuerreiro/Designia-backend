@@ -1,27 +1,27 @@
 import logging
+from dataclasses import asdict
 from decimal import Decimal
 from typing import Any, Dict
 
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 
+from infrastructure.events import get_event_bus
 from marketplace.models import Order
-from payment_system.email_utils import (
-    send_failed_refund_notification_email,
-    send_order_cancellation_receipt_email,
-)
+from payment_system.domain.events.definitions import PaymentRefunded, PaymentRefundFailed, PaymentSucceeded
+from payment_system.domain.services.security_service import PaymentAuditLogger
+from payment_system.domain.services.stripe_service import StripeConnectService
 from payment_system.infra.payment_provider.stripe_provider import StripePaymentProvider
 from payment_system.models import PaymentTracker, PaymentTransaction
-from payment_system.security import PaymentAuditLogger
-from payment_system.stripe_service import StripeConnectService  # Keep this for now for account.updated webhook
 from utils.transaction_utils import atomic_with_isolation, retry_on_deadlock
 
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
 
-# Initialize PaymentProvider for use in webhook service
+# Initialize PaymentProvider and EventBus
 payment_provider = StripePaymentProvider()
+event_bus = get_event_bus()
 
 
 class WebhookService:
@@ -54,6 +54,8 @@ class WebhookService:
                 return False
         except Exception as e:
             logger.error(f"WebhookService: Error processing event {event_type}: {str(e)}", exc_info=True)
+            # PaymentAuditLogger moved to domain/services/security_service.py
+            # Assuming it's imported correctly as PaymentAuditLogger
             PaymentAuditLogger.log_security_event(
                 "webhook_processing_error_internal",
                 client_ip,
@@ -69,18 +71,12 @@ class WebhookService:
         metadata = getattr(checkout_session, "metadata", {})
         if metadata and metadata.get("user_id"):
             logger.info(f"WebhookService: Found user_id in checkout session metadata: {metadata.get('user_id')}")
-            # The original handle_sucessfull_checkout will be moved here or called
-            # This logic needs to be moved from views.py
-            # For now, it's a placeholder.
             return WebhookService._handle_successful_checkout_logic(checkout_session)
         else:
             logger.warning("WebhookService: No user_id found in checkout session metadata")
-            # Fallback to retrieve full session if needed, similar to original views.py logic
-            # This logic also needs to be moved from views.py
             session_id = checkout_session.id
             if session_id:
                 try:
-                    # Use payment_provider to retrieve session (no direct stripe calls)
                     full_session = payment_provider.retrieve_checkout_session(session_id)
                     full_metadata = getattr(full_session, "metadata", {})
                     if full_metadata and full_metadata.get("user_id"):
@@ -92,7 +88,9 @@ class WebhookService:
     @staticmethod
     def _handle_successful_checkout_logic(session: Dict[str, Any]) -> bool:
         """
-        Logic for handling a successful checkout, moved from views.handle_sucessfull_checkout.
+        Logic for handling a successful checkout.
+        Now decoupled: Updates Payment Domain and publishes event.
+        Does NOT update Order status directly.
         """
         logger.info("WebhookService: Handling successful checkout...")
 
@@ -108,16 +106,19 @@ class WebhookService:
                     return False
 
                 user = User.objects.get(id=user_id)
-                order = Order.objects.select_for_update().get(id=order_id)
+                # Retrieve order for FK association, but do not lock/modify it here if possible
+                # Or keep select_for_update if we want to ensure existence, but we aren't modifying it.
+                order = Order.objects.get(id=order_id)
 
                 if order.buyer != user:
                     logger.error(f"WebhookService: Order {order_id} does not belong to user {user_id}")
                     return False
 
+                # Extract shipping address to pass in event
                 shipping_details = session.get("shipping_details", {})
                 customer_details = session.get("customer_details", {})
-
                 shipping_address = {}
+
                 if shipping_details and shipping_details.get("address"):
                     shipping_address = {
                         "name": shipping_details.get("name", ""),
@@ -139,12 +140,12 @@ class WebhookService:
                         "country": customer_details["address"].get("country", ""),
                     }
 
-                order.shipping_address = shipping_address
-                order.save(update_fields=["shipping_address"])
-
                 payment_intent_id = session.get("payment_intent", "")
                 session_id = session.get("id", "")
+                amount_total = Decimal(session.get("amount_total", 0)) / 100
+                currency = session.get("currency", "usd").upper()
 
+                # 1. Update PaymentTracker
                 if payment_intent_id:
                     existing_trackers = PaymentTracker.objects.filter(
                         stripe_payment_intent_id=payment_intent_id
@@ -165,11 +166,12 @@ class WebhookService:
                             user=user,
                             transaction_type="payment",
                             status="succeeded",
-                            amount=order.total_amount,
-                            currency="USD",
-                            notes=f"Payment completed via checkout session {session_id} for order {order.id} with {order.items.count()} items",
+                            amount=amount_total,
+                            currency=currency,
+                            notes=f"Payment completed via checkout session {session_id} for order {order.id}",
                         )
 
+                # 2. Update PaymentTransaction (Seller Splits)
                 if payment_intent_id:
                     existing_transactions = PaymentTransaction.objects.filter(
                         stripe_payment_intent_id=payment_intent_id
@@ -200,6 +202,7 @@ class WebhookService:
                                     ]
                                 )
                     else:
+                        # Fallback creation if transactions weren't created at checkout init
                         from collections import defaultdict
 
                         seller_data = defaultdict(
@@ -229,7 +232,7 @@ class WebhookService:
                                 platform_fee=platform_fee,
                                 stripe_fee=stripe_fee,
                                 net_amount=net_amount,
-                                currency="USD",
+                                currency=currency,
                                 item_count=data["item_count"],
                                 item_names=", ".join(data["item_names"]),
                                 payment_received_date=timezone.now(),
@@ -247,6 +250,19 @@ class WebhookService:
                                     "completed_at": str(timezone.now()),
                                 },
                             )
+
+            # 3. Publish Domain Event
+            logger.info(f"WebhookService: Publishing payment.succeeded event for order {order_id}")
+            event_payload = PaymentSucceeded(
+                order_id=str(order_id),
+                transaction_id=payment_intent_id,
+                amount=amount_total,
+                currency=currency,
+                occurred_at=timezone.now(),
+                shipping_details=shipping_address,
+            )
+            event_bus.publish("payment.succeeded", asdict(event_payload))
+
             return True
         except User.DoesNotExist:
             logger.error(f"WebhookService: User not found for session {session.get('id')}")
@@ -271,23 +287,17 @@ class WebhookService:
         refund_status = getattr(refund_object, "status", "")
         refund_amount = getattr(refund_object, "amount", 0) / 100
         refund_metadata = getattr(refund_object, "metadata", {})
+        currency = getattr(refund_object, "currency", "usd").upper()
 
         if refund_status == "succeeded" and getattr(refund_object, "failure_balance_transaction", None) is None:
             order_id = refund_metadata.get("order_id")
             if order_id:
                 try:
                     with atomic_with_isolation("READ COMMITTED"):
-                        order = Order.objects.get(id=order_id)
-                        order.status = "refunded"
-                        order.payment_status = "refunded"
-                        order.save(update_fields=["status", "payment_status"])
-
-                        for item in order.items.all():
-                            product = item.product
-                            product.stock_quantity += item.quantity
-                            product.save(update_fields=["stock_quantity"])
-
-                        payment_transactions = PaymentTransaction.objects.filter(order=order, status="waiting_refund")
+                        # Payment Domain Updates
+                        payment_transactions = PaymentTransaction.objects.filter(
+                            order_id=order_id, status="waiting_refund"
+                        )
                         for transaction in payment_transactions:
                             transaction.status = "refunded"
                             transaction.notes = (
@@ -303,25 +313,36 @@ class WebhookService:
                             existing_tracker.notes = f"{existing_tracker.notes}\nRefund succeeded: {refund_metadata.get('reason', 'Order cancelled')}"
                             existing_tracker.save(update_fields=["status", "notes", "updated_at"])
                         else:
-                            PaymentTracker.objects.create(
-                                stripe_refund_id=refund_id,
-                                order=order,
-                                user=order.buyer,
-                                transaction_type="refund",
-                                status="success_refund",
-                                amount=refund_amount,
-                                currency="USD",
-                                notes=f"Refund succeeded: {refund_metadata.get('reason', 'Order cancelled')}",
-                            )
+                            # Try to find user from metadata
+                            user_id = refund_metadata.get("cancelled_by")
+                            if user_id:
+                                try:
+                                    user = User.objects.get(id=user_id)
+                                    PaymentTracker.objects.create(
+                                        stripe_refund_id=refund_id,
+                                        order_id=order_id,
+                                        user=user,
+                                        transaction_type="refund",
+                                        status="success_refund",
+                                        amount=refund_amount,
+                                        currency=currency,
+                                        notes=f"Refund succeeded: {refund_metadata.get('reason', 'Order cancelled')}",
+                                    )
+                                except User.DoesNotExist:
+                                    logger.warning(f"User {user_id} not found for refund tracker creation")
 
-                        _cancelled_by_id = refund_metadata.get("cancelled_by")
-                        cancellation_reason = refund_metadata.get("reason", "Order cancelled")
-                        send_order_cancellation_receipt_email(order, cancellation_reason, refund_amount)
+                        # Publish Event
+                        event_payload = PaymentRefunded(
+                            order_id=str(order_id),
+                            refund_id=refund_id,
+                            amount=Decimal(refund_amount),
+                            currency=currency,
+                            reason=refund_metadata.get("reason", "Order cancelled"),
+                            occurred_at=timezone.now(),
+                        )
+                        event_bus.publish("payment.refunded", asdict(event_payload))
 
                     return True
-                except Order.DoesNotExist:
-                    logger.error(f"WebhookService: Order {order_id} not found for refund updated event.")
-                    return False
                 except Exception as e:
                     logger.error(f"WebhookService: Error processing refund.updated for order {order_id}: {str(e)}")
                     return False
@@ -338,17 +359,16 @@ class WebhookService:
         failure_reason = getattr(refund_object, "failure_reason", "Unknown")
         refund_amount = getattr(refund_object, "amount", 0) / 100
         refund_metadata = getattr(refund_object, "metadata", {})
+        currency = getattr(refund_object, "currency", "usd").upper()
 
         order_id = refund_metadata.get("order_id")
         if order_id:
             try:
                 with atomic_with_isolation("READ COMMITTED"):
-                    order = Order.objects.get(id=order_id)
-                    order.status = "cancelled"
-                    order.payment_status = "failed_refund"
-                    order.save(update_fields=["status", "payment_status"])
-
-                    payment_transactions = PaymentTransaction.objects.filter(order=order, status="waiting_refund")
+                    # Payment Domain Updates
+                    payment_transactions = PaymentTransaction.objects.filter(
+                        order_id=order_id, status="waiting_refund"
+                    )
                     for transaction in payment_transactions:
                         transaction.status = "failed_refund"
                         transaction.notes = (
@@ -364,26 +384,40 @@ class WebhookService:
                         existing_tracker.notes = f"{existing_tracker.notes}\nRefund failed: {failure_reason}"
                         existing_tracker.save(update_fields=["status", "notes", "updated_at"])
                     else:
-                        PaymentTracker.objects.create(
-                            stripe_refund_id=refund_id,
-                            order=order,
-                            user=order.buyer,
-                            transaction_type="refund",
-                            status="failed_refund",
-                            amount=refund_amount,
-                            currency="USD",
-                            notes=f"Refund failed: {failure_reason}",
-                        )
+                        # Try to create tracker for failure record if we can identify user
+                        user_id = refund_metadata.get("cancelled_by")
+                        if user_id:
+                            try:
+                                user = User.objects.get(id=user_id)
+                                PaymentTracker.objects.create(
+                                    stripe_refund_id=refund_id,
+                                    order_id=order_id,
+                                    user=user,
+                                    transaction_type="refund",
+                                    status="failed_refund",
+                                    amount=refund_amount,
+                                    currency=currency,
+                                    notes=f"Refund failed: {failure_reason}",
+                                )
+                            except User.DoesNotExist:
+                                pass
 
-                    send_failed_refund_notification_email(order, failure_reason, refund_amount)
+                    # Publish Event
+                    event_payload = PaymentRefundFailed(
+                        order_id=str(order_id),
+                        refund_id=refund_id,
+                        reason=failure_reason,
+                        amount=Decimal(refund_amount),
+                        currency=currency,
+                        occurred_at=timezone.now(),
+                    )
+                    event_bus.publish("payment.refund_failed", asdict(event_payload))
+
                 return True
-            except Order.DoesNotExist:
-                logger.error(f"WebhookService: Order {order_id} not found for refund failed event.")
-                return False
             except Exception as e:
                 logger.error(f"WebhookService: Error processing refund.failed for order {order_id}: {str(e)}")
                 return False
-        return False  # Fallback logic is complex, might need to be re-evaluated later
+        return False
 
     @staticmethod
     def _handle_account_updated(event: Dict[str, Any]) -> bool:
