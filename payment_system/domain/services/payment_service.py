@@ -23,8 +23,8 @@ from infrastructure.payments.interface import (
     PaymentProviderInterface,
     PaymentStatus,
 )
+from marketplace.catalog.domain.services.base import BaseService, ErrorCodes, ServiceResult, service_err, service_ok
 from marketplace.models import Order
-from marketplace.services.base import BaseService, ErrorCodes, ServiceResult, service_err, service_ok
 from payment_system.domain.events.definitions import PaymentRefunded, PaymentSucceeded
 from payment_system.infra.observability.metrics import payment_volume_total
 
