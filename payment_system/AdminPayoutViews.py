@@ -13,19 +13,16 @@ Security: All endpoints verify admin role from database (never trust token)
 import logging
 
 from django.contrib.auth import get_user_model
-from django.db.models import Avg, Q, Sum
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from utils.rbac import is_admin
+from utils.transaction_utils import financial_transaction  # Re-import financial_transaction
 
-# Import transaction utilities
-from utils.transaction_utils import financial_transaction
-
-from .models import PaymentTransaction, Payout
 from .serializers import PayoutSummarySerializer
+from .services.reporting_service import ReportingService  # Import ReportingService
 
 
 # Initialize logger
@@ -73,44 +70,28 @@ def admin_list_all_payouts(request):
 
         logger.info(f"Admin {user.username} accessing all payouts list")
 
-        # Start with all payouts
-        payouts = Payout.objects.select_related("seller").all()
+        filters = {
+            "status": request.GET.get("status"),
+            "seller_id": request.GET.get("seller_id"),
+            "from_date": request.GET.get("from_date"),
+            "to_date": request.GET.get("to_date"),
+            "search": request.GET.get("search"),
+        }
+        # Clean filters from None values
+        filters = {k: v for k, v in filters.items() if v is not None}
 
-        # Apply filters
-        payout_status = request.GET.get("status")
-        if payout_status:
-            payouts = payouts.filter(status=payout_status)
-
-        seller_id = request.GET.get("seller_id")
-        if seller_id:
-            payouts = payouts.filter(seller_id=seller_id)
-
-        from_date = request.GET.get("from_date")
-        if from_date:
-            payouts = payouts.filter(created_at__gte=from_date)
-
-        to_date = request.GET.get("to_date")
-        if to_date:
-            payouts = payouts.filter(created_at__lte=to_date)
-
-        search = request.GET.get("search")
-        if search:
-            payouts = payouts.filter(
-                Q(seller__username__icontains=search)
-                | Q(seller__email__icontains=search)
-                | Q(seller__first_name__icontains=search)
-                | Q(seller__last_name__icontains=search)
-            )
-
-        # Order by most recent first
-        payouts = payouts.order_by("-created_at")
+        # Get data from ReportingService
+        report_data = ReportingService.get_payouts_summary(filters)
+        payouts_queryset = report_data["payouts_queryset"]
+        summary_stats = report_data["summary_stats"]
+        status_breakdown = report_data["status_breakdown"]
+        total_count = report_data["total_count"]
 
         # Pagination
         page_size = min(int(request.GET.get("page_size", 50)), 200)
         offset = int(request.GET.get("offset", 0))
 
-        total_count = payouts.count()
-        payouts_page = payouts[offset : offset + page_size]
+        payouts_page = payouts_queryset[offset : offset + page_size]
 
         # Serialize payouts with seller information
         payouts_data = []
@@ -127,16 +108,6 @@ def admin_list_all_payouts(request):
             }
             payouts_data.append(payout_dict)
 
-        # Calculate summary statistics
-        summary_stats = payouts.aggregate(
-            total_amount=Sum("amount_decimal"), average_amount=Avg("amount_decimal"), total_fees=Sum("total_fees")
-        )
-
-        status_breakdown = {}
-        for status_choice, _ in Payout._meta.get_field("status").choices:
-            count = payouts.filter(status=status_choice).count()
-            status_breakdown[status_choice] = count
-
         response_data = {
             "payouts": payouts_data,
             "pagination": {
@@ -147,9 +118,9 @@ def admin_list_all_payouts(request):
                 "has_previous": offset > 0,
             },
             "summary": {
-                "total_amount": str(summary_stats["total_amount"] or 0),
-                "average_amount": str(summary_stats["average_amount"] or 0),
-                "total_fees": str(summary_stats["total_fees"] or 0),
+                "total_amount": str(summary_stats["total_amount"]),
+                "average_amount": str(summary_stats["average_amount"]),
+                "total_fees": str(summary_stats["total_fees"]),
                 "status_breakdown": status_breakdown,
             },
         }
@@ -205,48 +176,29 @@ def admin_list_all_transactions(request):  # noqa: C901
 
         logger.info(f"Admin {user.username} accessing all transactions list")
 
-        # Start with all transactions
-        transactions = PaymentTransaction.objects.select_related("seller", "buyer", "order").all()
+        filters = {
+            "status": request.GET.get("status"),
+            "seller_id": request.GET.get("seller_id"),
+            "buyer_id": request.GET.get("buyer_id"),
+            "from_date": request.GET.get("from_date"),
+            "to_date": request.GET.get("to_date"),
+            "search": request.GET.get("search"),
+        }
+        # Clean filters from None values
+        filters = {k: v for k, v in filters.items() if v is not None}
 
-        # Apply filters
-        transaction_status = request.GET.get("status")
-        if transaction_status:
-            transactions = transactions.filter(status=transaction_status)
-
-        seller_id = request.GET.get("seller_id")
-        if seller_id:
-            transactions = transactions.filter(seller_id=seller_id)
-
-        buyer_id = request.GET.get("buyer_id")
-        if buyer_id:
-            transactions = transactions.filter(buyer_id=buyer_id)
-
-        from_date = request.GET.get("from_date")
-        if from_date:
-            transactions = transactions.filter(created_at__gte=from_date)
-
-        to_date = request.GET.get("to_date")
-        if to_date:
-            transactions = transactions.filter(created_at__lte=to_date)
-
-        search = request.GET.get("search")
-        if search:
-            transactions = transactions.filter(
-                Q(seller__username__icontains=search)
-                | Q(buyer__username__icontains=search)
-                | Q(order__id__icontains=search)
-                | Q(stripe_payment_intent_id__icontains=search)
-            )
-
-        # Order by most recent first
-        transactions = transactions.order_by("-created_at")
+        # Get data from ReportingService
+        report_data = ReportingService.get_transaction_report(filters)
+        transactions_queryset = report_data["transactions_queryset"]
+        summary_stats = report_data["summary_stats"]
+        status_breakdown = report_data["status_breakdown"]
+        total_count = report_data["total_count"]
 
         # Pagination
         page_size = min(int(request.GET.get("page_size", 50)), 200)
         offset = int(request.GET.get("offset", 0))
 
-        total_count = transactions.count()
-        transactions_page = transactions[offset : offset + page_size]
+        transactions_page = transactions_queryset[offset : offset + page_size]
 
         # Serialize transactions
         transactions_data = []
@@ -302,20 +254,6 @@ def admin_list_all_transactions(request):  # noqa: C901
             }
             transactions_data.append(transaction_dict)
 
-        # Calculate summary statistics
-        summary_stats = transactions.aggregate(
-            total_gross=Sum("gross_amount"),
-            total_net=Sum("net_amount"),
-            total_platform_fees=Sum("platform_fee"),
-            total_stripe_fees=Sum("stripe_fee"),
-            average_transaction=Avg("gross_amount"),
-        )
-
-        status_breakdown = {}
-        for status_choice in ["held", "completed", "released", "failed", "refunded"]:
-            count = transactions.filter(status=status_choice).count()
-            status_breakdown[status_choice] = count
-
         response_data = {
             "transactions": transactions_data,
             "pagination": {
@@ -326,11 +264,11 @@ def admin_list_all_transactions(request):  # noqa: C901
                 "has_previous": offset > 0,
             },
             "summary": {
-                "total_gross": str(summary_stats["total_gross"] or 0),
-                "total_net": str(summary_stats["total_net"] or 0),
-                "total_platform_fees": str(summary_stats["total_platform_fees"] or 0),
-                "total_stripe_fees": str(summary_stats["total_stripe_fees"] or 0),
-                "average_transaction": str(summary_stats["average_transaction"] or 0),
+                "total_gross": str(summary_stats["total_gross"]),
+                "total_net": str(summary_stats["total_net"]),
+                "total_platform_fees": str(summary_stats["total_platform_fees"]),
+                "total_stripe_fees": str(summary_stats["total_stripe_fees"]),
+                "average_transaction": str(summary_stats["average_transaction"]),
                 "status_breakdown": status_breakdown,
             },
         }

@@ -1,25 +1,31 @@
 """
 Stripe Connect service for seller account management.
 Handles Stripe account creation, validation, and session management for sellers.
+Refactored to use PaymentProvider interface.
 """
 
 import logging
 
-import stripe
-from django.conf import settings
 from django.contrib.auth import get_user_model
+
+from payment_system.infra.payment_provider.stripe_provider import StripePaymentProvider
 
 
 logger = logging.getLogger(__name__)
-
-# Configure Stripe API key
-stripe.api_key = getattr(settings, "STRIPE_SECRET_KEY", "")
 
 User = get_user_model()
 
 
 class StripeConnectService:
     """Service class for managing Stripe Connect accounts for sellers."""
+
+    _provider = None
+
+    @classmethod
+    def get_provider(cls):
+        if cls._provider is None:
+            cls._provider = StripePaymentProvider()
+        return cls._provider
 
     @staticmethod
     def validate_seller_requirements(user):
@@ -146,8 +152,8 @@ class StripeConnectService:
         logger.info(f"📊 SESSION VALIDATION RESULT: {result}")
         return result
 
-    @staticmethod
-    def create_stripe_account(user, country="US", business_type="individual"):
+    @classmethod
+    def create_stripe_account(cls, user, country="US", business_type="individual"):
         """
         Create a Stripe Express account for the seller.
 
@@ -164,7 +170,7 @@ class StripeConnectService:
         try:
             # First validate user requirements
             logger.info("🔍 Validating user requirements...")
-            validation = StripeConnectService.validate_seller_requirements(user)
+            validation = cls.validate_seller_requirements(user)
             logger.info(f"  Validation result: {validation}")
 
             if not validation["valid"]:
@@ -173,43 +179,19 @@ class StripeConnectService:
 
             logger.info("  User validation passed, creating Stripe account...")
 
-            # Prepare account creation parameters
-            account_params = {
-                "country": country,
-                "email": user.email,
-                "business_type": business_type,
-                "capabilities": {
-                    "card_payments": {"requested": True},
-                    "transfers": {"requested": True},
-                },
-                "settings": {
-                    "payouts": {
-                        "schedule": {
-                            "interval": "manual",  # Marketplace controls payouts
-                        }
-                    }
-                },
-                "controller": {
-                    "requirement_collection": "application",  # Required for disable_stripe_user_authentication
-                    "losses": {"payments": "application"},  # Application controls loss handling
-                    "fees": {"payer": "application"},  # Application controls fee collection
-                    "stripe_dashboard": {"type": "none"},  # Must be 'none' when controlling requirements
-                },
-            }
+            # Use provider to create account
+            provider = cls.get_provider()
 
-            # Add individual info for individual accounts
+            # Prepare kwargs for individual info if needed
+            kwargs = {}
             if business_type == "individual":
-                account_params["individual"] = {
-                    "email": user.email,
-                    "first_name": user.first_name or "",
-                    "last_name": user.last_name or "",
-                }
+                kwargs["first_name"] = user.first_name or ""
+                kwargs["last_name"] = user.last_name or ""
 
-            logger.debug(f"📝 Account creation parameters: {account_params}")
-
-            # Create Stripe Express account with controller (type is implied)
-            logger.info("🚀 Calling Stripe Account.create API...")
-            account = stripe.Account.create(**account_params)
+            logger.info("🚀 Calling PaymentProvider.create_connected_account...")
+            account = provider.create_connected_account(
+                email=user.email, country=country, business_type=business_type, **kwargs
+            )
 
             logger.info("  Stripe account created successfully!")
             logger.info(f"🆔 Account ID: {account.id}")
@@ -227,24 +209,13 @@ class StripeConnectService:
 
             return {"success": True, "account_id": account.id, "account": account}
 
-        except stripe.error.StripeError as e:
-            logger.error(f" STRIPE API ERROR: {str(e)}")
-            logger.error(f"🔍 Error type: {type(e).__name__}")
-            logger.error(f"📄 Error details: {e.user_message if hasattr(e, 'user_message') else 'No user message'}")
-            if hasattr(e, "error") and hasattr(e.error, "code"):
-                logger.error(f"🏷️ Error code: {e.error.code}")
-            if hasattr(e, "error") and hasattr(e.error, "param"):
-                logger.error(f"📌 Error param: {e.error.param}")
-
-            logger.error(f"Stripe error creating account for user {user.email}: {str(e)}")
-            return {"success": False, "errors": [f"Failed to create Stripe account: {str(e)}"]}
         except Exception as e:
             logger.exception(f" UNEXPECTED ERROR creating Stripe account for user {user.email}: {str(e)}")
             logger.error(f"Unexpected error creating Stripe account for user {user.email}: {str(e)}")
             return {"success": False, "errors": [f"An unexpected error occurred: {str(e)}"]}
 
-    @staticmethod
-    def create_account_session(user):
+    @classmethod
+    def create_account_session(cls, user):
         """
         Create an Account Session for seller onboarding using Stripe Connect JS.
 
@@ -259,7 +230,7 @@ class StripeConnectService:
         try:
             # Validate user requirements for session access (allows existing accounts)
             logger.info("🔍 Validating user session requirements...")
-            validation = StripeConnectService.validate_seller_session_requirements(user)
+            validation = cls.validate_seller_session_requirements(user)
             logger.info(f"  Session validation result: {validation}")
 
             if not validation["valid"]:
@@ -275,22 +246,20 @@ class StripeConnectService:
 
             logger.info("  User has valid Stripe account, creating account session...")
 
-            # Prepare account session parameters
-            session_params = {
-                "account": user.stripe_account_id,
-                "components": {
-                    "account_onboarding": {
-                        "enabled": True,
-                        "features": {"disable_stripe_user_authentication": True, "external_account_collection": True},
-                    }
-                },
-                "settings": {"payouts": {"schedule": {"interval": "manual"}}},  # 🔑 disables automatic payouts
+            provider = cls.get_provider()
+
+            components = {
+                "account_onboarding": {
+                    "enabled": True,
+                    "features": {"disable_stripe_user_authentication": True, "external_account_collection": True},
+                }
             }
+            settings_params = {"payouts": {"schedule": {"interval": "manual"}}}  # 🔑 disables automatic payouts
 
-            logger.debug(f"📝 Account session parameters: {session_params}")
-
-            logger.info("🚀 Calling Stripe AccountSession.create API...")
-            account_session = stripe.AccountSession.create(**session_params)
+            logger.info("🚀 Calling PaymentProvider.create_account_session...")
+            account_session = provider.create_account_session(
+                account_id=user.stripe_account_id, components=components, settings=settings_params
+            )
 
             logger.info("  Account session created successfully!")
             logger.debug(
@@ -306,24 +275,13 @@ class StripeConnectService:
                 "account_id": user.stripe_account_id,
             }
 
-        except stripe.error.StripeError as e:
-            logger.error(f" STRIPE API ERROR in session creation: {str(e)}")
-            logger.error(f"🔍 Error type: {type(e).__name__}")
-            logger.error(f"📄 Error details: {e.user_message if hasattr(e, 'user_message') else 'No user message'}")
-            if hasattr(e, "error") and hasattr(e.error, "code"):
-                logger.error(f"🏷️ Error code: {e.error.code}")
-            if hasattr(e, "error") and hasattr(e.error, "param"):
-                logger.error(f"📌 Error param: {e.error.param}")
-
-            logger.error(f"Stripe error creating account session for user {user.email}: {str(e)}")
-            return {"success": False, "errors": [f"Failed to create account session: {str(e)}"]}
         except Exception as e:
             logger.exception(f" UNEXPECTED ERROR in session creation for user {user.email}: {str(e)}")
             logger.error(f"Unexpected error creating account session for user {user.email}: {str(e)}")
             return {"success": False, "errors": [f"An unexpected error occurred: {str(e)}"]}
 
-    @staticmethod
-    def get_account_status(user):
+    @classmethod
+    def get_account_status(cls, user):
         """
         Get the status of a user's Stripe account.
 
@@ -337,7 +295,8 @@ class StripeConnectService:
             if not user.stripe_account_id:
                 return {"success": True, "has_account": False, "status": "no_account"}
 
-            account = stripe.Account.retrieve(user.stripe_account_id)
+            provider = cls.get_provider()
+            account = provider.retrieve_account(user.stripe_account_id)
 
             return {
                 "success": True,
@@ -351,9 +310,6 @@ class StripeConnectService:
                 "account_data": account,
             }
 
-        except stripe.error.StripeError as e:
-            logger.error(f"Stripe error getting account status for user {user.email}: {str(e)}")
-            return {"success": False, "errors": [f"Failed to get account status: {str(e)}"]}
         except Exception as e:
             logger.error(f"Unexpected error getting account status for user {user.email}: {str(e)}")
             return {"success": False, "errors": [f"An unexpected error occurred: {str(e)}"]}
@@ -398,14 +354,6 @@ class StripeConnectService:
 def create_seller_account(user, country="US", business_type="individual"):
     """
     Convenience function to create a Stripe account for a seller.
-
-    Args:
-        user (CustomUser): The user to create account for
-        country (str): Country code
-        business_type (str): Business type
-
-    Returns:
-        dict: Creation result
     """
     return StripeConnectService.create_stripe_account(user, country, business_type)
 
@@ -413,12 +361,6 @@ def create_seller_account(user, country="US", business_type="individual"):
 def create_seller_account_session(user):
     """
     Convenience function to create an account session for seller onboarding.
-
-    Args:
-        user (CustomUser): The user with Stripe account
-
-    Returns:
-        dict: Account session creation result
     """
     return StripeConnectService.create_account_session(user)
 
@@ -426,75 +368,5 @@ def create_seller_account_session(user):
 def validate_seller_eligibility(user):
     """
     Convenience function to validate seller eligibility.
-
-    Args:
-        user (CustomUser): The user to validate
-
-    Returns:
-        dict: Validation result
     """
     return StripeConnectService.validate_seller_requirements(user)
-
-
-def create_transfer_to_connected_account(amount, currency, destination_account_id, transfer_group=None, metadata=None):
-    """
-    Create a transfer to a connected Stripe account.
-
-    Args:
-        amount (int): Amount in cents to transfer
-        currency (str): Currency code (e.g., 'usd')
-        destination_account_id (str): Stripe connected account ID to transfer to
-        transfer_group (str, optional): Transfer group ID for grouping related transfers
-        metadata (dict, optional): Additional metadata for the transfer
-
-    Returns:
-        dict: Transfer result with success status and transfer data
-    """
-    logger.info(f"Creating transfer of {amount} {currency} to account {destination_account_id}")
-
-    try:
-        # Validate inputs
-        if not destination_account_id:
-            return {"success": False, "errors": ["Destination account ID is required"]}
-
-        if amount <= 0:
-            return {"success": False, "errors": ["Transfer amount must be greater than 0"]}
-
-        # Prepare transfer parameters
-        transfer_params = {
-            "amount": amount,
-            "currency": currency.lower(),
-            "destination": destination_account_id,
-        }
-
-        # Add optional parameters
-        if transfer_group:
-            transfer_params["transfer_group"] = transfer_group
-
-        if metadata:
-            transfer_params["metadata"] = metadata
-
-        logger.info(f"Transfer parameters: {transfer_params}")
-        # Create the transfer
-        transfer = stripe.Transfer.create(**transfer_params)
-
-        logger.info(f"Transfer created successfully: {transfer.id}")
-        logger.info(f"Transfer status: {transfer.object}")
-
-        return {
-            "success": True,
-            "transfer_id": transfer.id,
-            "amount": transfer.amount,
-            "currency": transfer.currency,
-            "destination": transfer.destination,
-            "transfer_group": transfer.transfer_group,
-            "created": transfer.created,
-            "transfer_data": transfer,
-        }
-
-    except stripe.error.StripeError as e:
-        logger.error(f"Stripe error creating transfer: {str(e)}")
-        return {"success": False, "errors": [f"Failed to create transfer: {str(e)}"]}
-    except Exception as e:
-        logger.error(f"Unexpected error creating transfer: {str(e)}")
-        return {"success": False, "errors": [f"An unexpected error occurred: {str(e)}"]}

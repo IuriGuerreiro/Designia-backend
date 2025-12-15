@@ -168,11 +168,12 @@ class StripeSecurityUtils:
     def verify_webhook_signature(payload: bytes, signature: str, secret: str) -> bool:
         """Verify Stripe webhook signature"""
         try:
-            import stripe
+            from payment_system.infra.payment_provider.stripe_provider import StripePaymentProvider
 
-            stripe.Webhook.construct_event(payload, signature, secret)
+            provider = StripePaymentProvider()
+            provider.verify_webhook(payload, signature, secret)
             return True
-        except (ValueError, stripe.error.SignatureVerificationError):
+        except (ValueError, Exception):
             return False
 
     @staticmethod

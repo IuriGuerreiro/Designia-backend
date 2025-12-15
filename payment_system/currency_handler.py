@@ -1,21 +1,19 @@
 """
 Currency handling system for Stripe transfers with balance checking and currency conversion.
 Now uses local database storage for exchange rates instead of external APIs.
+Refactored to use PaymentProvider interface.
 """
 
 import logging
 from decimal import Decimal
 from typing import Dict, List, Tuple
 
-import stripe
-from django.conf import settings
 from django.utils import timezone
+
+from payment_system.infra.payment_provider.stripe_provider import StripePaymentProvider
 
 
 logger = logging.getLogger(__name__)
-
-# Configure Stripe
-stripe.api_key = settings.STRIPE_SECRET_KEY
 
 
 class CurrencyHandler:
@@ -27,6 +25,14 @@ class CurrencyHandler:
     # Major currencies in order of preference
     PREFERRED_CURRENCIES = ["usd", "eur", "gbp", "cad", "aud", "jpy", "chf", "sek", "nok", "dkk"]
 
+    _provider = None
+
+    @classmethod
+    def get_provider(cls):
+        if cls._provider is None:
+            cls._provider = StripePaymentProvider()
+        return cls._provider
+
     @staticmethod
     def get_stripe_balance() -> Dict:
         """
@@ -37,7 +43,8 @@ class CurrencyHandler:
         """
         try:
             logger.debug("[STRIPE_DEBUG] Retrieving Stripe account balance...")
-            balance = stripe.Balance.retrieve()
+            provider = CurrencyHandler.get_provider()
+            balance = provider.retrieve_balance()
 
             logger.debug("[STRIPE_DEBUG] Stripe balance retrieved successfully")
             logger.debug(f"[STRIPE_DEBUG] Available currencies: {len(balance.available)}")
@@ -68,8 +75,8 @@ class CurrencyHandler:
 
             logger.info(f"Retrieved Stripe balance: {len(balance.available)} currencies available")
             return balance
-        except stripe.error.StripeError as e:
-            logger.error(f"[STRIPE_DEBUG] Stripe API error: {type(e).__name__}: {e}")
+        except Exception as e:
+            logger.error(f"[STRIPE_DEBUG] API error: {type(e).__name__}: {e}")
             logger.error(f"Failed to retrieve Stripe balance: {e}")
             raise
 
@@ -494,7 +501,8 @@ def switch_currency(preferred_currency: str, required_amount_cents: int, destina
 
         # Check if destination account supports the selected currency
         try:
-            dest_account = stripe.Account.retrieve(destination_account_id)
+            provider = CurrencyHandler.get_provider()
+            dest_account = provider.retrieve_account(destination_account_id)
             dest_country = dest_account.country
 
             # Log destination account info (could add currency compatibility check here)
@@ -502,7 +510,7 @@ def switch_currency(preferred_currency: str, required_amount_cents: int, destina
                 f"Destination account country: {dest_country}, selected currency: {currency_result['use_currency']}"
             )
 
-        except stripe.error.StripeError as e:
+        except Exception as e:
             logger.warning(f"Could not verify destination account currency compatibility: {e}")
 
         # Check if conversion was needed and return simplified structure
