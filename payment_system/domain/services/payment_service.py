@@ -26,6 +26,7 @@ from infrastructure.payments.interface import (
 from marketplace.models import Order
 from marketplace.services.base import BaseService, ErrorCodes, ServiceResult, service_err, service_ok
 from payment_system.domain.events.definitions import PaymentRefunded, PaymentSucceeded
+from payment_system.infra.observability.metrics import payment_volume_total
 
 
 logger = logging.getLogger(__name__)
@@ -156,6 +157,11 @@ class PaymentService(BaseService):
                 shipping_details={},  # Shipping details might be in intent, need extraction if available
             )
             self.event_bus.publish("payment.succeeded", asdict(event_payload))
+
+            # Increment metric
+            payment_volume_total.labels(currency=event_payload.currency, status="succeeded").inc(
+                float(event_payload.amount)
+            )
 
             return service_ok(True)
 

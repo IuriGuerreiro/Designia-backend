@@ -5,7 +5,7 @@ from typing import Any, Dict
 from django.contrib.auth import get_user_model
 from django.db.models import Avg, Q, Sum
 
-from ..models import PaymentTransaction, Payout
+from payment_system.models import PaymentTransaction, Payout
 
 
 logger = logging.getLogger(__name__)

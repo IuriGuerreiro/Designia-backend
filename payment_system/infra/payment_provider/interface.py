@@ -70,3 +70,8 @@ class PaymentProvider(ABC):
     def retrieve_balance(self) -> Dict[str, Any]:
         """Retrieve the platform's balance."""
         pass
+
+    @abstractmethod
+    def retrieve_payment_intent(self, payment_intent_id: str) -> Dict[str, Any]:
+        """Retrieve a payment intent by ID."""
+        pass

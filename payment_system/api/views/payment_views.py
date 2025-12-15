@@ -16,6 +16,7 @@ from marketplace.models import Cart, Order, OrderItem
 from payment_system.domain.services import stripe_events
 from payment_system.domain.services.security_service import PaymentAuditLogger
 from payment_system.domain.services.webhook_service import WebhookService
+from payment_system.infra.observability.metrics import payout_volume_total
 from payment_system.infra.payment_provider.stripe_provider import StripePaymentProvider
 from payment_system.models import PaymentTracker, PaymentTransaction, Payout, PayoutItem
 from utils.transaction_utils import (
@@ -522,6 +523,10 @@ def update_payout_from_webhook(event, payout_object):  # noqa: C901
                                 payment_transfer.save(update_fields=["payed_out", "updated_at"])
                                 transfers_updated += 1
                                 print(f"💰 Marked transfer {payment_transfer.id} as paid out")
+                                # Increment payout volume metric
+                                payout_volume_total.labels(currency=payout.currency, status="paid").inc(
+                                    float(payment_transfer.net_amount)
+                                )
 
                         logger.info(
                             f"[SUCCESS] Marked {transfers_updated} transfers as paid out for payout {payout.id}"

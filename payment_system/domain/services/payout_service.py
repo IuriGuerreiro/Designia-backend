@@ -7,10 +7,10 @@ from django.contrib.auth import get_user_model
 from django.db.models import Avg, Sum
 from django.utils import timezone
 
+from payment_system.infra.observability.metrics import active_holds_value, payout_volume_total
+from payment_system.infra.payment_provider.stripe_provider import StripePaymentProvider
+from payment_system.models import PaymentTransaction, Payout, PayoutItem
 from utils.transaction_utils import atomic_with_isolation
-
-from ..infra.payment_provider.stripe_provider import StripePaymentProvider
-from ..models import PaymentTransaction, Payout, PayoutItem
 
 
 logger = logging.getLogger(__name__)
@@ -165,6 +165,8 @@ class PayoutService:
         logger.info(
             f"Successfully prepared hold summary with {len(holds_data)} holds, total pending: ${total_pending_amount}"
         )
+        # Set gauge for active holds
+        active_holds_value.labels(currency="USD").set(float(total_pending_amount))
 
         return {
             "success": True,
@@ -542,6 +544,9 @@ class PayoutService:
 
             # Update reconciliation status using the enhanced tracking method
             payout.update_reconciliation_status(new_status, notes)
+
+            if new_status == "paid":
+                payout_volume_total.labels(currency=payout.currency, status="paid").inc(float(payout.amount_decimal))
 
             # Track the operation performance
             operation_duration = (timezone.now() - start_time).total_seconds() * 1000

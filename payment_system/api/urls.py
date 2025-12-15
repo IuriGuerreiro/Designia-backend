@@ -1,6 +1,6 @@
 from django.urls import path
 
-from . import AdminPayoutViews, PayoutViews, views
+from .views import admin_views as AdminPayoutViews, payment_views as views, payout_views as PayoutViews
 
 
 app_name = "payment_system"

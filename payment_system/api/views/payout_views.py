@@ -19,12 +19,11 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from payment_system.api.serializers.payment_serializers import PayoutSerializer, PayoutSummarySerializer
 from payment_system.domain.services.payout_service import PayoutService
 
 # Import transaction utilities
 from utils.transaction_utils import financial_transaction, retry_on_deadlock
-
-from .serializers import PayoutSerializer, PayoutSummarySerializer
 
 
 # Initialize logger

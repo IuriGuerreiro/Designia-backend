@@ -18,11 +18,10 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from payment_system.api.serializers.payment_serializers import PayoutSummarySerializer
 from payment_system.domain.services.reporting_service import ReportingService  # Import ReportingService
 from utils.rbac import is_admin
 from utils.transaction_utils import financial_transaction  # Re-import financial_transaction
-
-from .serializers import PayoutSummarySerializer
 
 
 # Initialize logger

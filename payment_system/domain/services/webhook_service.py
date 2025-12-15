@@ -6,11 +6,13 @@ from typing import Any, Dict
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 
+from authentication.infra.observability.tracing import tracer
 from infrastructure.events import get_event_bus
 from marketplace.models import Order
 from payment_system.domain.events.definitions import PaymentRefunded, PaymentRefundFailed, PaymentSucceeded
 from payment_system.domain.services.security_service import PaymentAuditLogger
 from payment_system.domain.services.stripe_service import StripeConnectService
+from payment_system.infra.observability.metrics import payment_volume_total
 from payment_system.infra.payment_provider.stripe_provider import StripePaymentProvider
 from payment_system.models import PaymentTracker, PaymentTransaction
 from utils.transaction_utils import atomic_with_isolation, retry_on_deadlock
@@ -32,36 +34,38 @@ class WebhookService:
         Returns True if the event was handled, False otherwise.
         """
         event_type = event.get("type")
-        logger.info(f"WebhookService: Processing event type: {event_type}")
+        with tracer.start_as_current_span("WebhookService.process_event") as span:
+            span.set_attribute("event.type", event_type)
+            span.set_attribute("client.ip", client_ip)
+            logger.info(f"WebhookService: Processing event type: {event_type}")
 
-        try:
-            if event_type == "checkout.session.completed":
-                return WebhookService._handle_checkout_session_completed(event)
-            elif event_type == "refund.updated":
-                return WebhookService._handle_refund_updated(event)
-            elif event_type == "refund.failed":
-                return WebhookService._handle_refund_failed(event)
-            elif event_type == "account.updated":
-                return WebhookService._handle_account_updated(event)
-            elif event_type == "transfer.created":
-                return WebhookService._handle_transfer_created(event)
-            elif event_type == "payment_intent.succeeded":
-                return WebhookService._handle_payment_intent_succeeded(event)
-            elif event_type == "payment_intent.payment_failed":
-                return WebhookService._handle_payment_intent_failed(event)
-            else:
-                logger.info(f"WebhookService: Unhandled event type: {event_type}")
+            try:
+                if event_type == "checkout.session.completed":
+                    return WebhookService._handle_checkout_session_completed(event)
+                elif event_type == "refund.updated":
+                    return WebhookService._handle_refund_updated(event)
+                elif event_type == "refund.failed":
+                    return WebhookService._handle_refund_failed(event)
+                elif event_type == "account.updated":
+                    return WebhookService._handle_account_updated(event)
+                elif event_type == "transfer.created":
+                    return WebhookService._handle_transfer_created(event)
+                elif event_type == "payment_intent.succeeded":
+                    return WebhookService._handle_payment_intent_succeeded(event)
+                elif event_type == "payment_intent.payment_failed":
+                    return WebhookService._handle_payment_intent_failed(event)
+                else:
+                    logger.info(f"WebhookService: Unhandled event type: {event_type}")
+                    return False
+            except Exception as e:
+                span.record_exception(e)  # Record exception in span
+                logger.error(f"WebhookService: Error processing event {event_type}: {str(e)}", exc_info=True)
+                PaymentAuditLogger.log_security_event(
+                    "webhook_processing_error_internal",
+                    client_ip,
+                    details=f"Internal error for event {event_type}: {str(e)}",
+                )
                 return False
-        except Exception as e:
-            logger.error(f"WebhookService: Error processing event {event_type}: {str(e)}", exc_info=True)
-            # PaymentAuditLogger moved to domain/services/security_service.py
-            # Assuming it's imported correctly as PaymentAuditLogger
-            PaymentAuditLogger.log_security_event(
-                "webhook_processing_error_internal",
-                client_ip,
-                details=f"Internal error for event {event_type}: {str(e)}",
-            )
-            return False
 
     @staticmethod
     def _handle_checkout_session_completed(event: Dict[str, Any]) -> bool:
@@ -262,7 +266,9 @@ class WebhookService:
                 shipping_details=shipping_address,
             )
             event_bus.publish("payment.succeeded", asdict(event_payload))
-
+            payment_volume_total.labels(currency=event_payload.currency, status="succeeded").inc(
+                float(event_payload.amount)
+            )
             return True
         except User.DoesNotExist:
             logger.error(f"WebhookService: User not found for session {session.get('id')}")

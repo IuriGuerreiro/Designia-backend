@@ -34,13 +34,14 @@ urlpatterns = [
     path("api/auth/", include("authentication.urls")),
     path("api/marketplace/", include("marketplace.urls")),
     path("api/activity/", include("activity.urls")),
-    path("api/payments/", include("payment_system.urls", namespace="payment_system")),
+    path("api/payments/", include("payment_system.api.urls", namespace="payment_system")),
     path("api/chat/", include("chat.urls")),
     path("api/system/", include("system_info.urls")),
     path("api/ar/", include("ar.urls")),
     # Internal APIs (service-to-service - NOT exposed through gateway)
     path("internal/auth/", include("authentication.api.urls.internal_urls")),
     path("internal/marketplace/", include("marketplace.api.urls.internal_urls")),
+    path("internal/payments/", include("payment_system.api.urls.internal_urls")),
     path("admin/ar/models/", ProductARModelAdminListView.as_view(), name="admin-ar-models"),
     path(
         "admin/ar/models/<int:pk>/download/",

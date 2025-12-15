@@ -1,7 +1,7 @@
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
-from .models import PaymentTracker, Payout, PayoutItem
+from payment_system.models import PaymentTracker, Payout, PayoutItem
 
 
 User = get_user_model()
