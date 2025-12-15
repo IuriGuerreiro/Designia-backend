@@ -16,7 +16,7 @@ urlpatterns = [
     # Order Management
     path("orders/<uuid:order_id>/cancel/", views.cancel_order, name="cancel_order"),
     # Webhook endpoints
-    path("stripe_webhook/", views.stripe_webhook, name="stripe_webhook"),
+    path("stripe_webhook/", views.StripeWebhookView.as_view(), name="stripe_webhook"),
     path("stripe_webhook/connect/", views.stripe_webhook_connect, name="stripe_webhook_connect"),
     # Stripe Connect endpoints
     path("stripe/account/", views.stripe_account, name="stripe_account"),

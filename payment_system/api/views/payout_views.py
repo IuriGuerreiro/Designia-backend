@@ -14,12 +14,24 @@ Webhook handling remains in views.py for security isolation.
 import logging
 
 from django.contrib.auth import get_user_model
+from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, OpenApiTypes, extend_schema
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from payment_system.api.serializers.payment_serializers import PayoutSerializer, PayoutSummarySerializer
+from payment_system.api.serializers.request_serializers import ReconciliationUpdateRequestSerializer
+from payment_system.api.serializers.response_serializers import (
+    ErrorResponseSerializer,
+    PaymentHoldsResponseSerializer,
+    PayoutAnalyticsResponseSerializer,
+    PayoutDetailResponseSerializer,
+    PayoutListResponseSerializer,
+    PayoutOrdersResponseSerializer,
+    PerformanceReportResponseSerializer,
+    ReconciliationUpdateResponseSerializer,
+)
 from payment_system.domain.services.payout_service import PayoutService
 
 # Import transaction utilities
@@ -40,6 +52,15 @@ User = get_user_model()
 # ===============================================================================
 
 
+@extend_schema(
+    operation_id="payout_create_seller_payout",
+    summary="Create Seller Payout (Disabled)",
+    description="Manual payout creation is disabled. This endpoint returns an error.",
+    responses={
+        410: OpenApiResponse(response=ErrorResponseSerializer, description="Payout creation disabled"),
+    },
+    tags=["Payouts"],
+)
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def seller_payout(request):
@@ -58,6 +79,16 @@ def seller_payout(request):
     )
 
 
+@extend_schema(
+    operation_id="payout_get_holds",
+    summary="Get Payment Holds",
+    description="Retrieve all held transactions for the authenticated seller.",
+    responses={
+        200: OpenApiResponse(response=PaymentHoldsResponseSerializer, description="Holds retrieved"),
+        403: OpenApiResponse(response=ErrorResponseSerializer, description="Not authorized"),
+    },
+    tags=["Payouts"],
+)
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 @financial_transaction
@@ -142,6 +173,45 @@ def get_seller_payment_holds(request):
 # ===============================================================================
 
 
+@extend_schema(
+    operation_id="payout_list",
+    summary="List Payouts",
+    description="List all payouts for the authenticated seller.",
+    parameters=[
+        OpenApiParameter(
+            name="page_size",
+            type=OpenApiTypes.INT,
+            location=OpenApiParameter.QUERY,
+            description="Results per page (default 20, max 100)",
+        ),
+        OpenApiParameter(
+            name="offset", type=OpenApiTypes.INT, location=OpenApiParameter.QUERY, description="Pagination offset"
+        ),
+        OpenApiParameter(
+            name="status",
+            type=OpenApiTypes.STR,
+            location=OpenApiParameter.QUERY,
+            description="Filter by status (optional)",
+        ),
+        OpenApiParameter(
+            name="from_date",
+            type=OpenApiTypes.DATE,
+            location=OpenApiParameter.QUERY,
+            description="Filter from date (YYYY-MM-DD)",
+        ),
+        OpenApiParameter(
+            name="to_date",
+            type=OpenApiTypes.DATE,
+            location=OpenApiParameter.QUERY,
+            description="Filter to date (YYYY-MM-DD)",
+        ),
+    ],
+    responses={
+        200: OpenApiResponse(response=PayoutListResponseSerializer, description="List of payouts"),
+        403: OpenApiResponse(response=ErrorResponseSerializer, description="Not authorized"),
+    },
+    tags=["Payouts"],
+)
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 @financial_transaction
@@ -212,6 +282,16 @@ def user_payouts_list(request):
         )
 
 
+@extend_schema(
+    operation_id="payout_detail",
+    summary="Get Payout Detail",
+    description="Get detailed information for a specific payout.",
+    responses={
+        200: OpenApiResponse(response=PayoutDetailResponseSerializer, description="Payout detail"),
+        404: OpenApiResponse(response=ErrorResponseSerializer, description="Payout not found"),
+    },
+    tags=["Payouts"],
+)
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 @financial_transaction
@@ -251,6 +331,16 @@ def payout_detail(request, payout_id):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 @financial_transaction
+@extend_schema(
+    operation_id="payout_orders",
+    summary="Get Payout Orders",
+    description="List all orders included in a specific payout.",
+    responses={
+        200: OpenApiResponse(response=PayoutOrdersResponseSerializer, description="Payout orders"),
+        404: OpenApiResponse(response=ErrorResponseSerializer, description="Payout not found"),
+    },
+    tags=["Payouts"],
+)
 def payout_orders(request, payout_id):
     """
     Retrieve all orders included in a specific payout.
@@ -354,6 +444,16 @@ def payout_orders(request, payout_id):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 @retry_on_deadlock(max_retries=3, delay=0.01, backoff=2.0)
+@extend_schema(
+    operation_id="payout_analytics",
+    summary="Payout Analytics",
+    description="Get comprehensive payout analytics and metrics.",
+    responses={
+        200: OpenApiResponse(response=PayoutAnalyticsResponseSerializer, description="Analytics data"),
+        500: OpenApiResponse(response=ErrorResponseSerializer, description="Internal error"),
+    },
+    tags=["Analytics"],
+)
 def payout_analytics_dashboard(request):
     """
     Comprehensive payout analytics dashboard with enhanced tracking metrics.
@@ -384,6 +484,16 @@ def payout_analytics_dashboard(request):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 @retry_on_deadlock(max_retries=3, delay=0.01, backoff=2.0)
+@extend_schema(
+    operation_id="payout_performance",
+    summary="Payout Performance Report",
+    description="Get detailed performance metrics for payout operations.",
+    responses={
+        200: OpenApiResponse(response=PerformanceReportResponseSerializer, description="Performance report"),
+        500: OpenApiResponse(response=ErrorResponseSerializer, description="Internal error"),
+    },
+    tags=["Analytics"],
+)
 def payout_performance_report(request):  # noqa: C901
     """
     Detailed performance report for payout operations with enhanced metrics.
@@ -414,6 +524,18 @@ def payout_performance_report(request):  # noqa: C901
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 @retry_on_deadlock(max_retries=3, delay=0.01, backoff=2.0)
+@extend_schema(
+    operation_id="payout_reconciliation_update",
+    summary="Update Reconciliation Status",
+    description="Update reconciliation status for a payout.",
+    request=ReconciliationUpdateRequestSerializer,
+    responses={
+        200: OpenApiResponse(response=ReconciliationUpdateResponseSerializer, description="Updated successfully"),
+        400: OpenApiResponse(response=ErrorResponseSerializer, description="Invalid status"),
+        404: OpenApiResponse(response=ErrorResponseSerializer, description="Payout not found"),
+    },
+    tags=["Payouts"],
+)
 def update_payout_reconciliation(request, payout_id):
     """
     Update reconciliation status for a payout with enhanced tracking.

@@ -13,15 +13,20 @@ Security: All endpoints verify admin role from database (never trust token)
 import logging
 
 from django.contrib.auth import get_user_model
+from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, OpenApiTypes, extend_schema
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from payment_system.api.serializers.payment_serializers import PayoutSummarySerializer
+from payment_system.api.serializers.response_serializers import (
+    AdminTransactionListResponseSerializer,
+    ErrorResponseSerializer,
+    PayoutListResponseSerializer,
+)
 from payment_system.domain.services.reporting_service import ReportingService  # Import ReportingService
 from utils.rbac import is_admin
-from utils.transaction_utils import financial_transaction  # Re-import financial_transaction
 
 
 # Initialize logger
@@ -34,21 +39,62 @@ User = get_user_model()
 # ===============================================================================
 
 
+@extend_schema(
+    operation_id="admin_payout_list",
+    summary="Admin: List All Payouts",
+    description="List all payouts across all sellers (Admin only).",
+    parameters=[
+        OpenApiParameter(
+            name="status",
+            type=OpenApiTypes.STR,
+            location=OpenApiParameter.QUERY,
+            description="Filter by payout status",
+        ),
+        OpenApiParameter(
+            name="seller_id",
+            type=OpenApiTypes.UUID,
+            location=OpenApiParameter.QUERY,
+            description="Filter by seller ID",
+        ),
+        OpenApiParameter(
+            name="from_date",
+            type=OpenApiTypes.DATE,
+            location=OpenApiParameter.QUERY,
+            description="Filter from date (YYYY-MM-DD)",
+        ),
+        OpenApiParameter(
+            name="to_date",
+            type=OpenApiTypes.DATE,
+            location=OpenApiParameter.QUERY,
+            description="Filter to date (YYYY-MM-DD)",
+        ),
+        OpenApiParameter(
+            name="search",
+            type=OpenApiTypes.STR,
+            location=OpenApiParameter.QUERY,
+            description="Search by username/email",
+        ),
+        OpenApiParameter(
+            name="page_size",
+            type=OpenApiTypes.INT,
+            location=OpenApiParameter.QUERY,
+            description="Results per page (default 50)",
+        ),
+        OpenApiParameter(
+            name="offset", type=OpenApiTypes.INT, location=OpenApiParameter.QUERY, description="Pagination offset"
+        ),
+    ],
+    responses={
+        200: OpenApiResponse(response=PayoutListResponseSerializer, description="List of all payouts"),
+        403: OpenApiResponse(response=ErrorResponseSerializer, description="Not authorized"),
+    },
+    tags=["Admin"],
+)
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
-@financial_transaction
 def admin_list_all_payouts(request):
     """
     Admin endpoint: List all payouts across all sellers with filtering and pagination.
-
-    Query Parameters:
-    - status: Filter by payout status (pending, paid, failed, etc.)
-    - seller_id: Filter by specific seller
-    - from_date: Filter payouts from this date (YYYY-MM-DD)
-    - to_date: Filter payouts to this date (YYYY-MM-DD)
-    - page_size: Number of results per page (default 50, max 200)
-    - offset: Pagination offset
-    - search: Search by seller username or email
     """
     try:
         # Get user from database (don't trust token)
@@ -139,22 +185,65 @@ def admin_list_all_payouts(request):
         )
 
 
+@extend_schema(
+    operation_id="admin_transaction_list",
+    summary="Admin: List All Transactions",
+    description="List all payment transactions across all sellers (Admin only).",
+    parameters=[
+        OpenApiParameter(
+            name="status",
+            type=OpenApiTypes.STR,
+            location=OpenApiParameter.QUERY,
+            description="Filter by transaction status",
+        ),
+        OpenApiParameter(
+            name="seller_id",
+            type=OpenApiTypes.UUID,
+            location=OpenApiParameter.QUERY,
+            description="Filter by seller ID",
+        ),
+        OpenApiParameter(
+            name="buyer_id", type=OpenApiTypes.UUID, location=OpenApiParameter.QUERY, description="Filter by buyer ID"
+        ),
+        OpenApiParameter(
+            name="from_date",
+            type=OpenApiTypes.DATE,
+            location=OpenApiParameter.QUERY,
+            description="Filter from date (YYYY-MM-DD)",
+        ),
+        OpenApiParameter(
+            name="to_date",
+            type=OpenApiTypes.DATE,
+            location=OpenApiParameter.QUERY,
+            description="Filter to date (YYYY-MM-DD)",
+        ),
+        OpenApiParameter(
+            name="search",
+            type=OpenApiTypes.STR,
+            location=OpenApiParameter.QUERY,
+            description="Search by username/order ID",
+        ),
+        OpenApiParameter(
+            name="page_size",
+            type=OpenApiTypes.INT,
+            location=OpenApiParameter.QUERY,
+            description="Results per page (default 50)",
+        ),
+        OpenApiParameter(
+            name="offset", type=OpenApiTypes.INT, location=OpenApiParameter.QUERY, description="Pagination offset"
+        ),
+    ],
+    responses={
+        200: OpenApiResponse(response=AdminTransactionListResponseSerializer, description="List of all transactions"),
+        403: OpenApiResponse(response=ErrorResponseSerializer, description="Not authorized"),
+    },
+    tags=["Admin"],
+)
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
-@financial_transaction
 def admin_list_all_transactions(request):  # noqa: C901
     """
     Admin endpoint: List all payment transactions across all sellers with filtering.
-
-    Query Parameters:
-    - status: Filter by transaction status (held, completed, released, etc.)
-    - seller_id: Filter by specific seller
-    - buyer_id: Filter by specific buyer
-    - from_date: Filter transactions from this date
-    - to_date: Filter transactions to this date
-    - page_size: Number of results per page (default 50, max 200)
-    - offset: Pagination offset
-    - search: Search by seller/buyer username or order ID
     """
     try:
         # Get user from database (don't trust token)

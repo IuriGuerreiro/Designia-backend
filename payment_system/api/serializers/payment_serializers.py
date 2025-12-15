@@ -64,7 +64,7 @@ class RefundRequestSerializer(serializers.Serializer):
 class PayoutItemSerializer(serializers.ModelSerializer):
     """Serializer for individual payout items with order details"""
 
-    order_id = serializers.CharField(source="order_id", read_only=True)
+    order_id = serializers.CharField(read_only=True)
     order_total = serializers.CharField(source="transfer_amount", read_only=True)
     order_date = serializers.DateTimeField(source="transfer_date", read_only=True)
 

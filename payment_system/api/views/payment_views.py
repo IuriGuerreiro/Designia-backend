@@ -5,14 +5,29 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.http import HttpResponse, JsonResponse
 from django.utils import timezone
+from django.utils.decorators import method_decorator
+from django.views import View
 from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_POST
+from drf_spectacular.utils import OpenApiResponse, OpenApiTypes, extend_schema
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from marketplace.models import Cart, Order, OrderItem
+from payment_system.api.serializers.request_serializers import (
+    OrderCancellationRequestSerializer,
+    StripeAccountCreateRequestSerializer,
+    TransferRequestSerializer,
+)
+from payment_system.api.serializers.response_serializers import (
+    CheckoutSessionResponseSerializer,
+    ErrorResponseSerializer,
+    OrderCancellationResponseSerializer,
+    StripeAccountSessionResponseSerializer,
+    StripeAccountStatusResponseSerializer,
+    TransferResponseSerializer,
+)
 from payment_system.domain.services import stripe_events
 from payment_system.domain.services.security_service import PaymentAuditLogger
 from payment_system.domain.services.webhook_service import WebhookService
@@ -40,106 +55,121 @@ User = get_user_model()
 
 
 # Handle Stripe webhook events VERY VERY IMPORTANTE
-@csrf_exempt
-@require_POST
-@financial_transaction
-def stripe_webhook(request):  # noqa: C901
-    """Process Stripe webhooks - thin router that delegates to WebhookService.
+@method_decorator(csrf_exempt, name="dispatch")
+class StripeWebhookView(View):
+    """Process Stripe webhooks - thin router that delegates to WebhookService."""
 
-    Summary:
-    - Verifies webhook signatures and logs security events.
-    - Delegates all event processing to WebhookService.process_event()
-    - Returns appropriate HTTP response based on processing result.
-    """
-    payload = request.body
-    endpoint_secret = settings.STRIPE_WEBHOOK_SECRET
-    sig_header = request.headers.get("stripe-signature")
-
-    # Get client IP for security monitoring
-    client_ip = request.META.get("HTTP_X_FORWARDED_FOR", "").split(",")[0] or request.META.get(
-        "REMOTE_ADDR", "unknown"
+    @extend_schema(
+        operation_id="payment_stripe_webhook",
+        summary="Stripe Webhook Endpoint",
+        description="Endpoint for receiving Stripe webhook events. Verifies signature and processes events.",
+        request=OpenApiTypes.OBJECT,
+        responses={
+            200: OpenApiResponse(description="Webhook processed successfully"),
+            400: OpenApiResponse(description="Invalid payload or signature"),
+            500: OpenApiResponse(description="Processing error"),
+        },
+        tags=["Webhooks"],
+        auth=[],
     )
+    @method_decorator(financial_transaction)
+    def post(self, request):  # noqa: C901
+        """Process Stripe webhooks.
 
-    # SECURITY FIX: Always require webhook signature verification
-    if not endpoint_secret:
-        PaymentAuditLogger.log_security_event(
-            "webhook_missing_secret",
-            client_ip,
-            details="STRIPE_WEBHOOK_SECRET not configured - critical security vulnerability",
-        )
-        logger.error("Critical Security Error: STRIPE_WEBHOOK_SECRET not configured. Rejecting webhook.")
-        return HttpResponse(
-            status=500,
-            content="Webhook endpoint secret must be configured for security. Contact system administrator.".encode(
-                "utf-8"
-            ),
-        )
+        Summary:
+        - Verifies webhook signatures and logs security events.
+        - Delegates all event processing to WebhookService.process_event()
+        - Returns appropriate HTTP response based on processing result.
+        """
+        payload = request.body
+        endpoint_secret = settings.STRIPE_WEBHOOK_SECRET
+        sig_header = request.headers.get("stripe-signature")
 
-    if not sig_header:
-        PaymentAuditLogger.log_security_event(
-            "webhook_missing_signature", client_ip, details="Webhook request without stripe-signature header"
-        )
-        logger.warning(f"Webhook rejected: Missing stripe-signature header from IP {client_ip}")
-        return HttpResponse(
-            status=400, content="Missing stripe-signature header. Webhook verification required.".encode("utf-8")
+        # Get client IP for security monitoring
+        client_ip = request.META.get("HTTP_X_FORWARDED_FOR", "").split(",")[0] or request.META.get(
+            "REMOTE_ADDR", "unknown"
         )
 
-    # SECURITY: Verify webhook signature BEFORE processing any data
-    try:
-        event = payment_provider.verify_webhook(payload, sig_header, endpoint_secret)
-        # Log successful webhook verification
-        PaymentAuditLogger.log_security_event(
-            "webhook_verified",
-            client_ip,
-            details=f"Successful webhook verification for event: {event.get('type', 'unknown')}",
-        )
-        logger.info(
-            f"Webhook signature verified successfully for event: {event.get('type', 'unknown')} from IP {client_ip}"
-        )
-        # Delegate safe event logging to service layer (no payloads)
+        # SECURITY FIX: Always require webhook signature verification
+        if not endpoint_secret:
+            PaymentAuditLogger.log_security_event(
+                "webhook_missing_secret",
+                client_ip,
+                details="STRIPE_WEBHOOK_SECRET not configured - critical security vulnerability",
+            )
+            logger.error("Critical Security Error: STRIPE_WEBHOOK_SECRET not configured. Rejecting webhook.")
+            return HttpResponse(
+                status=500,
+                content="Webhook endpoint secret must be configured for security. Contact system administrator.".encode(
+                    "utf-8"
+                ),
+            )
+
+        if not sig_header:
+            PaymentAuditLogger.log_security_event(
+                "webhook_missing_signature", client_ip, details="Webhook request without stripe-signature header"
+            )
+            logger.warning(f"Webhook rejected: Missing stripe-signature header from IP {client_ip}")
+            return HttpResponse(
+                status=400, content="Missing stripe-signature header. Webhook verification required.".encode("utf-8")
+            )
+
+        # SECURITY: Verify webhook signature BEFORE processing any data
         try:
-            stripe_events.handle_event(event)
-        except Exception:  # pragma: no cover - defensive logging only
-            logger.warning("Stripe event logging via service failed; continuing")
-    except ValueError as e:  # Catch ValueErrors from payment_provider.verify_webhook
-        PaymentAuditLogger.log_security_event(
-            "webhook_signature_failed",
-            client_ip,
-            details=f"Signature verification or payload parsing failed: {str(e)}",
-        )
-        logger.warning(f"Webhook signature or payload verification failed from IP {client_ip}: {str(e)}")
-        return HttpResponse(status=400, content=f"Webhook verification failed: {str(e)}".encode("utf-8"))
-    except Exception as e:
-        PaymentAuditLogger.log_security_event(
-            "webhook_processing_error", client_ip, details=f"Unexpected error: {str(e)}"
-        )
-        logger.error(f"Unexpected webhook verification error from IP {client_ip}: {str(e)}")
-        return HttpResponse(status=500, content="Webhook processing error.".encode("utf-8"))
-
-    # Delegate all event processing to WebhookService
-    logger.info(f"🔔 Received Stripe event: {event.get('type', 'unknown')}")
-
-    try:
-        handled = WebhookService.process_event(event, client_ip)
-        if handled:
-            logger.info(f"✅ Event {event.get('type')} processed successfully by WebhookService")
-            return HttpResponse(
-                status=200, content=f"{event.get('type')} event successfully processed".encode("utf-8")
+            event = payment_provider.verify_webhook(payload, sig_header, endpoint_secret)
+            # Log successful webhook verification
+            PaymentAuditLogger.log_security_event(
+                "webhook_verified",
+                client_ip,
+                details=f"Successful webhook verification for event: {event.get('type', 'unknown')}",
             )
-        else:
-            logger.info(f"ℹ️  Event {event.get('type')} received but not handled by WebhookService")
-            return HttpResponse(
-                status=200, content=f"{event.get('type')} event received but not processed".encode("utf-8")
+            logger.info(
+                f"Webhook signature verified successfully for event: {event.get('type', 'unknown')} from IP {client_ip}"
             )
-    except Exception as e:
-        logger.error(f"❌ Error processing event {event.get('type')} via WebhookService: {str(e)}", exc_info=True)
-        PaymentAuditLogger.log_security_event(
-            "webhook_service_error",
-            client_ip,
-            details=f"WebhookService failed to process {event.get('type')}: {str(e)}",
-        )
-        # Return 200 to prevent Stripe retries for application errors
-        return HttpResponse(status=200, content=f"{event.get('type')} event processing failed".encode("utf-8"))
+            # Delegate safe event logging to service layer (no payloads)
+            try:
+                stripe_events.handle_event(event)
+            except Exception:  # pragma: no cover - defensive logging only
+                logger.warning("Stripe event logging via service failed; continuing")
+        except ValueError as e:  # Catch ValueErrors from payment_provider.verify_webhook
+            PaymentAuditLogger.log_security_event(
+                "webhook_signature_failed",
+                client_ip,
+                details=f"Signature verification or payload parsing failed: {str(e)}",
+            )
+            logger.warning(f"Webhook signature or payload verification failed from IP {client_ip}: {str(e)}")
+            return HttpResponse(status=400, content=f"Webhook verification failed: {str(e)}".encode("utf-8"))
+        except Exception as e:
+            PaymentAuditLogger.log_security_event(
+                "webhook_processing_error", client_ip, details=f"Unexpected error: {str(e)}"
+            )
+            logger.error(f"Unexpected webhook verification error from IP {client_ip}: {str(e)}")
+            return HttpResponse(status=500, content="Webhook processing error.".encode("utf-8"))
+
+        # Delegate all event processing to WebhookService
+        logger.info(f"🔔 Received Stripe event: {event.get('type', 'unknown')}")
+
+        try:
+            handled = WebhookService.process_event(event, client_ip)
+            if handled:
+                logger.info(f"✅ Event {event.get('type')} processed successfully by WebhookService")
+                return HttpResponse(
+                    status=200, content=f"{event.get('type')} event successfully processed".encode("utf-8")
+                )
+            else:
+                logger.info(f"ℹ️  Event {event.get('type')} received but not handled by WebhookService")
+                return HttpResponse(
+                    status=200, content=f"{event.get('type')} event received but not processed".encode("utf-8")
+                )
+        except Exception as e:
+            logger.error(f"❌ Error processing event {event.get('type')} via WebhookService: {str(e)}", exc_info=True)
+            PaymentAuditLogger.log_security_event(
+                "webhook_service_error",
+                client_ip,
+                details=f"WebhookService failed to process {event.get('type')}: {str(e)}",
+            )
+            # Return 200 to prevent Stripe retries for application errors
+            return HttpResponse(status=200, content=f"{event.get('type')} event processing failed".encode("utf-8"))
 
 
 def update_payment_trackers_for_payout(payout, event_type):  # noqa: C901
@@ -588,6 +618,18 @@ def update_payout_from_webhook(event, payout_object):  # noqa: C901
         return None
 
 
+@extend_schema(
+    operation_id="payment_stripe_webhook_connect",
+    summary="Stripe Connect Webhook Endpoint",
+    description="Endpoint for receiving Stripe Connect webhook events. Verifies signature and processes events.",
+    request=OpenApiTypes.OBJECT,
+    responses={
+        200: OpenApiResponse(description="Webhook processed successfully"),
+        400: OpenApiResponse(description="Invalid payload or signature"),
+    },
+    tags=["Webhooks"],
+    auth=[],
+)
 def stripe_webhook_connect(request):  # noqa: C901
     """Handle Stripe Connect webhooks for seller accounts and payouts.
 
@@ -723,6 +765,16 @@ def get_product_image_url(product, request=None):
 
 
 # Create a Stripe Embedded Checkout Session
+@extend_schema(
+    operation_id="payment_create_checkout",
+    summary="Create Stripe Checkout Session",
+    description="Creates an embedded checkout session for the user's cart.",
+    responses={
+        200: OpenApiResponse(response=CheckoutSessionResponseSerializer, description="Session created"),
+        400: OpenApiResponse(response=ErrorResponseSerializer, description="Bad request"),
+    },
+    tags=["Payments"],
+)
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 @financial_transaction
@@ -901,6 +953,17 @@ def create_checkout_session(request):
         )
 
 
+@extend_schema(
+    operation_id="payment_retry_checkout",
+    summary="Retry Failed Checkout",
+    description="Creates a retry session for a pending order.",
+    responses={
+        200: OpenApiResponse(response=CheckoutSessionResponseSerializer, description="Retry session created"),
+        400: OpenApiResponse(response=ErrorResponseSerializer, description="Invalid order state"),
+        404: OpenApiResponse(response=ErrorResponseSerializer, description="Order not found"),
+    },
+    tags=["Payments"],
+)
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def create_checkout_failed_checkout(request, order_id):
@@ -1034,6 +1097,19 @@ def create_checkout_failed_checkout(request, order_id):
 
 
 # Cancel an order and process Stripe refund if payment was made
+@extend_schema(
+    operation_id="payment_cancel_order",
+    summary="Cancel Order",
+    description="Cancels an order and initiates refund if paid.",
+    request=OrderCancellationRequestSerializer,
+    responses={
+        200: OpenApiResponse(response=OrderCancellationResponseSerializer, description="Order cancelled"),
+        400: OpenApiResponse(response=ErrorResponseSerializer, description="Cannot cancel"),
+        403: OpenApiResponse(response=ErrorResponseSerializer, description="Permission denied"),
+        404: OpenApiResponse(response=ErrorResponseSerializer, description="Order not found"),
+    },
+    tags=["Payments"],
+)
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def cancel_order(request, order_id):  # noqa: C901
@@ -1275,6 +1351,29 @@ def cancel_order(request, order_id):  # noqa: C901
 from payment_system.domain.services.stripe_service import StripeConnectService  # noqa: E402
 
 
+@extend_schema(
+    methods=["GET"],
+    operation_id="payment_stripe_account_status",
+    summary="Get Stripe Account Status",
+    description="Check status of the connected Stripe account.",
+    responses={
+        200: OpenApiResponse(response=StripeAccountStatusResponseSerializer, description="Account status"),
+        400: OpenApiResponse(response=ErrorResponseSerializer, description="Error"),
+    },
+    tags=["Stripe Connect"],
+)
+@extend_schema(
+    methods=["POST"],
+    operation_id="payment_create_stripe_account",
+    summary="Create Stripe Account",
+    description="Create a new Stripe Connect account.",
+    request=StripeAccountCreateRequestSerializer,
+    responses={
+        201: OpenApiResponse(response=StripeAccountStatusResponseSerializer, description="Account created"),
+        400: OpenApiResponse(response=ErrorResponseSerializer, description="Bad request"),
+    },
+    tags=["Stripe Connect"],
+)
 @api_view(["GET", "POST"])
 @permission_classes([IsAuthenticated])
 @financial_transaction
@@ -1418,6 +1517,16 @@ def stripe_account(request):  # noqa: C901
 
 
 # This creates a Stripe Account Session for seller onboarding AKA get seller info to pay or edit the info
+@extend_schema(
+    operation_id="payment_create_account_session",
+    summary="Create Account Session",
+    description="Creates a session for Stripe Connect onboarding.",
+    responses={
+        200: OpenApiResponse(response=StripeAccountSessionResponseSerializer, description="Session created"),
+        400: OpenApiResponse(response=ErrorResponseSerializer, description="Failed to create session"),
+    },
+    tags=["Stripe Connect"],
+)
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def create_stripe_account_session(request):
@@ -1456,6 +1565,16 @@ def create_stripe_account_session(request):
 
 
 # Get the Stripe account status for the authenticated user
+@extend_schema(
+    operation_id="payment_get_account_status",
+    summary="Get Stripe Account Status",
+    description="Returns status of the connected Stripe account.",
+    responses={
+        200: OpenApiResponse(response=StripeAccountStatusResponseSerializer, description="Account status"),
+        400: OpenApiResponse(response=ErrorResponseSerializer, description="Error"),
+    },
+    tags=["Stripe Connect"],
+)
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def get_stripe_account_status(request):
@@ -1544,6 +1663,19 @@ def create_transfer_to_connected_account(amount, currency, destination_account_i
 
 
 # transfer payment to seller's connected account
+@extend_schema(
+    operation_id="payment_transfer_to_seller",
+    summary="Transfer Payment",
+    description="Transfers held funds to the seller's connected account.",
+    request=TransferRequestSerializer,
+    responses={
+        200: OpenApiResponse(response=TransferResponseSerializer, description="Transfer successful"),
+        400: OpenApiResponse(response=ErrorResponseSerializer, description="Transfer failed"),
+        403: OpenApiResponse(response=ErrorResponseSerializer, description="Permission denied"),
+        404: OpenApiResponse(response=ErrorResponseSerializer, description="Transaction not found"),
+    },
+    tags=["Stripe Connect"],
+)
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 @financial_transaction

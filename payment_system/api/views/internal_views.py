@@ -3,12 +3,18 @@ from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
+from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
 from marketplace.models import Order  # For order status
 from payment_system.api.permissions import IsStaffOrInternalService
+from payment_system.api.serializers.response_serializers import (
+    ErrorResponseSerializer,
+    InternalPaymentStatusResponseSerializer,
+    InternalSellerBalanceResponseSerializer,
+)
 from payment_system.domain.services.payment_service import PaymentService
 from payment_system.domain.services.payout_service import PayoutService
 
@@ -23,6 +29,16 @@ payout_service = PayoutService()
 
 @api_view(["GET"])
 @permission_classes([IsStaffOrInternalService])  # Custom internal permission
+@extend_schema(
+    operation_id="internal_payment_status",
+    summary="Internal: Get Payment Status",
+    description="Get payment status for an order (Internal/Admin only).",
+    responses={
+        200: OpenApiResponse(response=InternalPaymentStatusResponseSerializer, description="Payment status"),
+        404: OpenApiResponse(response=ErrorResponseSerializer, description="Order not found"),
+    },
+    tags=["Internal Payments"],
+)
 def get_payment_status_internal(request, order_id):
     """
     Internal API: Get payment status for a given order ID.
@@ -60,6 +76,16 @@ def get_payment_status_internal(request, order_id):
 
 @api_view(["GET"])
 @permission_classes([IsStaffOrInternalService])  # Custom internal permission
+@extend_schema(
+    operation_id="internal_seller_balance",
+    summary="Internal: Get Seller Balance",
+    description="Get aggregate balance for a seller (Internal/Admin only).",
+    responses={
+        200: OpenApiResponse(response=InternalSellerBalanceResponseSerializer, description="Seller balance"),
+        404: OpenApiResponse(response=ErrorResponseSerializer, description="Seller not found"),
+    },
+    tags=["Internal Payments"],
+)
 def get_seller_balance_internal(request, seller_id):
     """
     Internal API: Get aggregate balance for a seller ID.
