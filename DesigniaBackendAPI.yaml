@@ -2169,7 +2169,7 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/ProductListResponse'
+                  $ref: '#/components/schemas/ProductListPaginatedResponse'
           description: Products retrieved successfully
         '500':
           content:
@@ -2609,8 +2609,11 @@ paths:
       operationId: products_retrieve
       description: "\n        **What it receives:**\n        - `slug` (string in URL):\
         \ Product slug identifier\n\n        **What it returns:**\n        - Complete\
-        \ product details including images, reviews summary, seller info\n       \
-        \ - View count is automatically incremented\n        "
+        \ product details including:\n          - Full product information\n     \
+        \     - Array of images with proxy URLs\n          - Array of reviews with\
+        \ reviewer info\n          - Seller info (id, username, rating)\n        \
+        \  - Category info\n        - View count is automatically incremented\n  \
+        \      "
       summary: Get product details
       parameters:
       - in: path
@@ -2630,7 +2633,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProductDetail'
-          description: Product retrieved successfully
+          description: ''
         '404':
           content:
             application/json:
@@ -2981,19 +2984,101 @@ paths:
           description: Internal server error
   /api/marketplace/products/search/:
     get:
-      operationId: marketplace_products_search_retrieve
-      description: |-
-        ViewSet for search, filter, and autocomplete operations.
-        Delegates logic to SearchService.
+      operationId: products_search
+      description: Search for products with filters and pagination
+      summary: Search products
+      parameters:
+      - in: query
+        name: brand
+        schema:
+          type: string
+        description: Filter by brand
+      - in: query
+        name: category
+        schema:
+          type: array
+          items:
+            type: string
+        description: Filter by category (can be multiple)
+      - in: query
+        name: condition
+        schema:
+          type: array
+          items:
+            type: string
+        description: Filter by condition (can be multiple)
+      - in: query
+        name: in_stock
+        schema:
+          type: boolean
+        description: Only show in-stock products
+      - in: query
+        name: is_featured
+        schema:
+          type: boolean
+        description: Only show featured products
+      - in: query
+        name: min_rating
+        schema:
+          type: number
+          format: double
+        description: Minimum rating
+      - in: query
+        name: page
+        schema:
+          type: integer
+        description: 'Page number (default: 1)'
+      - in: query
+        name: page_size
+        schema:
+          type: integer
+        description: 'Items per page (default: 20)'
+      - in: query
+        name: price_max
+        schema:
+          type: number
+          format: double
+        description: Maximum price
+      - in: query
+        name: price_min
+        schema:
+          type: number
+          format: double
+        description: Minimum price
+      - in: query
+        name: q
+        schema:
+          type: string
+        description: Search query
+      - in: query
+        name: seller
+        schema:
+          type: string
+        description: Filter by seller ID
+      - in: query
+        name: sort
+        schema:
+          type: string
+        description: Sort by (relevance, price, newest, popular)
       tags:
-      - marketplace
+      - Marketplace - Search
       security:
       - jwtAuth: []
       - Bearer: []
       - {}
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductSearchPaginatedResponse'
+          description: Search results
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Internal server error
   /api/marketplace/profiles/:
     get:
       operationId: marketplace_profiles_list
@@ -3390,7 +3475,7 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/ProductListResponse'
+                  $ref: '#/components/schemas/ProductListPaginatedResponse'
           description: Products retrieved successfully
         '500':
           content:
@@ -3400,75 +3485,162 @@ paths:
           description: Internal server error
   /api/payments/admin/payouts/:
     get:
-      operationId: payments_admin_payouts_retrieve
-      description: |-
-        Admin endpoint: List all payouts across all sellers with filtering and pagination.
-
-        Query Parameters:
-        - status: Filter by payout status (pending, paid, failed, etc.)
-        - seller_id: Filter by specific seller
-        - from_date: Filter payouts from this date (YYYY-MM-DD)
-        - to_date: Filter payouts to this date (YYYY-MM-DD)
-        - page_size: Number of results per page (default 50, max 200)
-        - offset: Pagination offset
-        - search: Search by seller username or email
+      operationId: admin_payout_list
+      description: List all payouts across all sellers (Admin only).
+      summary: 'Admin: List All Payouts'
+      parameters:
+      - in: query
+        name: from_date
+        schema:
+          type: string
+          format: date
+        description: Filter from date (YYYY-MM-DD)
+      - in: query
+        name: offset
+        schema:
+          type: integer
+        description: Pagination offset
+      - in: query
+        name: page_size
+        schema:
+          type: integer
+        description: Results per page (default 50)
+      - in: query
+        name: search
+        schema:
+          type: string
+        description: Search by username/email
+      - in: query
+        name: seller_id
+        schema:
+          type: string
+          format: uuid
+        description: Filter by seller ID
+      - in: query
+        name: status
+        schema:
+          type: string
+        description: Filter by payout status
+      - in: query
+        name: to_date
+        schema:
+          type: string
+          format: date
+        description: Filter to date (YYYY-MM-DD)
       tags:
-      - payments
+      - Admin
       security:
       - jwtAuth: []
       - Bearer: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PayoutListResponse'
+          description: List of all payouts
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Not authorized
   /api/payments/admin/transactions/:
     get:
-      operationId: payments_admin_transactions_retrieve
-      description: |-
-        Admin endpoint: List all payment transactions across all sellers with filtering.
-
-        Query Parameters:
-        - status: Filter by transaction status (held, completed, released, etc.)
-        - seller_id: Filter by specific seller
-        - buyer_id: Filter by specific buyer
-        - from_date: Filter transactions from this date
-        - to_date: Filter transactions to this date
-        - page_size: Number of results per page (default 50, max 200)
-        - offset: Pagination offset
-        - search: Search by seller/buyer username or order ID
+      operationId: admin_transaction_list
+      description: List all payment transactions across all sellers (Admin only).
+      summary: 'Admin: List All Transactions'
+      parameters:
+      - in: query
+        name: buyer_id
+        schema:
+          type: string
+          format: uuid
+        description: Filter by buyer ID
+      - in: query
+        name: from_date
+        schema:
+          type: string
+          format: date
+        description: Filter from date (YYYY-MM-DD)
+      - in: query
+        name: offset
+        schema:
+          type: integer
+        description: Pagination offset
+      - in: query
+        name: page_size
+        schema:
+          type: integer
+        description: Results per page (default 50)
+      - in: query
+        name: search
+        schema:
+          type: string
+        description: Search by username/order ID
+      - in: query
+        name: seller_id
+        schema:
+          type: string
+          format: uuid
+        description: Filter by seller ID
+      - in: query
+        name: status
+        schema:
+          type: string
+        description: Filter by transaction status
+      - in: query
+        name: to_date
+        schema:
+          type: string
+          format: date
+        description: Filter to date (YYYY-MM-DD)
       tags:
-      - payments
+      - Admin
       security:
       - jwtAuth: []
       - Bearer: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminTransactionListResponse'
+          description: List of all transactions
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Not authorized
   /api/payments/checkout_session/:
     post:
-      operationId: payments_checkout_session_create
-      description: |-
-        Create an Embedded Checkout Session for the user's cart and seed the Order.
-
-        This function validates stock and pricing, builds Stripe line items (products +
-        shipping), creates an Order in pending_payment with reserved stock, starts an
-        embedded checkout session carrying order/user metadata, and returns clientSecret.
+      operationId: payment_create_checkout
+      description: Creates an embedded checkout session for the user's cart.
+      summary: Create Stripe Checkout Session
       tags:
-      - payments
+      - Payments
       security:
       - jwtAuth: []
       - Bearer: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckoutSessionResponse'
+          description: Session created
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Bad request
   /api/payments/checkout_session/retry/{order_id}/:
     get:
-      operationId: payments_checkout_session_retry_retrieve
-      description: |-
-        Create a retry Embedded Checkout Session for a pending order.
-
-        This function verifies ownership and 'pending_payment' status, rebuilds Stripe line
-        items from the order (with stock checks), creates an embedded checkout session with
-        order/user metadata, and returns the clientSecret for the frontend to resume.
+      operationId: payment_retry_checkout
+      description: Creates a retry session for a pending order.
+      summary: Retry Failed Checkout
       parameters:
       - in: path
         name: order_id
@@ -3477,24 +3649,34 @@ paths:
           format: uuid
         required: true
       tags:
-      - payments
+      - Payments
       security:
       - jwtAuth: []
       - Bearer: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckoutSessionResponse'
+          description: Retry session created
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Invalid order state
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Order not found
   /api/payments/orders/{order_id}/cancel/:
     post:
-      operationId: payments_orders_cancel_create
-      description: |-
-        Cancel an order with refund handling and stock restoration.
-
-        This function cancels orders that are 'pending_payment' by restoring reserved stock,
-        marking cancellation metadata, and setting payment_status to 'failed'. If the order
-        was paid, it initiates a Stripe refund, moves the order to 'waiting_refund', and
-        persists metadata; final status transitions occur via the refund webhook. Terminal
-        states (shipped, delivered, cancelled, refunded) are rejected.
+      operationId: payment_cancel_order
+      description: Cancels an order and initiates refund if paid.
+      summary: Cancel Order
       parameters:
       - in: path
         name: order_id
@@ -3503,49 +3685,120 @@ paths:
           format: uuid
         required: true
       tags:
-      - payments
+      - Payments
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderCancellationRequestRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/OrderCancellationRequestRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/OrderCancellationRequestRequest'
+        required: true
       security:
       - jwtAuth: []
       - Bearer: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderCancellationResponse'
+          description: Order cancelled
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Cannot cancel
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Permission denied
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Order not found
   /api/payments/payout/:
     post:
-      operationId: payments_payout_create
-      description: |-
-        Manual payout creation has been disabled.
-
-        This endpoint now exists only to provide a clear error response
-        indicating that manual payout creation is no longer supported.
+      operationId: payout_create_seller_payout
+      description: Manual payout creation is disabled. This endpoint returns an error.
+      summary: Create Seller Payout (Disabled)
       tags:
-      - payments
+      - Payouts
       security:
       - jwtAuth: []
       - Bearer: []
       responses:
-        '200':
-          description: No response body
+        '410':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Payout creation disabled
   /api/payments/payouts/:
     get:
-      operationId: payments_payouts_retrieve
-      description: |-
-        Retrieve all payouts for the authenticated user (seller).
-        Returns a paginated list of payouts with summary information.
+      operationId: payout_list
+      description: List all payouts for the authenticated seller.
+      summary: List Payouts
+      parameters:
+      - in: query
+        name: from_date
+        schema:
+          type: string
+          format: date
+        description: Filter from date (YYYY-MM-DD)
+      - in: query
+        name: offset
+        schema:
+          type: integer
+        description: Pagination offset
+      - in: query
+        name: page_size
+        schema:
+          type: integer
+        description: Results per page (default 20, max 100)
+      - in: query
+        name: status
+        schema:
+          type: string
+        description: Filter by status (optional)
+      - in: query
+        name: to_date
+        schema:
+          type: string
+          format: date
+        description: Filter to date (YYYY-MM-DD)
       tags:
-      - payments
+      - Payouts
       security:
       - jwtAuth: []
       - Bearer: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PayoutListResponse'
+          description: List of payouts
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Not authorized
   /api/payments/payouts/{payout_id}/:
     get:
-      operationId: payments_payouts_retrieve_2
-      description: |-
-        Retrieve detailed information about a specific payout including all orders.
-        Only accessible by the seller who owns the payout.
+      operationId: payout_detail
+      description: Get detailed information for a specific payout.
+      summary: Get Payout Detail
       parameters:
       - in: path
         name: payout_id
@@ -3554,20 +3807,27 @@ paths:
           format: uuid
         required: true
       tags:
-      - payments
+      - Payouts
       security:
       - jwtAuth: []
       - Bearer: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PayoutDetailResponse'
+          description: Payout detail
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Payout not found
   /api/payments/payouts/{payout_id}/orders/:
     get:
       operationId: payments_payouts_orders_retrieve
-      description: |-
-        Retrieve all orders included in a specific payout.
-        Returns detailed order information with amounts.
-        Only includes order items where the current user is the product owner.
+      description: Retrieve all orders included in a specific payout.
       parameters:
       - in: path
         name: payout_id
@@ -3585,97 +3845,176 @@ paths:
           description: No response body
   /api/payments/stripe/account/:
     get:
-      operationId: payments_stripe_account_retrieve
-      description: |-
-        Unified endpoint for Stripe Connect account management.
-
-        This function returns existing account status on GET, or creates a new account on
-        POST after basic eligibility checks, surfacing requirements and next steps for the
-        seller’s onboarding.
+      operationId: payment_stripe_account_status
+      description: Check status of the connected Stripe account.
+      summary: Get Stripe Account Status
       tags:
-      - payments
+      - Stripe Connect
       security:
       - jwtAuth: []
       - Bearer: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StripeAccountStatusResponse'
+          description: Account status
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Error
     post:
-      operationId: payments_stripe_account_create
-      description: |-
-        Unified endpoint for Stripe Connect account management.
-
-        This function returns existing account status on GET, or creates a new account on
-        POST after basic eligibility checks, surfacing requirements and next steps for the
-        seller’s onboarding.
+      operationId: payment_create_stripe_account
+      description: Create a new Stripe Connect account.
+      summary: Create Stripe Account
       tags:
-      - payments
+      - Stripe Connect
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StripeAccountCreateRequestRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/StripeAccountCreateRequestRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/StripeAccountCreateRequestRequest'
       security:
       - jwtAuth: []
       - Bearer: []
       responses:
-        '200':
-          description: No response body
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StripeAccountStatusResponse'
+          description: Account created
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Bad request
   /api/payments/stripe/account-status/:
     get:
-      operationId: payments_stripe_account_status_retrieve
-      description: Return the Stripe Connect account status for the authenticated
-        user.
+      operationId: payment_get_account_status
+      description: Returns status of the connected Stripe account.
+      summary: Get Stripe Account Status
       tags:
-      - payments
+      - Stripe Connect
       security:
       - jwtAuth: []
       - Bearer: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StripeAccountStatusResponse'
+          description: Account status
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Error
   /api/payments/stripe/create-session/:
     post:
-      operationId: payments_stripe_create_session_create
-      description: |-
-        Create a Stripe Account Session for seller onboarding or updates.
-
-        This function returns an Account Session client_secret for onboarding or updating a
-        seller’s connected account. Requires the user to have an existing Stripe account.
+      operationId: payment_create_account_session
+      description: Creates a session for Stripe Connect onboarding.
+      summary: Create Account Session
       tags:
-      - payments
+      - Stripe Connect
       security:
       - jwtAuth: []
       - Bearer: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StripeAccountSessionResponse'
+          description: Session created
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Failed to create session
   /api/payments/stripe/holds/:
     get:
-      operationId: payments_stripe_holds_retrieve
-      description: |-
-        Get all payment holds for the authenticated seller with remaining time calculation
-        Using simplified PaymentTransaction model with integrated hold system
+      operationId: payout_get_holds
+      description: Retrieve all held transactions for the authenticated seller.
+      summary: Get Payment Holds
       tags:
-      - payments
+      - Payouts
       security:
       - jwtAuth: []
       - Bearer: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentHoldsResponse'
+          description: Holds retrieved
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Not authorized
   /api/payments/transfer/:
     post:
-      operationId: payments_transfer_create
-      description: |-
-        Transfer held funds to a seller’s connected Stripe account.
-
-        This function validates permissions and readiness (held status, delivered order,
-        optional release date), computes the transfer amount in cents, and creates a Stripe
-        transfer, returning details along with exchange-rate context.
+      operationId: payment_transfer_to_seller
+      description: Transfers held funds to the seller's connected account.
+      summary: Transfer Payment
       tags:
-      - payments
+      - Stripe Connect
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransferRequestRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TransferRequestRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TransferRequestRequest'
+        required: true
       security:
       - jwtAuth: []
       - Bearer: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferResponse'
+          description: Transfer successful
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Transfer failed
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Permission denied
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Transaction not found
   /internal/auth/check-email/{email}/:
     get:
       operationId: internal_auth_check_email_retrieve
@@ -3972,6 +4311,44 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
           description: Invalid product ID format
+  /internal/payments/payments/{order_id}/status/:
+    get:
+      operationId: internal_payments_payments_status_retrieve
+      description: 'Internal API: Get payment status for a given order ID.'
+      parameters:
+      - in: path
+        name: order_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - internal
+      security:
+      - jwtAuth: []
+      - Bearer: []
+      responses:
+        '200':
+          description: No response body
+  /internal/payments/payouts/seller/{seller_id}/balance/:
+    get:
+      operationId: internal_payments_payouts_seller_balance_retrieve
+      description: 'Internal API: Get aggregate balance for a seller ID.'
+      parameters:
+      - in: path
+        name: seller_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - internal
+      security:
+      - jwtAuth: []
+      - Bearer: []
+      responses:
+        '200':
+          description: No response body
 components:
   schemas:
     AccountStatusResponse:
@@ -4042,9 +4419,34 @@ components:
           description: 'Quantity to add (default: 1)'
       required:
       - product_id
+    AdminTransactionListResponse:
+      type: object
+      description: Response for admin transaction list
+      properties:
+        transactions:
+          type: array
+          items: {}
+        pagination:
+          type: object
+          additionalProperties: {}
+        summary:
+          type: object
+          additionalProperties: {}
+      required:
+      - pagination
+      - summary
+      - transactions
     BlankEnum:
       enum:
       - ''
+    BusinessTypeEnum:
+      enum:
+      - individual
+      - company
+      type: string
+      description: |-
+        * `individual` - individual
+        * `company` - company
     CancelOrderRequestRequest:
       type: object
       description: Request body for canceling an order
@@ -4266,6 +4668,18 @@ components:
           maxLength: 30
       required:
       - username
+    CheckoutSessionResponse:
+      type: object
+      description: Response for creating a checkout session
+      properties:
+        clientSecret:
+          type: string
+          description: Stripe client secret for embedded checkout
+        sessionId:
+          type: string
+          description: Stripe checkout session ID
+      required:
+      - clientSecret
     ConditionEnum:
       enum:
       - new
@@ -4700,32 +5114,39 @@ components:
       description: |-
         * `text` - Text
         * `image` - Image
-    MinimalCategory:
+    MinimalProductReview:
       type: object
+      description: Minimal review info for product detail - no sensitive user data
       properties:
         id:
           type: integer
           readOnly: true
-        name:
-          type: string
-          maxLength: 100
-        slug:
-          type: string
+        reviewer:
+          allOf:
+          - $ref: '#/components/schemas/MinimalSeller'
           readOnly: true
-          pattern: ^[-a-zA-Z0-9_]+$
-      required:
-      - id
-      - name
-      - slug
-    MinimalCategoryRequest:
-      type: object
-      properties:
-        name:
+        rating:
+          type: integer
+          maximum: 5
+          minimum: 1
+        title:
           type: string
-          minLength: 1
-          maxLength: 100
+          maxLength: 200
+        comment:
+          type: string
+        is_verified_purchase:
+          type: boolean
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
       required:
-      - name
+      - created_at
+      - id
+      - is_verified_purchase
+      - rating
+      - reviewer
     MinimalSeller:
       type: object
       properties:
@@ -4742,21 +5163,45 @@ components:
       required:
       - id
       - username
-    MinimalSellerRequest:
-      type: object
-      properties:
-        username:
-          type: string
-          minLength: 1
-          description: Required. 150 characters or fewer. Letters, digits and @/./+/-/_
-            only.
-          pattern: ^[\w.@+-]+$
-          maxLength: 150
-      required:
-      - username
     NullEnum:
       enum:
       - null
+    OrderCancellationRequestRequest:
+      type: object
+      properties:
+        cancellation_reason:
+          type: string
+          minLength: 1
+          description: Reason for cancellation
+      required:
+      - cancellation_reason
+    OrderCancellationResponse:
+      type: object
+      description: Response for order cancellation
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        refund_requested:
+          type: boolean
+        refund_amount:
+          type: string
+          nullable: true
+        stripe_refund_id:
+          type: string
+          nullable: true
+        order:
+          type: object
+          additionalProperties: {}
+          description: Updated order details
+      required:
+      - message
+      - order
+      - refund_amount
+      - refund_requested
+      - stripe_refund_id
+      - success
     OrderDetailResponse:
       type: object
       description: Detailed order response
@@ -4767,7 +5212,7 @@ components:
           description: Order UUID
         status:
           allOf:
-          - $ref: '#/components/schemas/StatusEnum'
+          - $ref: '#/components/schemas/Status64fEnum'
           description: |-
             Order status
 
@@ -4913,7 +5358,7 @@ components:
           description: Order UUID
         status:
           allOf:
-          - $ref: '#/components/schemas/StatusEnum'
+          - $ref: '#/components/schemas/Status64fEnum'
           description: |-
             Order status
 
@@ -5234,6 +5679,30 @@ components:
           type: integer
           minimum: 0
           description: New quantity (0 to remove item)
+    PaymentHoldsResponse:
+      type: object
+      description: Response for seller payment holds
+      properties:
+        success:
+          type: boolean
+        summary:
+          type: object
+          additionalProperties: {}
+          description: Summary statistics
+        holds:
+          type: array
+          items: {}
+          description: List of held transactions
+        message:
+          type: string
+        debug_info:
+          type: object
+          additionalProperties: {}
+      required:
+      - holds
+      - message
+      - success
+      - summary
     PaymentStatusEnum:
       enum:
       - pending
@@ -5246,6 +5715,268 @@ components:
         * `paid` - paid
         * `failed` - failed
         * `refunded` - refunded
+    Payout:
+      type: object
+      description: Serializer for payouts with complete details
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        stripe_payout_id:
+          type: string
+          description: Stripe payout ID
+          maxLength: 255
+        seller_username:
+          type: string
+          readOnly: true
+        status:
+          $ref: '#/components/schemas/Status0e1Enum'
+        payout_type:
+          $ref: '#/components/schemas/PayoutTypeEnum'
+        amount_decimal:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          description: Total payout amount in decimal format
+        formatted_amount:
+          type: string
+          readOnly: true
+        currency:
+          type: string
+          description: Payout currency
+          maxLength: 3
+        transfer_count:
+          type: integer
+          maximum: 4294967295
+          minimum: 0
+          format: int64
+          description: Number of payment transfers included
+        total_gross_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,10}(?:\.\d{0,2})?$
+          description: Total gross amount from all transfers
+        total_fees:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          description: Total fees deducted
+        bank_account_last4:
+          type: string
+          description: Last 4 digits of bank account
+          maxLength: 4
+        bank_name:
+          type: string
+          description: Bank name
+          maxLength: 100
+        arrival_date:
+          type: string
+          format: date-time
+          nullable: true
+          description: Expected arrival date
+        failure_code:
+          type: string
+          description: Stripe failure code if failed
+          maxLength: 50
+        failure_message:
+          type: string
+          description: Failure message from Stripe
+        description:
+          type: string
+          description: Description of the payout
+        is_completed:
+          type: boolean
+          readOnly: true
+        is_failed:
+          type: boolean
+          readOnly: true
+        days_since_created:
+          type: integer
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        payout_items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PayoutItem'
+          readOnly: true
+      required:
+      - amount_decimal
+      - created_at
+      - currency
+      - days_since_created
+      - formatted_amount
+      - id
+      - is_completed
+      - is_failed
+      - payout_items
+      - seller_username
+      - stripe_payout_id
+      - updated_at
+    PayoutDetailResponse:
+      type: object
+      description: Response for payout detail
+      properties:
+        payout:
+          $ref: '#/components/schemas/Payout'
+      required:
+      - payout
+    PayoutItem:
+      type: object
+      description: Serializer for individual payout items with order details
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        order_id:
+          type: string
+          readOnly: true
+        item_names:
+          type: string
+          description: Items sold in this transfer
+        transfer_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          description: Net amount of this transfer
+        transfer_currency:
+          type: string
+          description: Currency of the transfer
+          maxLength: 3
+        transfer_date:
+          type: string
+          format: date-time
+          description: When the transfer was completed
+        order_total:
+          type: string
+          readOnly: true
+        order_date:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - id
+      - item_names
+      - order_date
+      - order_id
+      - order_total
+      - transfer_amount
+      - transfer_currency
+      - transfer_date
+    PayoutListResponse:
+      type: object
+      description: Response for listing payouts
+      properties:
+        payouts:
+          type: array
+          items:
+            $ref: '#/components/schemas/PayoutSummary'
+        pagination:
+          type: object
+          additionalProperties: {}
+        summary:
+          type: object
+          additionalProperties: {}
+      required:
+      - pagination
+      - payouts
+    PayoutSummary:
+      type: object
+      description: Lightweight serializer for payout list view
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        stripe_payout_id:
+          type: string
+          description: Stripe payout ID
+          maxLength: 255
+        seller_username:
+          type: string
+          readOnly: true
+        status:
+          $ref: '#/components/schemas/Status0e1Enum'
+        payout_type:
+          $ref: '#/components/schemas/PayoutTypeEnum'
+        amount_decimal:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          description: Total payout amount in decimal format
+        formatted_amount:
+          type: string
+          readOnly: true
+        currency:
+          type: string
+          description: Payout currency
+          maxLength: 3
+        transfer_count:
+          type: integer
+          maximum: 4294967295
+          minimum: 0
+          format: int64
+          description: Number of payment transfers included
+        bank_account_last4:
+          type: string
+          description: Last 4 digits of bank account
+          maxLength: 4
+        bank_name:
+          type: string
+          description: Bank name
+          maxLength: 100
+        arrival_date:
+          type: string
+          format: date-time
+          nullable: true
+          description: Expected arrival date
+        is_completed:
+          type: boolean
+          readOnly: true
+        is_failed:
+          type: boolean
+          readOnly: true
+        days_since_created:
+          type: integer
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - amount_decimal
+      - created_at
+      - currency
+      - days_since_created
+      - formatted_amount
+      - id
+      - is_completed
+      - is_failed
+      - seller_username
+      - stripe_payout_id
+      - updated_at
+    PayoutTypeEnum:
+      enum:
+      - standard
+      - express
+      - instant
+      type: string
+      description: |-
+        * `standard` - Standard Payout
+        * `express` - Express Payout
+        * `instant` - Instant Payout
     ProductARModel:
       type: object
       description: Read-only serializer exposing metadata about a product 3D model.
@@ -5465,104 +6196,9 @@ components:
       - description
       - name
       - price
-    ProductDetailSeller:
-      type: object
-      description: Minimal seller info for product detail endpoint
-      properties:
-        id:
-          type: string
-          format: uuid
-          readOnly: true
-        username:
-          type: string
-          readOnly: true
-        seller_rating:
-          type: string
-          nullable: true
-          readOnly: true
-      required:
-      - id
-      - username
-    ProductDetailCategory:
-      type: object
-      description: Minimal category info for product detail endpoint
-      properties:
-        id:
-          type: integer
-          readOnly: true
-        name:
-          type: string
-          maxLength: 100
-        slug:
-          type: string
-          readOnly: true
-        description:
-          type: string
-      required:
-      - id
-      - name
-      - slug
-    ProductDetailImage:
-      type: object
-      description: Minimal image info for product detail endpoint
-      properties:
-        id:
-          type: integer
-          readOnly: true
-        image:
-          type: string
-          description: Original filename
-          readOnly: true
-        alt_text:
-          type: string
-          maxLength: 200
-        is_primary:
-          type: boolean
-        order:
-          type: integer
-          minimum: 0
-        url:
-          type: string
-          description: Proxy URL for the image
-          readOnly: true
-      required:
-      - id
-      - url
-    MinimalProductReview:
-      type: object
-      description: Minimal review info for product detail - no sensitive user data
-      properties:
-        id:
-          type: integer
-          readOnly: true
-        reviewer:
-          allOf:
-          - $ref: '#/components/schemas/MinimalSeller'
-          readOnly: true
-        rating:
-          type: integer
-          maximum: 5
-          minimum: 1
-        title:
-          type: string
-          maxLength: 200
-        comment:
-          type: string
-        is_verified_purchase:
-          type: boolean
-          readOnly: true
-        created_at:
-          type: string
-          format: date-time
-          readOnly: true
-      required:
-      - created_at
-      - id
-      - is_verified_purchase
-      - rating
-      - reviewer
     ProductDetail:
       type: object
+      description: Simplified product detail serializer with minimal nested data
       properties:
         id:
           type: string
@@ -5701,6 +6337,73 @@ components:
       - seller
       - slug
       - view_count
+    ProductDetailCategory:
+      type: object
+      description: Minimal category info for product detail endpoint
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 100
+        slug:
+          type: string
+          readOnly: true
+          pattern: ^[-a-zA-Z0-9_]+$
+        description:
+          type: string
+      required:
+      - id
+      - name
+      - slug
+    ProductDetailImage:
+      type: object
+      description: Minimal image info for product detail endpoint
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        image:
+          type: string
+          readOnly: true
+        alt_text:
+          type: string
+          maxLength: 200
+        is_primary:
+          type: boolean
+        order:
+          type: integer
+          maximum: 4294967295
+          minimum: 0
+          format: int64
+        url:
+          type: string
+          readOnly: true
+      required:
+      - id
+      - image
+      - url
+    ProductDetailSeller:
+      type: object
+      description: Minimal seller info for product detail endpoint
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        username:
+          type: string
+          readOnly: true
+          description: Required. 150 characters or fewer. Letters, digits and @/./+/-/_
+            only.
+        seller_rating:
+          type: string
+          readOnly: true
+      required:
+      - id
+      - seller_rating
+      - username
     ProductFavorite:
       type: object
       properties:
@@ -5725,9 +6428,6 @@ components:
         id:
           type: integer
           readOnly: true
-        image:
-          type: string
-          format: uri
         alt_text:
           type: string
           maxLength: 200
@@ -5776,9 +6476,6 @@ components:
     ProductImageRequest:
       type: object
       properties:
-        image:
-          type: string
-          format: binary
         alt_text:
           type: string
           maxLength: 200
@@ -5791,7 +6488,8 @@ components:
           format: int64
     ProductList:
       type: object
-      description: Minimal product serializer for list/search - just the essentials for product cards
+      description: Minimal product serializer for list/search - just the essentials
+        for product cards
       properties:
         id:
           type: string
@@ -5859,9 +6557,37 @@ components:
       - primary_image
       - review_count
       - slug
+    ProductListPaginatedResponse:
+      type: object
+      properties:
+        count:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+        num_pages:
+          type: integer
+        has_next:
+          type: boolean
+        has_previous:
+          type: boolean
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductList'
+      required:
+      - count
+      - has_next
+      - has_previous
+      - num_pages
+      - page
+      - page_size
+      - results
     ProductListRequest:
       type: object
-      description: Minimal product serializer for lists with query optimization
+      description: Minimal product serializer for list/search - just the essentials
+        for product cards
       properties:
         name:
           type: string
@@ -5889,50 +6615,9 @@ components:
         brand:
           type: string
           maxLength: 100
-        is_featured:
-          type: boolean
-        is_digital:
-          type: boolean
-        is_active:
-          type: boolean
       required:
       - name
       - price
-    ProductListResponse:
-      type: object
-      description: Paginated product list response
-      properties:
-        count:
-          type: integer
-          description: Total number of products
-        page:
-          type: integer
-          description: Current page number
-        page_size:
-          type: integer
-          description: Items per page
-        num_pages:
-          type: integer
-          description: Total number of pages
-        has_next:
-          type: boolean
-          description: Whether there is a next page
-        has_previous:
-          type: boolean
-          description: Whether there is a previous page
-        results:
-          type: array
-          items:
-            $ref: '#/components/schemas/ProductList'
-          description: List of products
-      required:
-      - count
-      - has_next
-      - has_previous
-      - num_pages
-      - page
-      - page_size
-      - results
     ProductMetrics:
       type: object
       properties:
@@ -5980,6 +6665,33 @@ components:
       - total_sales
       - total_views
       - view_to_click_rate
+    ProductSearchPaginatedResponse:
+      type: object
+      properties:
+        count:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+        num_pages:
+          type: integer
+        has_next:
+          type: boolean
+        has_previous:
+          type: boolean
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductList'
+      required:
+      - count
+      - has_next
+      - has_previous
+      - num_pages
+      - page
+      - page_size
+      - results
     Profile:
       type: object
       properties:
@@ -6609,7 +7321,21 @@ components:
       - postal_code
       - state
       - street
-    StatusEnum:
+    Status0e1Enum:
+      enum:
+      - pending
+      - in_transit
+      - paid
+      - failed
+      - canceled
+      type: string
+      description: |-
+        * `pending` - Pending
+        * `in_transit` - In Transit
+        * `paid` - Paid
+        * `failed` - Failed
+        * `canceled` - Canceled
+    Status64fEnum:
       enum:
       - pending_payment
       - payment_confirmed
@@ -6627,6 +7353,76 @@ components:
         * `delivered` - delivered
         * `cancelled` - cancelled
         * `refunded` - refunded
+    StripeAccountCreateRequestRequest:
+      type: object
+      properties:
+        country:
+          type: string
+          minLength: 1
+          default: US
+          description: 2-letter Country Code (ISO 3166-1 alpha-2)
+          maxLength: 2
+        business_type:
+          allOf:
+          - $ref: '#/components/schemas/BusinessTypeEnum'
+          default: individual
+          description: |-
+            Type of business
+
+            * `individual` - individual
+            * `company` - company
+    StripeAccountSessionResponse:
+      type: object
+      description: Response for creating an account session
+      properties:
+        message:
+          type: string
+        client_secret:
+          type: string
+        account_id:
+          type: string
+      required:
+      - account_id
+      - client_secret
+      - message
+    StripeAccountStatusResponse:
+      type: object
+      description: Response for Stripe account status
+      properties:
+        has_account:
+          type: boolean
+        has_stripe_account:
+          type: boolean
+        account_id:
+          type: string
+          nullable: true
+        status:
+          type: string
+        details_submitted:
+          type: boolean
+        charges_enabled:
+          type: boolean
+        payouts_enabled:
+          type: boolean
+        requirements:
+          type: object
+          additionalProperties: {}
+        message:
+          type: string
+        account_created:
+          type: boolean
+        next_step:
+          type: string
+        eligible_for_creation:
+          type: boolean
+        eligibility_errors:
+          type: array
+          items:
+            type: string
+      required:
+      - account_id
+      - has_account
+      - status
     TokenRefresh:
       type: object
       properties:
@@ -6646,6 +7442,50 @@ components:
           minLength: 1
       required:
       - refresh
+    TransferRequestRequest:
+      type: object
+      properties:
+        transaction_id:
+          type: string
+          format: uuid
+          description: ID of the payment transaction to transfer
+        transfer_group:
+          type: string
+          minLength: 1
+          description: Optional transfer group string
+      required:
+      - transaction_id
+    TransferResponse:
+      type: object
+      description: Response for payment transfer
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        transfer_details:
+          type: object
+          additionalProperties: {}
+        currency_info:
+          type: object
+          additionalProperties: {}
+        transaction_details:
+          type: object
+          additionalProperties: {}
+        balance_summary:
+          type: object
+          additionalProperties: {}
+        exchange_rate_info:
+          type: object
+          additionalProperties: {}
+      required:
+      - balance_summary
+      - currency_info
+      - exchange_rate_info
+      - message
+      - success
+      - transaction_details
+      - transfer_details
     TwoFactorCodeRequestRequest:
       type: object
       description: Serializer for requesting a 2FA code

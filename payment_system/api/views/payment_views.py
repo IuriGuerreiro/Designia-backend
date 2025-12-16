@@ -857,7 +857,8 @@ def create_checkout_session(request):
             # Calculate totals from cart
             subtotal = sum(item.total_price for item in cart_items)
             shipping_cost = Decimal("19.99")  # Fixed shipping for now
-            total_amount = subtotal + shipping_cost
+            tax_amount = Decimal("0.00")  # Stripe will handle tax calculation
+            total_amount = subtotal + shipping_cost + tax_amount  # Total will be re-calculated by Stripe
 
             # Create the order with pending_payment status
             order = Order.objects.create(
@@ -866,9 +867,9 @@ def create_checkout_session(request):
                 payment_status="pending",  # Payment status is pending
                 subtotal=subtotal,
                 shipping_cost=shipping_cost,
-                tax_amount=Decimal("0.00"),  # Will be calculated by Stripe
-                total_amount=total_amount,
-                shipping_address={},  # Will be filled by Stripe checkout
+                tax_amount=tax_amount,  # Set to 0.00 as Stripe will handle
+                total_amount=total_amount,  # Temporary, will be updated by webhook
+                shipping_address={},  # Will be filled by Stripe checkout webhook
                 is_locked=False,  # Order is not locked until payment succeeds
             )
 
@@ -917,7 +918,7 @@ def create_checkout_session(request):
             line_items=line_items,
             customer_email=request.user.email,
             mode="payment",
-            success_url=f"{frontend_url}/order-success/{{order.id}}",
+            success_url=f"{frontend_url}/checkout/confirmation/{order.id}",
             cancel_url=frontend_url,  # Fallback cancel URL
             metadata={
                 "user_id": str(request.user.id),
@@ -932,7 +933,9 @@ def create_checkout_session(request):
             },
             automatic_tax={"enabled": True},
             locale=str(request.user.language) or "en",
-            billing_address_collection="required",
+            shipping_address_collection={
+                "allowed_countries": ["US", "CA"]
+            },  # Enable Stripe to collect shipping address
         )
 
         print(f"  Checkout session created: {session_data['sessionId']}")
@@ -1060,7 +1063,7 @@ def create_checkout_failed_checkout(request, order_id):
             line_items=line_items,
             customer_email=request.user.email,
             mode="payment",
-            success_url=f"{frontend_url}/order-success/{{order.id}}",
+            success_url=f"{frontend_url}/checkout/confirmation/{order.id}",
             cancel_url=frontend_url,  # Fallback cancel URL
             metadata={
                 "user_id": str(request.user.id),
@@ -1075,7 +1078,9 @@ def create_checkout_failed_checkout(request, order_id):
             },
             automatic_tax={"enabled": True},
             locale=str(request.user.language) or "en",
-            billing_address_collection="required",
+            shipping_address_collection={
+                "allowed_countries": ["US", "CA"]
+            },  # Enable Stripe to collect shipping address
         )
 
         print(f"  Checkout session created: {session_data['sessionId']}")

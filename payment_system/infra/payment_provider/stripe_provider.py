@@ -42,8 +42,7 @@ class StripePaymentProvider(PaymentProvider):
                     "line_items": line_items,
                     "customer_email": customer_email,
                     "mode": mode,
-                    "return_url": success_url,  # Stripe embedded checkout uses return_url for success
-                    "cancel_url": cancel_url,
+                    "return_url": success_url,  # Stripe embedded checkout uses return_url only (no cancel_url for embedded)
                     "metadata": metadata,
                     "idempotency_key": f"checkout_{metadata.get('order_id') or 'unknown'}_{str(uuid.uuid4())}",
                 }
