@@ -1,5 +1,6 @@
 from .auth_serializers import (
     GoogleAuthSerializer,
+    LoginUserSerializer,
     SetPasswordRequestSerializer,
     SetPasswordVerifySerializer,
     TwoFactorCodeRequestSerializer,
@@ -20,6 +21,7 @@ from .seller_serializers import (
 
 __all__ = [
     "UserSerializer",
+    "LoginUserSerializer",
     "UserRegistrationSerializer",
     "GoogleAuthSerializer",
     "TwoFactorToggleSerializer",

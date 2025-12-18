@@ -18,6 +18,8 @@ from .response_serializers import (
     ProductCreateRequestSerializer,
     ProductListResponseSerializer,
     RemoveFromCartRequestSerializer,
+    ReturnRequestCreateSerializer,
+    ReturnRequestSerializer,
     ReviewResponseSerializer,
     SellerProfileResponseSerializer,
     SuccessResponseSerializer,
@@ -40,6 +42,8 @@ __all__ = [
     "OrderDetailResponseSerializer",
     "OrderListResponseSerializer",
     "CancelOrderRequestSerializer",
+    "ReturnRequestCreateSerializer",  # Added
+    "ReturnRequestSerializer",  # Added
     "CreateReviewRequestSerializer",
     "ReviewResponseSerializer",
     "AutocompleteResponseSerializer",

@@ -239,6 +239,55 @@ class CancelOrderRequestSerializer(serializers.Serializer):
     reason = serializers.CharField(help_text="Reason for cancellation", required=False)
 
 
+class ReturnRequestCreateSerializer(serializers.Serializer):
+    """
+    Serializer for creating a return request.
+    Validates items to ensure they belong to the order and quantities are valid.
+    """
+
+    items = serializers.ListField(
+        child=serializers.DictField(
+            child=serializers.IntegerField(),  # Expecting {'item_id': int, 'quantity': int}
+        ),
+        min_length=1,
+        error_messages={"empty": "Please select at least one item to return."},
+    )
+    reason = serializers.ChoiceField(
+        choices=[
+            "defective",
+            "wrong_item",
+            "size_too_small",
+            "size_too_large",
+            "change_of_mind",
+            "other",
+        ],
+        error_messages={"invalid_choice": "Invalid return reason."},
+    )
+    comment = serializers.CharField(required=False, allow_blank=True)
+    proof_image_urls = serializers.ListField(child=serializers.URLField(), required=False, allow_empty=True)
+
+
+class ReturnRequestSerializer(serializers.Serializer):
+    """
+    Serializer for the ReturnRequest model (output/read-only).
+    """
+
+    id = serializers.UUIDField(help_text="Return Request UUID")
+    order_id = serializers.UUIDField(help_text="Associated Order UUID")
+    requested_by_username = serializers.CharField(help_text="Username of the requester")
+    reason = serializers.CharField(help_text="Reason for return")
+    comment = serializers.CharField(help_text="Additional comments", required=False, allow_blank=True)
+    status = serializers.CharField(help_text="Status of the return request")
+    proof_image_urls = serializers.ListField(
+        child=serializers.URLField(), help_text="List of URLs for proof images", required=False, allow_empty=True
+    )
+    created_at = serializers.DateTimeField(help_text="Timestamp of request creation")
+    updated_at = serializers.DateTimeField(help_text="Timestamp of last update")
+    approved_by = serializers.CharField(help_text="Username of approver", required=False, allow_null=True)
+    approved_at = serializers.DateTimeField(help_text="Timestamp of approval", required=False, allow_null=True)
+    rejection_reason = serializers.CharField(help_text="Reason for rejection", required=False, allow_blank=True)
+
+
 # ===== Review Response Serializers =====
 
 

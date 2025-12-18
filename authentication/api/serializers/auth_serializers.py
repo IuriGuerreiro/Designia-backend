@@ -232,3 +232,21 @@ class SetPasswordVerifySerializer(serializers.Serializer):
         if attrs["password"] != attrs["password_confirm"]:
             raise serializers.ValidationError("Password fields didn't match.")
         return attrs
+
+
+class LoginUserSerializer(serializers.ModelSerializer):
+    """Lightweight serializer for login responses - only essential user data"""
+
+    class Meta:
+        model = CustomUser
+        fields = (
+            "id",
+            "username",
+            "email",
+            "first_name",
+            "last_name",
+            "avatar",
+            "language",
+            "role",
+        )
+        read_only_fields = fields

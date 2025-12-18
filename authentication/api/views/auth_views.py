@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from authentication.api.serializers import (
+    LoginUserSerializer,
     TwoFactorCodeRequestSerializer,
     TwoFactorConfirmSerializer,
     UserRegistrationSerializer,
@@ -117,7 +118,7 @@ class LoginAPIView(APIView):
                     "message": result.message,
                     "access": result.access_token,
                     "refresh": result.refresh_token,
-                    "user": UserSerializer(result.user).data,
+                    "user": LoginUserSerializer(result.user).data,
                 },
                 status=status.HTTP_200_OK,
             )
@@ -324,7 +325,7 @@ class GoogleLoginView(APIView):
                     "message": result.message,
                     "access": result.access_token,
                     "refresh": result.refresh_token,
-                    "user": UserSerializer(result.user).data,
+                    "user": LoginUserSerializer(result.user).data,
                 },
                 status=status.HTTP_200_OK,
             )
@@ -372,7 +373,7 @@ class TwoFactorLoginVerifyView(APIView):
                     "message": result.message,
                     "access": result.access_token,
                     "refresh": result.refresh_token,
-                    "user": UserSerializer(result.user).data,
+                    "user": LoginUserSerializer(result.user).data,
                 },
                 status=status.HTTP_200_OK,
             )

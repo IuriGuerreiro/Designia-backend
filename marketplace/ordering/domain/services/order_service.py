@@ -24,6 +24,7 @@ from marketplace.cart.domain.services.pricing_service import PricingService
 from marketplace.catalog.domain.services.base import BaseService, ErrorCodes, ServiceResult, service_err, service_ok
 from marketplace.infra.observability.metrics import order_value, orders_placed_total
 from marketplace.ordering.domain.models.order import Order, OrderItem
+from marketplace.ordering.domain.models.return_request import ReturnRequest
 from payment_system.domain.services.email_utils import (
     send_failed_refund_notification_email,
     send_order_cancellation_receipt_email,
@@ -559,6 +560,88 @@ class OrderService(BaseService):
             return service_err(ErrorCodes.ORDER_NOT_FOUND, f"Order {order_id} not found")
         except Exception as e:
             self.logger.error(f"Error cancelling order {order_id}: {e}", exc_info=True)
+            return service_err(ErrorCodes.INTERNAL_ERROR, str(e))
+
+    @BaseService.log_performance
+    @transaction.atomic
+    def create_return_request(
+        self,
+        order_id: str,
+        user: User,
+        items_data: List[Dict],
+        reason: str,
+        comment: Optional[str] = None,
+        proof_image_urls: Optional[List[str]] = None,
+    ) -> ServiceResult[ReturnRequest]:
+        """
+        Create a return request for a delivered order.
+        """
+        try:
+            order = (
+                Order.objects.select_for_update().select_related("buyer").prefetch_related("items").get(id=order_id)
+            )
+
+            # Validate ownership
+            if order.buyer != user:
+                return service_err(ErrorCodes.NOT_ORDER_OWNER, "You do not own this order.")
+
+            # Validate order status
+            if order.status != "delivered":
+                return service_err(
+                    ErrorCodes.INVALID_ORDER_STATE,
+                    f"Return request can only be created for 'delivered' orders. Current status: {order.status}.",
+                )
+
+            # Validate requested items and quantities
+            order_items_to_return = []
+            for item_data in items_data:
+                order_item_id = item_data.get("itemId")  # Frontend field name
+                quantity = item_data.get("quantity")
+
+                try:
+                    order_item = order.items.get(id=order_item_id)
+                except OrderItem.DoesNotExist:
+                    return service_err(
+                        ErrorCodes.ITEM_NOT_FOUND,
+                        f"Order item with ID {order_item_id} not found in this order.",
+                    )
+
+                if not isinstance(quantity, int) or quantity <= 0 or quantity > order_item.quantity:
+                    return service_err(
+                        ErrorCodes.INVALID_QUANTITY,
+                        f"Invalid quantity {quantity} for item {order_item.product_name}. Must be between 1 and {order_item.quantity}.",
+                    )
+                order_items_to_return.append({"order_item": order_item, "quantity": quantity})
+
+            if not order_items_to_return:
+                return service_err(ErrorCodes.VALIDATION_ERROR, "No items selected for return.")
+
+            # Create the ReturnRequest
+            return_request = ReturnRequest.objects.create(
+                order=order,
+                requested_by=user,
+                reason=reason,
+                comment=comment,
+                proof_image_urls=proof_image_urls,
+                status="pending",  # Initial status
+            )
+
+            # Link returned items to the ReturnRequest (many-to-many relationship, or just save quantities)
+            # For simplicity, we are saving the items and quantities within the ReturnRequest, not linking explicitly for now.
+            # In a more complex system, we'd have a separate model for ReturnRequestItems
+
+            # Update order status to indicate a return request has been initiated
+            order.status = "return_requested"
+            order.save(update_fields=["status"])
+
+            self.logger.info(f"Return request {return_request.id} created for order {order_id} by user {user.id}.")
+
+            return service_ok(return_request)
+
+        except Order.DoesNotExist:
+            return service_err(ErrorCodes.ORDER_NOT_FOUND, f"Order {order_id} not found.")
+        except Exception as e:
+            self.logger.error(f"Error creating return request for order {order_id}: {e}", exc_info=True)
             return service_err(ErrorCodes.INTERNAL_ERROR, str(e))
 
     def _rollback_reservations(self, reservations: List[Dict]) -> None:

@@ -16,6 +16,7 @@ class Order(models.Model):
         ("awaiting_shipment", "Awaiting Shipment"),
         ("shipped", "Shipped"),
         ("delivered", "Delivered"),
+        ("return_requested", "Return Requested"),  # New status for when a return is initiated
         ("cancelled", "Cancelled"),
         ("refunded", "Refunded"),
     ]

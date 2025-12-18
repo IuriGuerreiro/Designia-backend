@@ -11,6 +11,8 @@ from marketplace.api.serializers import (
     ErrorResponseSerializer,
     OrderDetailResponseSerializer,
     OrderListResponseSerializer,
+    ReturnRequestCreateSerializer,  # NEW
+    ReturnRequestSerializer,  # NEW
 )
 from marketplace.serializers import OrderSerializer
 from marketplace.services import ErrorCodes, OrderService
@@ -288,6 +290,67 @@ class OrderViewSet(viewsets.ViewSet):
             return Response({"detail": result.error_detail}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         return Response(OrderSerializer(result.value).data, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        operation_id="orders_return_request",
+        summary="Create return request for order",
+        description="""
+        **What it receives:**
+        - `order_id` (UUID in URL): Order for which to request return
+        - `items` (list of objects): Items to return with quantities (`itemId`, `quantity`)
+        - `reason` (string): Reason for return
+        - `comment` (string, optional): Additional comments
+        - `proof_image_urls` (list of strings, optional): URLs of proof images
+        - Authentication token (must be order buyer)
+
+        **What it returns:**
+        - Created return request
+        - Order status transitions to "return_requested"
+        """,
+        request=ReturnRequestCreateSerializer,
+        responses={
+            201: OpenApiResponse(response=ReturnRequestSerializer, description="Return request created successfully"),
+            400: OpenApiResponse(response=ErrorResponseSerializer, description="Invalid data or order state"),
+            403: OpenApiResponse(response=ErrorResponseSerializer, description="Not order owner"),
+            404: OpenApiResponse(response=ErrorResponseSerializer, description="Order not found"),
+            500: OpenApiResponse(response=ErrorResponseSerializer, description="Internal server error"),
+        },
+        tags=["Marketplace - Orders"],
+    )
+    @action(detail=True, methods=["post"], url_path="return")
+    def return_request(self, request, pk=None):
+        service = self.get_service()
+        serializer = ReturnRequestCreateSerializer(data=request.data, context={"order_id": pk})
+        serializer.is_valid(raise_exception=True)
+
+        items_data = serializer.validated_data.get("items")  # Frontend sends itemId and quantity
+        reason = serializer.validated_data.get("reason")
+        comment = serializer.validated_data.get("comment")
+        proof_image_urls = serializer.validated_data.get("proof_image_urls")
+
+        result = service.create_return_request(
+            order_id=pk,
+            user=request.user,
+            items_data=items_data,
+            reason=reason,
+            comment=comment,
+            proof_image_urls=proof_image_urls,
+        )
+
+        if not result.ok:
+            if result.error == ErrorCodes.ORDER_NOT_FOUND:
+                return Response({"detail": result.error_detail}, status=status.HTTP_404_NOT_FOUND)
+            elif result.error == ErrorCodes.NOT_ORDER_OWNER:
+                return Response({"detail": result.error_detail}, status=status.HTTP_403_FORBIDDEN)
+            elif result.error == ErrorCodes.INVALID_ORDER_STATE:
+                return Response({"detail": result.error_detail}, status=status.HTTP_400_BAD_REQUEST)
+            elif result.error == ErrorCodes.ITEM_NOT_FOUND:
+                return Response({"detail": result.error_detail}, status=status.HTTP_400_BAD_REQUEST)
+            elif result.error == ErrorCodes.INVALID_QUANTITY:
+                return Response({"detail": result.error_detail}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"detail": result.error_detail}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response(ReturnRequestSerializer(result.value).data, status=status.HTTP_201_CREATED)
 
     @extend_schema(
         operation_id="orders_cancel",
