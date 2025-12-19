@@ -11,7 +11,7 @@ from .auth_views import (
     VerifyEmailView,
 )
 from .profile_views import ProfilePictureUploadView, ProfileUpdateView, PublicProfileDetailView
-from .seller_views import SellerApplicationAdminView, SellerApplicationCreateView
+from .seller_views import SellerApplicationAdminView, SellerApplicationCreateView, SellerApplicationStatusView
 
 
 __all__ = [
@@ -29,5 +29,6 @@ __all__ = [
     "ProfileUpdateView",
     "ProfilePictureUploadView",
     "SellerApplicationCreateView",
+    "SellerApplicationStatusView",
     "SellerApplicationAdminView",
 ]

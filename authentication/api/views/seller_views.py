@@ -21,8 +21,11 @@ def get_seller_service():
 
 
 class SellerApplicationCreateView(APIView):
+    """POST only - Submit seller application"""
+
     permission_classes = [permissions.IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser]
+    http_method_names = ["post"]
 
     @extend_schema(
         operation_id="seller_application_submit",
@@ -92,6 +95,13 @@ class SellerApplicationCreateView(APIView):
             return Response(result.data, status=status.HTTP_201_CREATED)
 
         return Response({"error": result.message}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class SellerApplicationStatusView(APIView):
+    """GET only - Check seller application status"""
+
+    permission_classes = [permissions.IsAuthenticated]
+    http_method_names = ["get"]
 
     @extend_schema(
         operation_id="seller_application_status",

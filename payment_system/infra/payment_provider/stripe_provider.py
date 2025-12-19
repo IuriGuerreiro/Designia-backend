@@ -258,6 +258,9 @@ class StripePaymentProvider(PaymentProvider):
                         "first_name": kwargs.get("first_name", ""),
                         "last_name": kwargs.get("last_name", ""),
                     }
+                    # Remove first_name and last_name from kwargs since they belong in the individual object
+                    kwargs.pop("first_name", None)
+                    kwargs.pop("last_name", None)
 
                 # Allow overriding defaults
                 account_params.update(kwargs)

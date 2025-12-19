@@ -43,6 +43,45 @@ logger = logging.getLogger(__name__)
 
 User = get_user_model()
 
+
+# ===============================================================================
+# HELPER FUNCTIONS
+# ===============================================================================
+
+
+def validate_2fa_requirement(user):
+    """
+    Validate that user has 2FA enabled for sensitive payout operations.
+
+    OAuth users are exempt from this requirement as they use social auth.
+    Regular users must have 2FA enabled to access payout functionality.
+
+    Args:
+        user: The authenticated user
+
+    Returns:
+        tuple: (is_valid: bool, error_response: Response or None)
+    """
+    # OAuth users are exempt from 2FA requirement
+    if user.is_oauth_only_user():
+        return True, None
+
+    # Check if 2FA is enabled for non-OAuth users
+    two_factor_enabled = getattr(user, "two_factor_enabled", False)
+
+    if not two_factor_enabled:
+        logger.warning(f"User {user.id} attempted to access payouts without 2FA enabled")
+        return False, Response(
+            {
+                "error": "TWO_FACTOR_REQUIRED",
+                "detail": "Two-factor authentication must be enabled to access payout functionality. Please enable 2FA in your account settings.",
+            },
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    return True, None
+
+
 # ===============================================================================
 # PAYOUT VIEWS - All payout-related functionality
 # ===============================================================================
@@ -82,10 +121,10 @@ def seller_payout(request):
 @extend_schema(
     operation_id="payout_get_holds",
     summary="Get Payment Holds",
-    description="Retrieve all held transactions for the authenticated seller.",
+    description="Retrieve all held transactions for the authenticated seller. Requires 2FA to be enabled.",
     responses={
         200: OpenApiResponse(response=PaymentHoldsResponseSerializer, description="Holds retrieved"),
-        403: OpenApiResponse(response=ErrorResponseSerializer, description="Not authorized"),
+        403: OpenApiResponse(response=ErrorResponseSerializer, description="Not authorized or 2FA not enabled"),
     },
     tags=["Payouts"],
 )
@@ -113,6 +152,11 @@ def get_seller_payment_holds(request):
     try:
         # Get user from database (don't trust token)
         user = User.objects.get(id=request.user.id)
+
+        # 2FA VALIDATION: Ensure user has 2FA enabled for payout access
+        is_valid, error_response = validate_2fa_requirement(user)
+        if not is_valid:
+            return error_response
 
         # ROLE CHECK: Verify seller or admin role from database
         from utils.rbac import is_seller
@@ -176,7 +220,7 @@ def get_seller_payment_holds(request):
 @extend_schema(
     operation_id="payout_list",
     summary="List Payouts",
-    description="List all payouts for the authenticated seller.",
+    description="List all payouts for the authenticated seller. Requires 2FA to be enabled.",
     parameters=[
         OpenApiParameter(
             name="page_size",
@@ -208,7 +252,7 @@ def get_seller_payment_holds(request):
     ],
     responses={
         200: OpenApiResponse(response=PayoutListResponseSerializer, description="List of payouts"),
-        403: OpenApiResponse(response=ErrorResponseSerializer, description="Not authorized"),
+        403: OpenApiResponse(response=ErrorResponseSerializer, description="Not authorized or 2FA not enabled"),
     },
     tags=["Payouts"],
 )
@@ -223,6 +267,11 @@ def user_payouts_list(request):
     try:
         # Get user from database (don't trust token)
         user = User.objects.get(id=request.user.id)
+
+        # 2FA VALIDATION: Ensure user has 2FA enabled for payout access
+        is_valid, error_response = validate_2fa_requirement(user)
+        if not is_valid:
+            return error_response
 
         # ROLE CHECK: Verify seller or admin role from database
         from utils.rbac import is_seller
@@ -285,9 +334,10 @@ def user_payouts_list(request):
 @extend_schema(
     operation_id="payout_detail",
     summary="Get Payout Detail",
-    description="Get detailed information for a specific payout.",
+    description="Get detailed information for a specific payout. Requires 2FA to be enabled.",
     responses={
         200: OpenApiResponse(response=PayoutDetailResponseSerializer, description="Payout detail"),
+        403: OpenApiResponse(response=ErrorResponseSerializer, description="Not authorized or 2FA not enabled"),
         404: OpenApiResponse(response=ErrorResponseSerializer, description="Payout not found"),
     },
     tags=["Payouts"],
@@ -302,6 +352,11 @@ def payout_detail(request, payout_id):
     """
     try:
         user = User.objects.get(id=request.user.id)
+
+        # 2FA VALIDATION: Ensure user has 2FA enabled for payout access
+        is_valid, error_response = validate_2fa_requirement(user)
+        if not is_valid:
+            return error_response
 
         from utils.rbac import is_seller
 
@@ -334,9 +389,10 @@ def payout_detail(request, payout_id):
 @extend_schema(
     operation_id="payout_orders",
     summary="Get Payout Orders",
-    description="List all orders included in a specific payout.",
+    description="List all orders included in a specific payout. Requires 2FA to be enabled.",
     responses={
         200: OpenApiResponse(response=PayoutOrdersResponseSerializer, description="Payout orders"),
+        403: OpenApiResponse(response=ErrorResponseSerializer, description="Not authorized or 2FA not enabled"),
         404: OpenApiResponse(response=ErrorResponseSerializer, description="Payout not found"),
     },
     tags=["Payouts"],
@@ -347,6 +403,11 @@ def payout_orders(request, payout_id):
     """
     try:
         user = User.objects.get(id=request.user.id)
+
+        # 2FA VALIDATION: Ensure user has 2FA enabled for payout access
+        is_valid, error_response = validate_2fa_requirement(user)
+        if not is_valid:
+            return error_response
 
         from utils.rbac import is_seller
 
@@ -447,9 +508,10 @@ def payout_orders(request, payout_id):
 @extend_schema(
     operation_id="payout_analytics",
     summary="Payout Analytics",
-    description="Get comprehensive payout analytics and metrics.",
+    description="Get comprehensive payout analytics and metrics. Requires 2FA to be enabled.",
     responses={
         200: OpenApiResponse(response=PayoutAnalyticsResponseSerializer, description="Analytics data"),
+        403: OpenApiResponse(response=ErrorResponseSerializer, description="2FA not enabled"),
         500: OpenApiResponse(response=ErrorResponseSerializer, description="Internal error"),
     },
     tags=["Analytics"],
@@ -460,6 +522,12 @@ def payout_analytics_dashboard(request):
     """
     try:
         user = request.user
+
+        # 2FA VALIDATION: Ensure user has 2FA enabled for payout access
+        is_valid, error_response = validate_2fa_requirement(user)
+        if not is_valid:
+            return error_response
+
         logger.info(f"Fetching payout analytics dashboard for user: {user.id}")
 
         analytics_data = PayoutService.get_analytics_dashboard(str(user.id))
@@ -487,9 +555,10 @@ def payout_analytics_dashboard(request):
 @extend_schema(
     operation_id="payout_performance",
     summary="Payout Performance Report",
-    description="Get detailed performance metrics for payout operations.",
+    description="Get detailed performance metrics for payout operations. Requires 2FA to be enabled.",
     responses={
         200: OpenApiResponse(response=PerformanceReportResponseSerializer, description="Performance report"),
+        403: OpenApiResponse(response=ErrorResponseSerializer, description="2FA not enabled"),
         500: OpenApiResponse(response=ErrorResponseSerializer, description="Internal error"),
     },
     tags=["Analytics"],
@@ -500,6 +569,12 @@ def payout_performance_report(request):  # noqa: C901
     """
     try:
         user = request.user
+
+        # 2FA VALIDATION: Ensure user has 2FA enabled for payout access
+        is_valid, error_response = validate_2fa_requirement(user)
+        if not is_valid:
+            return error_response
+
         logger.info(f"Generating performance report for user: {user.id}")
 
         report_data = PayoutService.get_performance_report(str(user.id))
@@ -527,11 +602,12 @@ def payout_performance_report(request):  # noqa: C901
 @extend_schema(
     operation_id="payout_reconciliation_update",
     summary="Update Reconciliation Status",
-    description="Update reconciliation status for a payout.",
+    description="Update reconciliation status for a payout. Requires 2FA to be enabled.",
     request=ReconciliationUpdateRequestSerializer,
     responses={
         200: OpenApiResponse(response=ReconciliationUpdateResponseSerializer, description="Updated successfully"),
         400: OpenApiResponse(response=ErrorResponseSerializer, description="Invalid status"),
+        403: OpenApiResponse(response=ErrorResponseSerializer, description="2FA not enabled"),
         404: OpenApiResponse(response=ErrorResponseSerializer, description="Payout not found"),
     },
     tags=["Payouts"],
@@ -542,6 +618,12 @@ def update_payout_reconciliation(request, payout_id):
     """
     try:
         user = request.user
+
+        # 2FA VALIDATION: Ensure user has 2FA enabled for payout access
+        is_valid, error_response = validate_2fa_requirement(user)
+        if not is_valid:
+            return error_response
+
         new_status = request.data.get("reconciliation_status")
         notes = request.data.get("notes", "")
 

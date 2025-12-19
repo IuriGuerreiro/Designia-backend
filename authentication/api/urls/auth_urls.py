@@ -14,6 +14,7 @@ from authentication.api.views import (
     ResendVerificationView,
     SellerApplicationAdminView,
     SellerApplicationCreateView,
+    SellerApplicationStatusView,
     Send2FACodeView,
     TwoFactorLoginVerifyView,
     VerifyEmailView,
@@ -43,7 +44,7 @@ urlpatterns = [
     path("users/<uuid:pk>/", PublicProfileDetailView.as_view(), name="public_profile_detail"),
     # Seller
     path("seller/apply/", SellerApplicationCreateView.as_view(), name="seller_apply"),
-    path("seller/application/status/", SellerApplicationCreateView.as_view(), name="seller_application_status"),
+    path("seller/application/status/", SellerApplicationStatusView.as_view(), name="seller_application_status"),
     path(
         "admin/seller/applications/<int:pk>/",
         SellerApplicationAdminView.as_view(),

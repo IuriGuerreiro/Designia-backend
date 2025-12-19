@@ -43,54 +43,54 @@ class StripeConnectService:
         Returns:
             dict: Validation result with success status and errors
         """
-        logger.info(f"🔍 VALIDATING SELLER REQUIREMENTS for user: {user.email}")
+        logger.info(f"[VALIDATION] Validating seller requirements for user: {user.email}")
         logger.debug(
-            f"📋 User info: is_oauth={user.is_oauth_only_user()}, has_stripe_account={bool(user.stripe_account_id)}, two_factor_enabled={getattr(user, 'two_factor_enabled', 'N/A')}"
+            f"[VALIDATION] User info: is_oauth={user.is_oauth_only_user()}, has_stripe_account={bool(user.stripe_account_id)}, two_factor_enabled={getattr(user, 'two_factor_enabled', 'N/A')}"
         )
 
         errors = []
 
         # Check if user already has a Stripe account
         if user.stripe_account_id:
-            logger.info(f" User already has Stripe account: {user.stripe_account_id}")
+            logger.info(f"[VALIDATION] User already has Stripe account: {user.stripe_account_id}")
             errors.append("User already has a Stripe account associated with this profile.")
         else:
-            logger.info("  User does not have existing Stripe account")
+            logger.info("[VALIDATION] User does not have existing Stripe account")
 
         # For non-OAuth users, require password and 2FA
         if not user.is_oauth_only_user():
-            logger.info("🔍 Checking regular user requirements (password + 2FA)...")
+            logger.info("[VALIDATION] Checking regular user requirements (password + 2FA)...")
 
             # Check if user has usable password
             has_password = user.has_usable_password()
-            logger.info(f"🔑 Has usable password: {has_password}")
+            logger.info(f"[VALIDATION] Has usable password: {has_password}")
 
             if not has_password:
-                logger.warning(" User doesn't have usable password")
+                logger.warning("[VALIDATION] User doesn't have usable password")
                 errors.append("Password is required to create a seller account. Please set up a password first.")
             else:
                 # Additional check for passwords starting with '!' (Django's unusable password prefix)
                 if hasattr(user, "password") and user.password and user.password.startswith("!"):
-                    logger.warning(" User has invalid password (starts with '!')")
+                    logger.warning("[VALIDATION] User has invalid password (starts with '!')")
                     errors.append("Invalid password detected. Please reset your password to continue.")
                 else:
-                    logger.info("  User has valid password")
+                    logger.info("[VALIDATION] User has valid password")
 
             # Check if 2FA is enabled for non-OAuth users
             two_factor_enabled = getattr(user, "two_factor_enabled", False)
-            logger.info(f"🔐 Two-factor enabled: {two_factor_enabled}")
+            logger.info(f"[VALIDATION] Two-factor enabled: {two_factor_enabled}")
 
             if not two_factor_enabled:
-                logger.warning(" User doesn't have 2FA enabled")
+                logger.warning("[VALIDATION] User doesn't have 2FA enabled")
                 errors.append("Two-factor authentication must be enabled to create a seller account.")
             else:
-                logger.info("  User has 2FA enabled")
+                logger.info("[VALIDATION] User has 2FA enabled")
         else:
-            logger.info("  OAuth user - no additional password/2FA requirements")
+            logger.info("[VALIDATION] OAuth user - no additional password/2FA requirements")
 
         result = {"valid": len(errors) == 0, "errors": errors}
 
-        logger.info(f"📊 VALIDATION RESULT: {result}")
+        logger.info(f"[VALIDATION] RESULT: {result}")
         return result
 
     @staticmethod
@@ -109,47 +109,47 @@ class StripeConnectService:
         Returns:
             dict: Validation result with success status and errors
         """
-        logger.info(f"🔍 VALIDATING SESSION REQUIREMENTS for user: {user.email}")
+        logger.info(f"[SESSION] Validating session requirements for user: {user.email}")
         logger.debug(
-            f"📋 User info: is_oauth={user.is_oauth_only_user()}, has_stripe_account={bool(user.stripe_account_id)}, two_factor_enabled={getattr(user, 'two_factor_enabled', 'N/A')}"
+            f"[SESSION] User info: is_oauth={user.is_oauth_only_user()}, has_stripe_account={bool(user.stripe_account_id)}, two_factor_enabled={getattr(user, 'two_factor_enabled', 'N/A')}"
         )
 
         errors = []
 
         # For non-OAuth users, require password and 2FA
         if not user.is_oauth_only_user():
-            logger.info("🔍 Checking regular user session requirements (password + 2FA)...")
+            logger.info("[SESSION] Checking regular user session requirements (password + 2FA)...")
 
             # Check if user has usable password
             has_password = user.has_usable_password()
-            logger.info(f"🔑 Has usable password: {has_password}")
+            logger.info(f"[SESSION] Has usable password: {has_password}")
 
             if not has_password:
-                logger.warning(" User doesn't have usable password")
+                logger.warning("[SESSION] User doesn't have usable password")
                 errors.append("Password is required to access seller account. Please set up a password first.")
             else:
                 # Additional check for passwords starting with '!' (Django's unusable password prefix)
                 if hasattr(user, "password") and user.password and user.password.startswith("!"):
-                    logger.warning(" User has invalid password (starts with '!')")
+                    logger.warning("[SESSION] User has invalid password (starts with '!')")
                     errors.append("Invalid password detected. Please reset your password to continue.")
                 else:
-                    logger.info("  User has valid password")
+                    logger.info("[SESSION] User has valid password")
 
             # Check if 2FA is enabled for non-OAuth users
             two_factor_enabled = getattr(user, "two_factor_enabled", False)
-            logger.info(f"🔐 Two-factor enabled: {two_factor_enabled}")
+            logger.info(f"[SESSION] Two-factor enabled: {two_factor_enabled}")
 
             if not two_factor_enabled:
-                logger.warning(" User doesn't have 2FA enabled")
+                logger.warning("[SESSION] User doesn't have 2FA enabled")
                 errors.append("Two-factor authentication must be enabled to access seller account.")
             else:
-                logger.info("  User has 2FA enabled")
+                logger.info("[SESSION] User has 2FA enabled")
         else:
-            logger.info("  OAuth user - no additional password/2FA requirements for session")
+            logger.info("[SESSION] OAuth user - no additional password/2FA requirements for session")
 
         result = {"valid": len(errors) == 0, "errors": errors}
 
-        logger.info(f"📊 SESSION VALIDATION RESULT: {result}")
+        logger.info(f"[SESSION] VALIDATION RESULT: {result}")
         return result
 
     @classmethod
@@ -165,19 +165,19 @@ class StripeConnectService:
         Returns:
             dict: Result with account_id and success status
         """
-        logger.info(f"🔄 STRIPE ACCOUNT CREATION START for user: {user.email}")
-        logger.info(f"📋 Request parameters: country={country}, business_type={business_type}")
+        logger.info(f"[CREATE_ACCOUNT] Starting Stripe account creation for user: {user.email}")
+        logger.info(f"[CREATE_ACCOUNT] Request parameters: country={country}, business_type={business_type}")
         try:
             # First validate user requirements
-            logger.info("🔍 Validating user requirements...")
+            logger.info("[CREATE_ACCOUNT] Validating user requirements...")
             validation = cls.validate_seller_requirements(user)
-            logger.info(f"  Validation result: {validation}")
+            logger.info(f"[CREATE_ACCOUNT] Validation result: {validation}")
 
             if not validation["valid"]:
-                logger.warning(f" Validation failed with errors: {validation['errors']}")
+                logger.warning(f"[CREATE_ACCOUNT] Validation failed with errors: {validation['errors']}")
                 return {"success": False, "errors": validation["errors"]}
 
-            logger.info("  User validation passed, creating Stripe account...")
+            logger.info("[CREATE_ACCOUNT] User validation passed, creating Stripe account...")
 
             # Use provider to create account
             provider = cls.get_provider()
@@ -188,19 +188,19 @@ class StripeConnectService:
                 kwargs["first_name"] = user.first_name or ""
                 kwargs["last_name"] = user.last_name or ""
 
-            logger.info("🚀 Calling PaymentProvider.create_connected_account...")
+            logger.info("[CREATE_ACCOUNT] Calling PaymentProvider.create_connected_account...")
             account = provider.create_connected_account(
                 email=user.email, country=country, business_type=business_type, **kwargs
             )
 
-            logger.info("  Stripe account created successfully!")
-            logger.info(f"🆔 Account ID: {account.id}")
+            logger.info("[CREATE_ACCOUNT] Stripe account created successfully!")
+            logger.info(f"[CREATE_ACCOUNT] Account ID: {account.id}")
             logger.info(
-                f"📊 Account status: charges_enabled={account.charges_enabled}, details_submitted={account.details_submitted}"
+                f"[CREATE_ACCOUNT] Account status: charges_enabled={account.charges_enabled}, details_submitted={account.details_submitted}"
             )
 
             # Save account ID to user model
-            logger.info("💾 Saving account ID to user model...")
+            logger.info("[CREATE_ACCOUNT] Saving account ID to user model...")
             user.stripe_account_id = account.id
             user.save(update_fields=["stripe_account_id"])
 
@@ -210,8 +210,10 @@ class StripeConnectService:
             return {"success": True, "account_id": account.id, "account": account}
 
         except Exception as e:
-            logger.exception(f" UNEXPECTED ERROR creating Stripe account for user {user.email}: {str(e)}")
-            logger.error(f"Unexpected error creating Stripe account for user {user.email}: {str(e)}")
+            logger.exception(
+                f"[CREATE_ACCOUNT] Unexpected error creating Stripe account for user {user.email}: {str(e)}"
+            )
+            logger.error(f"[CREATE_ACCOUNT] Unexpected error creating Stripe account for user {user.email}: {str(e)}")
             return {"success": False, "errors": [f"An unexpected error occurred: {str(e)}"]}
 
     @classmethod
@@ -225,26 +227,26 @@ class StripeConnectService:
         Returns:
             dict: Result with account session data
         """
-        logger.info(f"🔄 STRIPE ACCOUNT SESSION CREATION START for user: {user.email}")
-        logger.info(f"🆔 User's Stripe Account ID: {user.stripe_account_id}")
+        logger.info(f"[CREATE_SESSION] Starting account session creation for user: {user.email}")
+        logger.info(f"[CREATE_SESSION] User's Stripe Account ID: {user.stripe_account_id}")
         try:
             # Validate user requirements for session access (allows existing accounts)
-            logger.info("🔍 Validating user session requirements...")
+            logger.info("[CREATE_SESSION] Validating user session requirements...")
             validation = cls.validate_seller_session_requirements(user)
-            logger.info(f"  Session validation result: {validation}")
+            logger.info(f"[CREATE_SESSION] Session validation result: {validation}")
 
             if not validation["valid"]:
-                logger.warning(f" Session validation failed with errors: {validation['errors']}")
+                logger.warning(f"[CREATE_SESSION] Session validation failed with errors: {validation['errors']}")
                 return {"success": False, "errors": validation["errors"]}
 
             if not user.stripe_account_id:
-                logger.warning(" User does not have a Stripe account ID")
+                logger.warning("[CREATE_SESSION] User does not have a Stripe account ID")
                 return {
                     "success": False,
                     "errors": ["User does not have a Stripe account. Please create an account first."],
                 }
 
-            logger.info("  User has valid Stripe account, creating account session...")
+            logger.info("[CREATE_SESSION] User has valid Stripe account, creating account session...")
 
             provider = cls.get_provider()
 
@@ -254,18 +256,17 @@ class StripeConnectService:
                     "features": {"disable_stripe_user_authentication": True, "external_account_collection": True},
                 }
             }
-            settings_params = {"payouts": {"schedule": {"interval": "manual"}}}  # 🔑 disables automatic payouts
+            # NOTE: Payout settings should be configured on the Account itself, not in AccountSession
+            # Manual payouts are configured when creating the connected account
 
-            logger.info("🚀 Calling PaymentProvider.create_account_session...")
-            account_session = provider.create_account_session(
-                account_id=user.stripe_account_id, components=components, settings=settings_params
-            )
+            logger.info("[CREATE_SESSION] Calling PaymentProvider.create_account_session...")
+            account_session = provider.create_account_session(account_id=user.stripe_account_id, components=components)
 
-            logger.info("  Account session created successfully!")
+            logger.info("[CREATE_SESSION] Account session created successfully!")
             logger.debug(
-                f"🔑 Client secret: {account_session.client_secret[:20]}...{account_session.client_secret[-10:] if len(account_session.client_secret) > 30 else account_session.client_secret}"
+                f"[CREATE_SESSION] Client secret: {account_session.client_secret[:20]}...{account_session.client_secret[-10:] if len(account_session.client_secret) > 30 else account_session.client_secret}"
             )
-            logger.info(f"⏰ Session expires at: {account_session.expires_at}")
+            logger.info(f"[CREATE_SESSION] Session expires at: {account_session.expires_at}")
 
             logger.info(f"Created account session for user {user.email} with account {user.stripe_account_id}")
 
@@ -276,8 +277,8 @@ class StripeConnectService:
             }
 
         except Exception as e:
-            logger.exception(f" UNEXPECTED ERROR in session creation for user {user.email}: {str(e)}")
-            logger.error(f"Unexpected error creating account session for user {user.email}: {str(e)}")
+            logger.exception(f"[CREATE_SESSION] Unexpected error in session creation for user {user.email}: {str(e)}")
+            logger.error(f"[CREATE_SESSION] Unexpected error creating account session for user {user.email}: {str(e)}")
             return {"success": False, "errors": [f"An unexpected error occurred: {str(e)}"]}
 
     @classmethod
