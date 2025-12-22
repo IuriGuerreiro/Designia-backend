@@ -1591,13 +1591,12 @@ def get_stripe_account_status(request):
         result = StripeConnectService.get_account_status(user)
 
         if result["success"]:
-            response_data = {"has_stripe_account": result["has_account"], "status": result["status"]}
+            response_data = {"has_stripe_account": result["has_account"]}
 
             # Add detailed information if account exists
             if result["has_account"]:
                 response_data.update(
                     {
-                        "account_id": result["account_id"],
                         "details_submitted": result["details_submitted"],
                         "charges_enabled": result["charges_enabled"],
                         "payouts_enabled": result["payouts_enabled"],

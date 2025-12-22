@@ -455,7 +455,7 @@ class ProductViewSet(viewsets.ModelViewSet):
 
         # Using list_products with seller filter
         result = service.list_products(
-            filters={"seller": request.user.id}, page=page, limit=page_size, sort_by=ordering
+            filters={"seller": request.user.id}, page=page, page_size=page_size, ordering=ordering
         )
 
         if not result.ok:
