@@ -14,3 +14,7 @@ debug.log
 .opencode/
 .serena/
 output/
+.env.dev
+
+minio-backup/
+designia_backup.sql

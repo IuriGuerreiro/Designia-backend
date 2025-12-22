@@ -413,13 +413,31 @@ class ProductViewSet(viewsets.ModelViewSet):
         description="""
         **What it receives:**
         - Authentication token (must be a seller)
+        - Pagination parameters (page, page_size)
 
         **What it returns:**
-        - List of products owned by current user
+        - Paginated list of products owned by current user
         """,
+        parameters=[
+            OpenApiParameter(name="page", type=int, description="Page number (default: 1)"),
+            OpenApiParameter(name="page_size", type=int, description="Items per page (default: 20)"),
+            OpenApiParameter(name="ordering", type=str, description="Order by field (default: -created_at)"),
+        ],
         responses={
             200: OpenApiResponse(
-                response=ProductListSerializer(many=True), description="Products retrieved successfully"
+                response=inline_serializer(
+                    name="MyProductListPaginatedResponse",
+                    fields={
+                        "count": serializers.IntegerField(),
+                        "page": serializers.IntegerField(),
+                        "page_size": serializers.IntegerField(),
+                        "num_pages": serializers.IntegerField(),
+                        "has_next": serializers.BooleanField(),
+                        "has_previous": serializers.BooleanField(),
+                        "results": ProductListSerializer(many=True),
+                    },
+                ),
+                description="Products retrieved successfully",
             ),
             500: OpenApiResponse(response=ErrorResponseSerializer, description="Internal server error"),
         },
@@ -427,16 +445,33 @@ class ProductViewSet(viewsets.ModelViewSet):
     )
     @action(detail=False, methods=["get"])
     def my_products(self, request):
-        """Get current user's products"""
+        """Get current user's products with pagination"""
         service = self.get_service()
+
+        # Add pagination support
+        page = int(request.query_params.get("page", 1))
+        page_size = int(request.query_params.get("page_size", 20))
+        ordering = request.query_params.get("ordering", "-created_at")
+
         # Using list_products with seller filter
-        result = service.list_products(filters={"seller": request.user.id})
+        result = service.list_products(
+            filters={"seller": request.user.id}, page=page, limit=page_size, sort_by=ordering
+        )
 
         if not result.ok:
             return Response({"detail": result.error_detail}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+        # Serialize products
         serializer = self.get_serializer(result.value["results"], many=True)
-        return Response(serializer.data)
+
+        # Return paginated response matching standard list format
+        response_data = {
+            "count": result.value["count"],
+            "results": serializer.data,
+            "page": result.value["page"],
+            "num_pages": result.value["num_pages"],
+        }
+        return Response(response_data)
 
     @extend_schema(
         operation_id="products_favorites",

@@ -205,13 +205,16 @@ class SellerService:
                     return Result(success=False, message="Failed to upload workshop images.", error=file_key_or_error)
 
                 # Create SellerApplicationImage record
-                SellerApplicationImage.objects.create(
+                # We set the image name directly to the path returned by storage provider
+                # This prevents Django from attempting to upload/save the file a second time
+                image_record = SellerApplicationImage(
                     application=application,
-                    image=image_file,  # Django handles file storage
                     image_type="workshop",
                     description=f"Workshop photo {index + 1}",
                     order=index,
                 )
+                image_record.image.name = file_key_or_error
+                image_record.save()
 
                 images_uploaded += 1
 
