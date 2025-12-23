@@ -65,7 +65,7 @@ class WebhookService:
                     client_ip,
                     details=f"Internal error for event {event_type}: {str(e)}",
                 )
-                return False
+                raise  # Re-raise to allow 500 response
 
     @staticmethod
     def _handle_checkout_session_completed(event: Dict[str, Any]) -> bool:
@@ -87,6 +87,7 @@ class WebhookService:
                         return WebhookService._handle_successful_checkout_logic(full_session)
                 except Exception as e:
                     logger.error(f"WebhookService: Error retrieving full session in fallback: {e}")
+                    raise
             return False
 
     @staticmethod
@@ -260,27 +261,25 @@ class WebhookService:
             event_payload = PaymentSucceeded(
                 order_id=str(order_id),
                 transaction_id=payment_intent_id,
-                amount=amount_total,
+                amount=float(amount_total),
                 currency=currency,
-                occurred_at=timezone.now(),
+                occurred_at=timezone.now().isoformat(),
                 shipping_details=shipping_address,
             )
             event_bus.publish("payment.succeeded", asdict(event_payload))
-            payment_volume_total.labels(currency=event_payload.currency, status="succeeded").inc(
-                float(event_payload.amount)
-            )
+            payment_volume_total.labels(currency=event_payload.currency, status="succeeded").inc(event_payload.amount)
             return True
         except User.DoesNotExist:
             logger.error(f"WebhookService: User not found for session {session.get('id')}")
-            return False
+            raise
         except Order.DoesNotExist:
             logger.error(f"WebhookService: Order not found for session {session.get('id')}")
-            return False
+            raise
         except Exception as e:
             logger.error(
                 f"WebhookService: Error handling successful checkout for session {session.get('id')}: {str(e)}"
             )
-            return False
+            raise
 
     @staticmethod
     def _handle_refund_updated(event: Dict[str, Any]) -> bool:
@@ -341,17 +340,17 @@ class WebhookService:
                         event_payload = PaymentRefunded(
                             order_id=str(order_id),
                             refund_id=refund_id,
-                            amount=Decimal(refund_amount),
+                            amount=float(refund_amount),
                             currency=currency,
                             reason=refund_metadata.get("reason", "Order cancelled"),
-                            occurred_at=timezone.now(),
+                            occurred_at=timezone.now().isoformat(),
                         )
                         event_bus.publish("payment.refunded", asdict(event_payload))
 
                     return True
                 except Exception as e:
                     logger.error(f"WebhookService: Error processing refund.updated for order {order_id}: {str(e)}")
-                    return False
+                    raise
         return False
 
     @staticmethod
@@ -413,16 +412,16 @@ class WebhookService:
                         order_id=str(order_id),
                         refund_id=refund_id,
                         reason=failure_reason,
-                        amount=Decimal(refund_amount),
+                        amount=float(refund_amount),
                         currency=currency,
-                        occurred_at=timezone.now(),
+                        occurred_at=timezone.now().isoformat(),
                     )
                     event_bus.publish("payment.refund_failed", asdict(event_payload))
 
                 return True
             except Exception as e:
                 logger.error(f"WebhookService: Error processing refund.failed for order {order_id}: {str(e)}")
-                return False
+                raise
         return False
 
     @staticmethod
@@ -441,7 +440,7 @@ class WebhookService:
             return result["success"]
         except Exception as e:
             logger.error(f"WebhookService: Error processing account.updated webhook: {str(e)}")
-            return False
+            raise
 
     @staticmethod
     def _handle_transfer_created(event: Dict[str, Any]) -> bool:
@@ -529,40 +528,47 @@ class WebhookService:
                 logger.error(
                     f"WebhookService: Payment transaction {transaction_id} not found for transfer created event."
                 )
-                return False
+                raise
             except Exception as e:
                 logger.error(
                     f"WebhookService: Error processing transfer.created for transaction {transaction_id}: {str(e)}"
                 )
-                return False
+                raise
         return False
 
     @staticmethod
     def _handle_payment_intent_succeeded(event: Dict[str, Any]) -> bool:
         payment_intent = event["data"]["object"]
+        payment_intent_id = getattr(payment_intent, "id", "unknown")
         logger.info(
-            f"WebhookService: payment_intent.succeeded received for ID: {getattr(payment_intent, 'id', 'unknown')}"
+            f"WebhookService: payment_intent.succeeded received for ID: {payment_intent_id}. Ignoring as per configuration."
         )
-
-        # Need to move handle_payment_intent_succeeded here
-        # For now, assuming it's a standalone function. It's not in the provided views.py snippet
-        # Placeholder call
-        # result = handle_payment_intent_succeeded(payment_intent)
-        # return result["success"]
-        logger.warning("WebhookService: handle_payment_intent_succeeded not yet implemented.")
-        return False
+        return True
 
     @staticmethod
     def _handle_payment_intent_failed(event: Dict[str, Any]) -> bool:
         payment_intent = event["data"]["object"]
-        logger.info(
-            f"WebhookService: payment_intent.payment_failed received for ID: {getattr(payment_intent, 'id', 'unknown')}"
-        )
+        payment_intent_id = getattr(payment_intent, "id", "unknown")
+        logger.info(f"WebhookService: payment_intent.payment_failed received for ID: {payment_intent_id}")
 
-        # Need to move handle_payment_intent_failed here
-        # For now, assuming it's a standalone function. It's not in the provided views.py snippet
-        # Placeholder call
-        # result = handle_payment_intent_failed(payment_intent)
-        # return result["success"]
-        logger.warning("WebhookService: handle_payment_intent_failed not yet implemented.")
-        return False
+        metadata = getattr(payment_intent, "metadata", {})
+        order_id = metadata.get("order_id")
+        last_payment_error = getattr(payment_intent, "last_payment_error", {})
+        failure_message = last_payment_error.get("message", "Unknown error")
+
+        if order_id:
+            try:
+                from payment_system.domain.events.definitions import PaymentFailed
+
+                event_payload = PaymentFailed(
+                    order_id=str(order_id),
+                    reason=failure_message,
+                    occurred_at=timezone.now().isoformat(),
+                )
+                event_bus.publish("payment.failed", asdict(event_payload))
+                logger.info(f"Published payment.failed event for order {order_id}")
+            except Exception as e:
+                logger.error(f"Failed to publish payment.failed event: {e}")
+                raise
+
+        return True

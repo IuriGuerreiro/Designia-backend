@@ -405,7 +405,10 @@ class CatalogService(BaseService):
                     setattr(product, field, data[field])
                     updated_fields.append(field)
 
-            if "category_id" in data:
+            if "category" in data:
+                product.category = data["category"]
+                updated_fields.append("category")
+            elif "category_id" in data:
                 try:
                     category = Category.objects.get(id=data["category_id"], is_active=True)
                     product.category = category

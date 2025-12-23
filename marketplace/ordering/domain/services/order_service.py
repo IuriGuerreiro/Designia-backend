@@ -129,6 +129,40 @@ class OrderService(BaseService):
 
     @BaseService.log_performance
     @transaction.atomic
+    def fail_payment(self, order_id: str, reason: str = "") -> ServiceResult[Order]:
+        """
+        Mark order as payment failed and release stock.
+        """
+        try:
+            order = Order.objects.select_for_update().prefetch_related("items__product").get(id=order_id)
+
+            if order.payment_status == "paid":
+                self.logger.warning(f"Payment failed event for already paid order {order_id}, ignoring.")
+                return service_ok(order)
+
+            # Update status
+            order.status = "cancelled"
+            order.payment_status = "failed"
+            order.cancellation_reason = f"Payment failed: {reason}"
+            order.save(update_fields=["status", "payment_status", "cancellation_reason"])
+
+            # Release stock
+            for item in order.items.all():
+                self.inventory_service.release_stock(
+                    product_id=str(item.product.id), quantity=item.quantity, reason=f"payment_failed_{order_id}"
+                )
+
+            self.logger.info(f"Marked order {order_id} as payment failed: {reason}")
+            return service_ok(order)
+
+        except Order.DoesNotExist:
+            return service_err(ErrorCodes.ORDER_NOT_FOUND, f"Order {order_id} not found")
+        except Exception as e:
+            self.logger.error(f"Error processing payment failure for order {order_id}: {e}", exc_info=True)
+            return service_err(ErrorCodes.INTERNAL_ERROR, str(e))
+
+    @BaseService.log_performance
+    @transaction.atomic
     def create_order(
         self, user: User, shipping_address: Dict, buyer_notes: str = "", shipping_cost: Decimal = None
     ) -> ServiceResult[Order]:
@@ -552,7 +586,24 @@ class OrderService(BaseService):
 
             order.save(update_fields=["status", "cancellation_reason", "cancelled_by", "cancelled_at"])
 
-            self.logger.info(f"Cancelled order {order_id} by user {user.id}: {reason}")
+            self.logger.info(
+                f"Cancelled order {order_id} by user {user.id}: {reason}. Payment status remains '{order.payment_status}' until refund webhook."
+            )
+
+            # Publish OrderCancelledEvent
+            try:
+                from marketplace.domain.events.order_events import OrderCancelledEvent
+
+                event = OrderCancelledEvent(
+                    order_id=str(order.id),
+                    user_id=str(user.id),
+                    reason=reason,
+                    payment_status=order.payment_status,
+                )
+                self.event_bus.publish(event.event_type, event.payload)
+                self.logger.info(f"Published event: {event.to_dict()}")
+            except Exception as e:
+                self.logger.error(f"Failed to publish OrderCancelledEvent: {e}")
 
             return service_ok(order)
 

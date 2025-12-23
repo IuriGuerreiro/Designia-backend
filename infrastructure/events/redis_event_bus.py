@@ -63,17 +63,13 @@ class RedisEventBus(EventBus):
         def listen():
             try:
                 pubsub = self.redis_client.pubsub()
-                channels = [f"events.{et}" for et in self._subscribers.keys()]
-
-                if not channels:
-                    return
-
-                pubsub.subscribe(*channels)
+                # Use pattern subscription to receive all events dynamically
+                pubsub.psubscribe("events.*")
                 self._listening = True
-                logger.info(f"EventBus listening on: {channels}")
+                logger.info("EventBus listening on pattern: events.*")
 
                 for message in pubsub.listen():
-                    if message["type"] == "message":
+                    if message["type"] in ["message", "pmessage"]:
                         self._handle_message(message)
             except Exception as e:
                 logger.error(f"EventBus listener crashed: {e}")

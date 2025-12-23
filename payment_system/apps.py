@@ -18,6 +18,14 @@ class PaymentSystemConfig(AppConfig):
         # Only run in the main process, not in reloaders or migrations
         import os
 
+        # Register event listeners (Must run in all processes)
+        try:
+            from payment_system.infra.events.listeners import register_payment_listeners
+
+            register_payment_listeners()
+        except Exception as e:
+            logger.error(f"Failed to register payment listeners: {e}")
+
         if os.environ.get("RUN_MAIN") != "true":
             return
 

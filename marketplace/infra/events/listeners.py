@@ -85,6 +85,25 @@ def handle_payment_refund_failed(event_data):
         logger.error(f"Error handling payment.refund_failed event: {e}")
 
 
+def handle_payment_failed(event_data):
+    """Handle payment.failed event."""
+    try:
+        payload = event_data.get("payload", {})
+        order_id = payload.get("order_id")
+        reason = payload.get("reason", "Payment failed")
+
+        logger.info(f"[Marketplace Listener] Payment failed for order {order_id}")
+
+        service = OrderService()
+        result = service.fail_payment(order_id, reason)
+
+        if not result.ok:
+            logger.error(f"Failed to process payment failure for order {order_id}: {result.error_detail}")
+
+    except Exception as e:
+        logger.error(f"Error handling payment.failed event: {e}")
+
+
 def register_marketplace_listeners():
     """Register all marketplace event listeners."""
     event_bus = get_event_bus()
@@ -92,4 +111,5 @@ def register_marketplace_listeners():
     event_bus.subscribe("payment.succeeded", handle_payment_succeeded)
     event_bus.subscribe("payment.refunded", handle_payment_refunded)
     event_bus.subscribe("payment.refund_failed", handle_payment_refund_failed)
+    event_bus.subscribe("payment.failed", handle_payment_failed)
     logger.info("Marketplace event listeners registered")

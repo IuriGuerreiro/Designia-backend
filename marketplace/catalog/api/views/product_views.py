@@ -1,3 +1,9 @@
+import base64
+import io
+import logging
+import os
+
+from django.core.files.uploadedfile import InMemoryUploadedFile
 from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema, inline_serializer
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
@@ -15,6 +21,21 @@ from marketplace.serializers import (
     ProductListSerializer,
 )
 from marketplace.services import CatalogService, ErrorCodes
+
+
+# Try imports for optional AR dependencies
+try:
+    from ar.models import ProductARModel
+except ImportError:
+    ProductARModel = None
+
+try:
+    from utils.s3_storage import S3StorageError, get_s3_storage
+except ImportError:
+    get_s3_storage = None
+    S3StorageError = Exception
+
+logger = logging.getLogger(__name__)
 
 
 class ProductViewSet(viewsets.ModelViewSet):
@@ -43,25 +64,101 @@ class ProductViewSet(viewsets.ModelViewSet):
             return [IsAuthenticated(), IsSellerOrReadOnly()]
         return super().get_permissions()
 
+    def _handle_ar_model_update(self, product, model_data, user):
+        """
+        Handle AR model update: upload new, or delete existing.
+        model_data: Dict with 'model_content' and 'filename', or None (to delete).
+        """
+        if ProductARModel is None:
+            logger.warning("AR app not available, skipping AR model update")
+            return
+
+        # Case 1: Delete existing model
+        if model_data is None:
+            # If explicit None was passed (user wants to remove), delete existing
+            ProductARModel.objects.filter(product=product).delete()
+            logger.info(f"Deleted AR model for product {product.id}")
+            return
+
+        # Case 2: Upload new model
+        try:
+            # Extract base64 content
+            model_content = model_data.get("model_content", "")
+            if "," in model_content:
+                header, encoded = model_content.split(",", 1)
+            else:
+                encoded = model_content
+
+            # Decode base64
+            model_bytes = base64.b64decode(encoded)
+
+            # Determine content type
+            content_type = "model/gltf-binary"  # Default for .glb
+            filename = model_data.get("filename", "model.glb")
+
+            if filename.lower().endswith(".gltf"):
+                content_type = "model/gltf+json"
+            elif filename.lower().endswith(".usdz"):
+                content_type = "model/vnd.usdz+zip"
+
+            # Create in-memory file
+            model_file = InMemoryUploadedFile(
+                file=io.BytesIO(model_bytes),
+                field_name="model_file",
+                name=filename,
+                content_type=content_type,
+                size=len(model_bytes),
+                charset=None,
+            )
+
+            # Validate
+            max_size = 50 * 1024 * 1024  # 50MB
+            allowed_extensions = [".glb", ".gltf", ".usdz"]
+            file_ext = os.path.splitext(filename)[1].lower()
+
+            if model_file.size > max_size:
+                logger.warning(f"3D model file too large: {model_file.size} bytes")
+                return
+            if file_ext not in allowed_extensions:
+                logger.warning(f"Invalid 3D model extension: {file_ext}")
+                return
+
+            # Delete old model first (optional, but good for cleanup)
+            ProductARModel.objects.filter(product=product).delete()
+
+            # Upload to S3
+            storage = get_s3_storage()
+            upload_result = storage.upload_product_3d_model(
+                product_id=str(product.id),
+                model_file=model_file,
+                user_id=str(user.id),
+            )
+
+            # Create DB entry
+            ProductARModel.objects.create(
+                product=product,
+                s3_key=upload_result["key"],
+                s3_bucket=upload_result.get("bucket", storage.bucket_name),
+                original_filename=filename,
+                file_size=upload_result.get("size"),
+                content_type=upload_result.get("content_type"),
+                uploaded_by=user,
+            )
+            logger.info(f"Uploaded 3D model for product {product.id}: {filename}")
+
+        except Exception as e:
+            logger.error(f"Error processing 3D model: {e}", exc_info=True)
+
     @extend_schema(
         operation_id="products_list",
         summary="List products with filters",
-        description="""
-        **What it receives:**
-        - Query parameters for filtering (category, seller, price range, condition, brand, stock status)
-        - Pagination parameters (page, page_size)
-        - Ordering parameter
-
-        **What it returns:**
-        - Paginated list of products
-        - Total count and page information
-        """,
+        description="List products with various filters.",
         parameters=[
             OpenApiParameter(name="category", type=str, description="Filter by category slug"),
             OpenApiParameter(name="seller", type=int, description="Filter by seller ID"),
             OpenApiParameter(name="price_min", type=float, description="Minimum price"),
             OpenApiParameter(name="price_max", type=float, description="Maximum price"),
-            OpenApiParameter(name="condition", type=str, description="Product condition (new, used, etc.)"),
+            OpenApiParameter(name="condition", type=str, description="Product condition"),
             OpenApiParameter(name="brand", type=str, description="Filter by brand"),
             OpenApiParameter(name="in_stock", type=bool, description="Only show in-stock products"),
             OpenApiParameter(name="is_featured", type=bool, description="Only show featured products"),
@@ -91,10 +188,7 @@ class ProductViewSet(viewsets.ModelViewSet):
     )
     def list(self, request, *args, **kwargs):
         service = self.get_service()
-
-        # Extract filters
         filters = {}
-        # Mapping query params to filters
         if request.query_params.get("category"):
             filters["category"] = request.query_params.get("category")
         if request.query_params.get("seller"):
@@ -121,7 +215,6 @@ class ProductViewSet(viewsets.ModelViewSet):
         if not result.ok:
             return Response({"detail": result.error_detail}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-        # Serialize products
         products = result.value["results"]
         serializer = self.get_serializer(products, many=True)
 
@@ -136,19 +229,6 @@ class ProductViewSet(viewsets.ModelViewSet):
     @extend_schema(
         operation_id="products_retrieve",
         summary="Get product details",
-        description="""
-        **What it receives:**
-        - `slug` (string in URL): Product slug identifier
-
-        **What it returns:**
-        - Complete product details including:
-          - Full product information
-          - Array of images with proxy URLs
-          - Array of reviews with reviewer info
-          - Seller info (id, username, rating)
-          - Category info
-        - View count is automatically incremented
-        """,
         responses={
             200: ProductDetailSerializer,
             404: OpenApiResponse(response=ErrorResponseSerializer, description="Product not found"),
@@ -158,10 +238,6 @@ class ProductViewSet(viewsets.ModelViewSet):
     )
     def retrieve(self, request, slug=None):
         service = self.get_service()
-
-        # We need product ID but we have slug.
-        # Service `get_product` expects ID.
-        # We should probably update service to accept slug or lookup ID here.
         try:
             product = Product.objects.get(slug=slug)
         except Product.DoesNotExist:
@@ -180,81 +256,42 @@ class ProductViewSet(viewsets.ModelViewSet):
     @extend_schema(
         operation_id="products_create",
         summary="Create a new product (Seller only)",
-        description="""
-        **What it receives:**
-        - Product data (name, description, price, category, stock, etc.)
-        - Product images via multipart/form-data (any field name, e.g., 'uploaded_images', 'images', etc.)
-        - Optional `image_metadata` (JSON string) with format:
-          ```json
-          {
-            "filename.jpg": {
-              "alt_text": "Image description",
-              "is_primary": true,
-              "order": 0
-            }
-          }
-          ```
-        - Authentication token (must be a seller)
-
-        **What it returns:**
-        - Created product with generated ID and slug
-        - All uploaded images with their metadata (alt_text, is_primary, order)
-
-        **Example:**
-        Upload images with metadata to control display order and primary image selection.
-        """,
         request=ProductCreateUpdateSerializer,
         responses={
             201: OpenApiResponse(response=ProductDetailSerializer, description="Product created successfully"),
             400: OpenApiResponse(response=ErrorResponseSerializer, description="Invalid data"),
-            403: OpenApiResponse(response=ErrorResponseSerializer, description="Permission denied (not a seller)"),
+            403: OpenApiResponse(response=ErrorResponseSerializer, description="Permission denied"),
         },
         tags=["Marketplace - Products"],
     )
     def create(self, request):
-        import base64
-        import io
-        import logging
-
-        from django.core.files.uploadedfile import InMemoryUploadedFile
-
-        logger = logging.getLogger(__name__)
         service = self.get_service()
-
-        # Validate input using serializer
         serializer = self.get_serializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         data = serializer.validated_data
 
-        # Handle base64-encoded images from image_data
+        # Handle base64-encoded images
         images = []
         image_metadata = {}
-
         image_data_list = data.pop("image_data", [])
+
         for img_data in image_data_list:
             try:
-                # Extract base64 content (remove data URI prefix if present)
                 image_content = img_data.get("image_content", "")
                 if "," in image_content:
-                    # Format: "data:image/png;base64,iVBORw0KGgo..."
                     header, encoded = image_content.split(",", 1)
                 else:
                     encoded = image_content
 
-                # Decode base64
                 image_bytes = base64.b64decode(encoded)
-
-                # Determine content type
-                content_type = "image/jpeg"  # Default
+                content_type = "image/jpeg"
                 if "data:" in image_content:
-                    # Extract from data URI
                     parts = image_content.split(";")[0].split(":")
                     if len(parts) > 1:
                         content_type = parts[1]
 
-                # Create in-memory file
                 filename = img_data.get("filename", f"image_{len(images)}.jpg")
                 image_file = InMemoryUploadedFile(
                     file=io.BytesIO(image_bytes),
@@ -264,19 +301,18 @@ class ProductViewSet(viewsets.ModelViewSet):
                     size=len(image_bytes),
                     charset=None,
                 )
-
                 images.append(image_file)
-
-                # Build metadata
                 image_metadata[filename] = {
                     "alt_text": img_data.get("alt_text", ""),
                     "is_primary": img_data.get("is_primary", False),
                     "order": img_data.get("order", len(images) - 1),
                 }
-
             except Exception as e:
                 logger.error(f"Error decoding image: {e}")
                 continue
+
+        # Extract model_data to handle after creation
+        model_data = data.pop("model_data", None)
 
         result = service.create_product(data, request.user, images, image_metadata)
 
@@ -285,20 +321,18 @@ class ProductViewSet(viewsets.ModelViewSet):
                 return Response({"detail": result.error_detail}, status=status.HTTP_403_FORBIDDEN)
             return Response({"detail": result.error_detail}, status=status.HTTP_400_BAD_REQUEST)
 
-        return Response(self.get_serializer(result.value).data, status=status.HTTP_201_CREATED)
+        product = result.value
+
+        # Handle AR Model
+        if model_data:
+            self._handle_ar_model_update(product, model_data, request.user)
+
+        response_serializer = ProductDetailSerializer(product, context={"request": request})
+        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
 
     @extend_schema(
         operation_id="products_update",
         summary="Update product (Owner only)",
-        description="""
-        **What it receives:**
-        - `slug` (string in URL): Product to update
-        - Complete product data (all fields required)
-        - Authentication token (must be product owner)
-
-        **What it returns:**
-        - Updated product details
-        """,
         request=ProductCreateUpdateSerializer,
         responses={
             200: OpenApiResponse(response=ProductDetailSerializer, description="Product updated successfully"),
@@ -310,16 +344,18 @@ class ProductViewSet(viewsets.ModelViewSet):
     )
     def update(self, request, slug=None):
         service = self.get_service()
-
         try:
             product = Product.objects.get(slug=slug)
         except Product.DoesNotExist:
             return Response({"detail": "Product not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        # Validate input
         serializer = self.get_serializer(product, data=request.data, partial=False)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        # Check for model_data in validated_data
+        model_data_present = "model_data" in serializer.validated_data
+        model_data = serializer.validated_data.pop("model_data", None)
 
         result = service.update_product(str(product.id), serializer.validated_data, request.user)
 
@@ -328,20 +364,16 @@ class ProductViewSet(viewsets.ModelViewSet):
                 return Response({"detail": result.error_detail}, status=status.HTTP_403_FORBIDDEN)
             return Response({"detail": result.error_detail}, status=status.HTTP_400_BAD_REQUEST)
 
-        return Response(self.get_serializer(result.value).data)
+        # Handle AR Model Update/Delete if model_data key was present
+        if model_data_present:
+            self._handle_ar_model_update(product, model_data, request.user)
+
+        response_serializer = ProductDetailSerializer(result.value, context={"request": request})
+        return Response(response_serializer.data)
 
     @extend_schema(
         operation_id="products_partial_update",
         summary="Partially update product (Owner only)",
-        description="""
-        **What it receives:**
-        - `slug` (string in URL): Product to update
-        - Partial product data (only fields to update)
-        - Authentication token (must be product owner)
-
-        **What it returns:**
-        - Updated product details
-        """,
         request=ProductCreateUpdateSerializer,
         responses={
             200: OpenApiResponse(response=ProductDetailSerializer, description="Product updated successfully"),
@@ -353,7 +385,6 @@ class ProductViewSet(viewsets.ModelViewSet):
     )
     def partial_update(self, request, slug=None):
         service = self.get_service()
-
         try:
             product = Product.objects.get(slug=slug)
         except Product.DoesNotExist:
@@ -363,6 +394,10 @@ class ProductViewSet(viewsets.ModelViewSet):
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+        # Check for model_data in validated_data
+        model_data_present = "model_data" in serializer.validated_data
+        model_data = serializer.validated_data.pop("model_data", None)
+
         result = service.update_product(str(product.id), serializer.validated_data, request.user)
 
         if not result.ok:
@@ -370,19 +405,16 @@ class ProductViewSet(viewsets.ModelViewSet):
                 return Response({"detail": result.error_detail}, status=status.HTTP_403_FORBIDDEN)
             return Response({"detail": result.error_detail}, status=status.HTTP_400_BAD_REQUEST)
 
-        return Response(self.get_serializer(result.value).data)
+        # Handle AR Model Update/Delete if model_data key was present
+        if model_data_present:
+            self._handle_ar_model_update(product, model_data, request.user)
+
+        response_serializer = ProductDetailSerializer(result.value, context={"request": request})
+        return Response(response_serializer.data)
 
     @extend_schema(
         operation_id="products_delete",
         summary="Delete product (Owner only)",
-        description="""
-        **What it receives:**
-        - `slug` (string in URL): Product to delete
-        - Authentication token (must be product owner)
-
-        **What it returns:**
-        - 204 No Content on success
-        """,
         responses={
             204: OpenApiResponse(description="Product deleted successfully"),
             403: OpenApiResponse(response=ErrorResponseSerializer, description="Not product owner"),
@@ -392,7 +424,6 @@ class ProductViewSet(viewsets.ModelViewSet):
     )
     def destroy(self, request, slug=None):
         service = self.get_service()
-
         try:
             product = Product.objects.get(slug=slug)
         except Product.DoesNotExist:
@@ -410,14 +441,6 @@ class ProductViewSet(viewsets.ModelViewSet):
     @extend_schema(
         operation_id="products_my_products",
         summary="Get current user's products (Seller only)",
-        description="""
-        **What it receives:**
-        - Authentication token (must be a seller)
-        - Pagination parameters (page, page_size)
-
-        **What it returns:**
-        - Paginated list of products owned by current user
-        """,
         parameters=[
             OpenApiParameter(name="page", type=int, description="Page number (default: 1)"),
             OpenApiParameter(name="page_size", type=int, description="Items per page (default: 20)"),
@@ -445,15 +468,11 @@ class ProductViewSet(viewsets.ModelViewSet):
     )
     @action(detail=False, methods=["get"])
     def my_products(self, request):
-        """Get current user's products with pagination"""
         service = self.get_service()
-
-        # Add pagination support
         page = int(request.query_params.get("page", 1))
         page_size = int(request.query_params.get("page_size", 20))
         ordering = request.query_params.get("ordering", "-created_at")
 
-        # Using list_products with seller filter
         result = service.list_products(
             filters={"seller": request.user.id}, page=page, page_size=page_size, ordering=ordering
         )
@@ -461,10 +480,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         if not result.ok:
             return Response({"detail": result.error_detail}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-        # Serialize products
         serializer = self.get_serializer(result.value["results"], many=True)
-
-        # Return paginated response matching standard list format
         response_data = {
             "count": result.value["count"],
             "results": serializer.data,
@@ -476,13 +492,6 @@ class ProductViewSet(viewsets.ModelViewSet):
     @extend_schema(
         operation_id="products_favorites",
         summary="Get user's favorite products",
-        description="""
-        **What it receives:**
-        - Authentication token
-
-        **What it returns:**
-        - List of products marked as favorites by current user
-        """,
         responses={
             200: OpenApiResponse(
                 response=ProductFavoriteSerializer(many=True), description="Favorites retrieved successfully"
@@ -493,7 +502,6 @@ class ProductViewSet(viewsets.ModelViewSet):
     )
     @action(detail=False, methods=["get"])
     def favorites(self, request):
-        """Get user's favorite products"""
         if not request.user.is_authenticated:
             return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
 
@@ -504,15 +512,6 @@ class ProductViewSet(viewsets.ModelViewSet):
     @extend_schema(
         operation_id="products_toggle_favorite",
         summary="Toggle product favorite status",
-        description="""
-        **What it receives:**
-        - `slug` (string in URL): Product to favorite/unfavorite
-        - Authentication token
-
-        **What it returns:**
-        - `{"favorited": true}` if product was added to favorites
-        - `{"favorited": false}` if product was removed from favorites
-        """,
         responses={
             200: OpenApiResponse(description="Favorite status toggled"),
             401: OpenApiResponse(response=ErrorResponseSerializer, description="Authentication required"),
@@ -522,7 +521,6 @@ class ProductViewSet(viewsets.ModelViewSet):
     )
     @action(detail=True, methods=["post"])
     def favorite(self, request, slug=None):
-        """Toggle favorite status"""
         if not request.user.is_authenticated:
             return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
 

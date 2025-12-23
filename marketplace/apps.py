@@ -11,7 +11,8 @@ class MarketplaceConfig(AppConfig):
             from marketplace.infra.events.listeners import register_marketplace_listeners
 
             register_marketplace_listeners()
-        except Exception:
-            # Don't crash app startup if redis is not available
-            # Use standard print as logger might not be fully configured yet during startup in some contexts
-            pass
+        except Exception as e:
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to register marketplace listeners: {e}")

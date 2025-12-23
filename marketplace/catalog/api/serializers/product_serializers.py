@@ -148,6 +148,7 @@ class ProductDetailSerializer(serializers.ModelSerializer):
     average_rating = serializers.SerializerMethodField()
     is_in_stock = serializers.SerializerMethodField()
     has_ar_model = serializers.SerializerMethodField()
+    ar_model_filename = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
@@ -182,6 +183,7 @@ class ProductDetailSerializer(serializers.ModelSerializer):
             "discount_percentage",
             "is_favorited",
             "has_ar_model",
+            "ar_model_filename",
             "view_count",
             "click_count",
             "favorite_count",
@@ -204,6 +206,15 @@ class ProductDetailSerializer(serializers.ModelSerializer):
     def get_has_ar_model(self, obj):
         return ARService().has_3d_model(str(obj.id)).value
 
+    def get_ar_model_filename(self, obj):
+        from ar.models import ProductARModel
+
+        try:
+            ar_model = ProductARModel.objects.filter(product_id=obj.id).first()
+            return ar_model.original_filename if ar_model else None
+        except Exception:
+            return None
+
     def get_is_on_sale(self, obj):
         return PricingService().is_on_sale(obj).value
 
@@ -217,6 +228,22 @@ class ProductDetailSerializer(serializers.ModelSerializer):
         return InventoryService().is_in_stock(str(obj.id)).value
 
 
+class ModelDataSerializer(serializers.Serializer):
+    """Serializer for base64-encoded 3D model upload"""
+
+    model_content = serializers.CharField(
+        required=True,
+        help_text="Base64-encoded 3D model data (e.g., 'data:model/gltf-binary;base64,...')",
+    )
+    filename = serializers.CharField(required=True, max_length=255, help_text="Model filename (e.g., 'chair.glb')")
+
+    def to_internal_value(self, data):
+        # Allow null to pass through as None
+        if data is None:
+            return None
+        return super().to_internal_value(data)
+
+
 class ProductCreateUpdateSerializer(serializers.ModelSerializer):
     images = ProductImageSerializer(many=True, read_only=True)
     colors = FlexibleJSONField(required=False)
@@ -224,6 +251,13 @@ class ProductCreateUpdateSerializer(serializers.ModelSerializer):
     # Base64 encoded images with metadata
     image_data = ImageDataSerializer(
         many=True, write_only=True, required=False, help_text="Array of base64-encoded images with metadata"
+    )
+    # Base64 encoded 3D model for AR
+    model_data = ModelDataSerializer(
+        write_only=True,
+        required=False,
+        allow_null=True,
+        help_text="Base64-encoded 3D model (.glb, .gltf, .usdz) for AR features",
     )
 
     class Meta:
@@ -250,6 +284,7 @@ class ProductCreateUpdateSerializer(serializers.ModelSerializer):
             "is_digital",
             "images",
             "image_data",
+            "model_data",
         ]
         read_only_fields = ["id", "images"]
 
@@ -284,6 +319,16 @@ class ProductCreateUpdateSerializer(serializers.ModelSerializer):
                 data["stock_quantity"] = int(data["stock_quantity"])
             except (ValueError, TypeError):
                 pass
+
+        # Handle complex fields that might be JSON strings (for FormData)
+        import json
+
+        for field in ["model_data", "image_data"]:
+            if field in data and isinstance(data[field], str):
+                try:
+                    data[field] = json.loads(data[field])
+                except (json.JSONDecodeError, ValueError):
+                    pass
 
         return super().to_internal_value(data)
 

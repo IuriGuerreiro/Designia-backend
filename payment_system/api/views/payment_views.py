@@ -147,29 +147,29 @@ class StripeWebhookView(View):
             return HttpResponse(status=500, content="Webhook processing error.".encode("utf-8"))
 
         # Delegate all event processing to WebhookService
-        logger.info(f"🔔 Received Stripe event: {event.get('type', 'unknown')}")
+        logger.info(f"Received Stripe event: {event.get('type', 'unknown')}")
 
         try:
             handled = WebhookService.process_event(event, client_ip)
             if handled:
-                logger.info(f"✅ Event {event.get('type')} processed successfully by WebhookService")
+                logger.info(f"Event {event.get('type')} processed successfully by WebhookService")
                 return HttpResponse(
                     status=200, content=f"{event.get('type')} event successfully processed".encode("utf-8")
                 )
             else:
-                logger.info(f"ℹ️  Event {event.get('type')} received but not handled by WebhookService")
+                logger.info(f"Event {event.get('type')} received but not handled by WebhookService")
                 return HttpResponse(
                     status=200, content=f"{event.get('type')} event received but not processed".encode("utf-8")
                 )
         except Exception as e:
-            logger.error(f"❌ Error processing event {event.get('type')} via WebhookService: {str(e)}", exc_info=True)
+            logger.error(f"Error processing event {event.get('type')} via WebhookService: {str(e)}", exc_info=True)
             PaymentAuditLogger.log_security_event(
                 "webhook_service_error",
                 client_ip,
                 details=f"WebhookService failed to process {event.get('type')}: {str(e)}",
             )
-            # Return 200 to prevent Stripe retries for application errors
-            return HttpResponse(status=200, content=f"{event.get('type')} event processing failed".encode("utf-8"))
+            # Return 500 as requested to indicate something went wrong
+            return HttpResponse(status=500, content=f"{event.get('type')} event processing failed".encode("utf-8"))
 
 
 def update_payment_trackers_for_payout(payout, event_type):  # noqa: C901
@@ -777,7 +777,7 @@ def get_product_image_url(product, request=None):
 )
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
-@financial_transaction
+@retry_on_deadlock(max_retries=3)
 def create_checkout_session(request):
     """Create an Embedded Checkout Session for the user's cart and seed the Order.
 
