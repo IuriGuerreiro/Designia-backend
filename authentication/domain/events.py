@@ -34,6 +34,10 @@ profile_updated = Signal()  # sender=user, updated_fields=list
 profile_picture_uploaded = Signal()  # sender=user, file_key=str
 profile_picture_deleted = Signal()  # sender=user
 
+# GDPR Events
+account_deleted = Signal()  # user_id=str, email=str
+data_export_requested = Signal()  # user_id=str, email=str
+
 
 # ===== Event Data Classes =====
 
@@ -411,3 +415,43 @@ class EventDispatcher:
             get_event_bus().publish("profile.picture_deleted", {"user_id": str(user.id)})
         except Exception as e:
             logger.error(f"Failed to publish profile.picture_deleted event: {e}")
+
+    @staticmethod
+    def dispatch_account_deleted(user_id: str, email: str):
+        """Dispatch account deleted event (GDPR)."""
+        import logging
+
+        from infrastructure.events.redis_event_bus import get_event_bus
+
+        logger = logging.getLogger(__name__)
+
+        logger.info(f"[EVENT] Account deleted: {email} (user_id={user_id})")
+
+        # Legacy Signal
+        account_deleted.send(sender=None, user_id=user_id, email=email)
+
+        # Redis Event Bus
+        try:
+            get_event_bus().publish("account.deleted", {"user_id": user_id, "email": email})
+        except Exception as e:
+            logger.error(f"Failed to publish account.deleted event: {e}")
+
+    @staticmethod
+    def dispatch_data_export_requested(user_id: str, email: str):
+        """Dispatch data export requested event (GDPR)."""
+        import logging
+
+        from infrastructure.events.redis_event_bus import get_event_bus
+
+        logger = logging.getLogger(__name__)
+
+        logger.info(f"[EVENT] Data export requested: {email} (user_id={user_id})")
+
+        # Legacy Signal
+        data_export_requested.send(sender=None, user_id=user_id, email=email)
+
+        # Redis Event Bus
+        try:
+            get_event_bus().publish("data.export_requested", {"user_id": user_id, "email": email})
+        except Exception as e:
+            logger.error(f"Failed to publish data.export_requested event: {e}")

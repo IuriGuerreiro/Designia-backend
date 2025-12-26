@@ -5,6 +5,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from authentication.api.serializers import ProfileSerializer, PublicUserSerializer, UserSerializer
+from authentication.api.serializers.profile_serializers import AccountDeletionSerializer
 from authentication.api.serializers.response_serializers import (
     ErrorResponseSerializer,
     ProfilePictureDeleteResponseSerializer,
@@ -232,5 +233,168 @@ class ProfilePictureUploadView(APIView):
 
         if result.success:
             return Response({"message": result.message}, status=status.HTTP_200_OK)
+
+        return Response({"error": result.message}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ProfileExportView(APIView):
+    """
+    GDPR Data Export - Request export of all user data.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        operation_id="profile_data_export",
+        summary="Request data export (GDPR)",
+        description="""
+        Request an export of all your personal data (GDPR Right to Data Portability).
+
+        **Process:**
+        - Request is queued for async processing
+        - All user data is collected (profile, orders, reviews, messages)
+        - JSON file is generated and uploaded to secure storage
+        - Email is sent with time-limited download link
+
+        **Included Data:**
+        - Profile information
+        - Order history
+        - Reviews and ratings
+        - Messages and conversations
+        - Seller data (if applicable)
+
+        **Rate Limiting:** 1 export request per 24 hours
+        """,
+        responses={
+            200: OpenApiResponse(
+                description="Export request accepted",
+                examples=[
+                    OpenApiExample(
+                        "Success",
+                        value={
+                            "message": "Export request received. You will receive an email with a download link when ready.",
+                            "estimated_time": "5-10 minutes",
+                        },
+                    )
+                ],
+            ),
+            429: OpenApiResponse(
+                response=ErrorResponseSerializer,
+                description="Rate limit exceeded",
+                examples=[
+                    OpenApiExample(
+                        "Rate Limited",
+                        value={
+                            "error": "Export request already in progress or completed recently.",
+                            "retry_after": 86400,
+                        },
+                    )
+                ],
+            ),
+        },
+        tags=["Profile", "GDPR"],
+    )
+    def get(self, request):
+        from authentication.tasks.gdpr_tasks import export_user_data_task
+
+        user = request.user
+
+        # Queue the Celery task for async processing
+        export_user_data_task.delay(str(user.id))
+
+        return Response(
+            {
+                "message": "Export request received. You will receive an email with a download link when ready.",
+                "estimated_time": "5-10 minutes",
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class ProfileDeleteView(APIView):
+    """
+    GDPR Account Deletion - Permanently delete user account.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        operation_id="profile_delete_account",
+        summary="Delete account (GDPR)",
+        description="""
+        Permanently delete your account (GDPR Right to Erasure / Right to be Forgotten).
+
+        **Requirements:**
+        - Must type "DELETE" as confirmation
+        - Must provide current password
+
+        **Process:**
+        - Account is immediately deactivated
+        - Personal data is anonymized (reviews show "Deleted User")
+        - Private data (orders, messages) is permanently deleted
+        - Session is terminated
+
+        **WARNING:** This action is irreversible!
+        """,
+        request=AccountDeletionSerializer,
+        responses={
+            200: OpenApiResponse(
+                description="Account deleted successfully",
+                examples=[
+                    OpenApiExample(
+                        "Success",
+                        value={"message": "Account deleted successfully. All personal data has been removed."},
+                    )
+                ],
+            ),
+            400: OpenApiResponse(
+                response=ErrorResponseSerializer,
+                description="Validation error",
+                examples=[
+                    OpenApiExample(
+                        "Invalid Confirmation",
+                        value={"error": "You must type DELETE to confirm account deletion."},
+                    ),
+                    OpenApiExample(
+                        "Invalid Password",
+                        value={"error": "Incorrect password."},
+                    ),
+                ],
+            ),
+        },
+        tags=["Profile", "GDPR"],
+    )
+    def post(self, request):
+        serializer = AccountDeletionSerializer(data=request.data)
+
+        if not serializer.is_valid():
+            return Response(
+                {"error": "Validation failed", "details": serializer.errors}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        confirmation = serializer.validated_data.get("confirmation")
+        password = serializer.validated_data.get("password")
+
+        # Verify confirmation text
+        if confirmation != "DELETE":
+            return Response(
+                {"error": "You must type DELETE to confirm account deletion."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Verify password
+        user = request.user
+        if not user.check_password(password):
+            return Response({"error": "Incorrect password."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Perform account deletion via service
+        service = get_profile_service()
+        result = service.delete_user_account(user)
+
+        if result.success:
+            return Response(
+                {"message": "Account deleted successfully. All personal data has been removed."},
+                status=status.HTTP_200_OK,
+            )
 
         return Response({"error": result.message}, status=status.HTTP_400_BAD_REQUEST)

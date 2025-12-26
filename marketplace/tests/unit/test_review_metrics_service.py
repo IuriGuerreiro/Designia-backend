@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from marketplace.services.review_metrics_service import ReviewMetricsService
+from marketplace.catalog.domain.services.review_metrics_service import ReviewMetricsService
 
 
 @pytest.mark.unit
@@ -12,7 +12,7 @@ class TestReviewMetricsServiceUnit:
         self.service = ReviewMetricsService()
         self.product_id = "test-product-id"
 
-    @patch("marketplace.services.review_metrics_service.cache")
+    @patch("marketplace.catalog.domain.services.review_metrics_service.cache")
     @patch("marketplace.models.ProductReview.objects.filter")
     def test_calculate_average_rating_cached(self, mock_filter, mock_cache):
         # Setup cache hit
@@ -24,7 +24,7 @@ class TestReviewMetricsServiceUnit:
         assert result.value == Decimal("4.5")
         mock_filter.assert_not_called()
 
-    @patch("marketplace.services.review_metrics_service.cache")
+    @patch("marketplace.catalog.domain.services.review_metrics_service.cache")
     @patch("marketplace.models.ProductReview.objects.filter")
     def test_calculate_average_rating_db(self, mock_filter, mock_cache):
         # Setup cache miss
@@ -42,7 +42,7 @@ class TestReviewMetricsServiceUnit:
         assert result.value == Decimal("4.25")
         mock_cache.set.assert_called()
 
-    @patch("marketplace.services.review_metrics_service.cache")
+    @patch("marketplace.catalog.domain.services.review_metrics_service.cache")
     @patch("marketplace.models.ProductReview.objects.filter")
     def test_get_review_count(self, mock_filter, mock_cache):
         mock_cache.get.return_value = None
@@ -55,7 +55,7 @@ class TestReviewMetricsServiceUnit:
         assert result.ok
         assert result.value == 10
 
-    @patch("marketplace.services.review_metrics_service.cache")
+    @patch("marketplace.catalog.domain.services.review_metrics_service.cache")
     @patch("marketplace.models.ProductReview.objects.filter")
     def test_get_rating_distribution(self, mock_filter, mock_cache):
         mock_cache.get.return_value = None

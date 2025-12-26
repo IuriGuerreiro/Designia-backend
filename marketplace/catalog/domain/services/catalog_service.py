@@ -14,7 +14,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.db.models import Avg, Count, OuterRef, Q, Subquery
+from django.db.models import Count, Q
 
 # Phase 3: Observability
 from authentication.infra.observability.tracing import tracer
@@ -22,7 +22,6 @@ from infrastructure.container import container
 from infrastructure.storage.interface import StorageException
 from marketplace.catalog.domain.models.catalog import Product, ProductImage
 from marketplace.catalog.domain.models.category import Category
-from marketplace.catalog.domain.models.interaction import ProductReview
 from marketplace.catalog.domain.services.base import BaseService, ErrorCodes, ServiceResult, service_err, service_ok
 from utils.rbac import is_seller
 
@@ -93,26 +92,8 @@ class CatalogService(BaseService):
             span.set_attribute("page", page)
 
             try:
-                # Start with base queryset, including annotations for average rating and review count
-                # The ProductReview model is assumed to be related to Product with 'productreview_set' or similar related_name
-                # If not, adjust the filter below (e.g., 'productreview__product')
-                # Assuming 'ProductReview' has a foreign key to 'Product' named 'product'
-                queryset = (
-                    Product.objects.select_related("seller", "category")
-                    .prefetch_related("images")
-                    .annotate(
-                        calculated_average_rating=Subquery(
-                            ProductReview.objects.filter(product=OuterRef("pk"))
-                            .annotate(avg_rating=Avg("rating"))
-                            .values("avg_rating")[:1]
-                        ),
-                        calculated_review_count=Subquery(
-                            ProductReview.objects.filter(product=OuterRef("pk"))
-                            .annotate(count_reviews=Count("id"))
-                            .values("count_reviews")[:1]
-                        ),
-                    )
-                )
+                # Start with base queryset
+                queryset = Product.objects.select_related("seller", "category").prefetch_related("images")
 
                 # Apply filters
                 if "category" in filters:
@@ -147,7 +128,17 @@ class CatalogService(BaseService):
                     queryset = queryset.filter(stock_quantity__gt=0)
 
                 # Apply ordering
-                allowed_orderings = ["-created_at", "created_at", "price", "-price", "-view_count", "-favorite_count"]
+                allowed_orderings = [
+                    "-created_at",
+                    "created_at",
+                    "price",
+                    "-price",
+                    "-view_count",
+                    "-favorite_count",
+                    "-average_rating",
+                    "average_rating",
+                    "-review_count",
+                ]
                 if ordering in allowed_orderings:
                     queryset = queryset.order_by(ordering)
                 else:

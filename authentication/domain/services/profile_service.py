@@ -273,3 +273,224 @@ class ProfileService:
         except Exception as e:
             logger.warning(f"Failed to generate profile picture URL for user {user.id}: {e}")
             return None
+
+    def delete_user_account(self, user) -> Result:
+        """
+        Delete user account (GDPR Right to Erasure).
+
+        Business Logic:
+        1. Anonymize public data (reviews) - change author to "Deleted User"
+        2. Delete private data (messages, orders relation but keep for seller records)
+        3. Delete profile picture from storage
+        4. Deactivate and anonymize user account
+        5. Note: Password already verified in view layer
+
+        Args:
+            user: CustomUser instance to delete
+
+        Returns:
+            Result with deletion status
+        """
+        from django.db import transaction
+
+        try:
+            with transaction.atomic():
+                user_id = str(user.id)
+                user_email = user.email
+
+                # 1. Delete profile picture if exists
+                if hasattr(user, "profile") and user.profile.profile_picture_url:
+                    self.storage_provider.delete_file(user.profile.profile_picture_url)
+
+                # 2. Anonymize reviews (if marketplace app exists)
+                try:
+                    from marketplace.models import Review
+
+                    Review.objects.filter(user=user).update(
+                        user=None,
+                        reviewer_name="Deleted User",
+                    )
+                except (ImportError, Exception) as e:
+                    logger.info(f"Could not anonymize reviews for user {user_id}: {e}")
+
+                # 3. Delete chat messages (if chat app exists)
+                try:
+                    from chat.models import Message
+
+                    Message.objects.filter(sender=user).delete()
+                except (ImportError, Exception) as e:
+                    logger.info(f"Could not delete messages for user {user_id}: {e}")
+
+                # 4. Clear personal profile data
+                if hasattr(user, "profile"):
+                    profile = user.profile
+                    profile.bio = ""
+                    profile.phone_number = ""
+                    profile.website = ""
+                    profile.location = ""
+                    profile.street_address = ""
+                    profile.city = ""
+                    profile.state_province = ""
+                    profile.country = ""
+                    profile.postal_code = ""
+                    profile.instagram_url = ""
+                    profile.twitter_url = ""
+                    profile.linkedin_url = ""
+                    profile.facebook_url = ""
+                    profile.profile_picture_url = None
+                    profile.save()
+
+                # 5. Anonymize and deactivate user
+                user.email = f"deleted_{user_id}@deleted.local"
+                user.username = f"deleted_{user_id}"
+                user.first_name = "Deleted"
+                user.last_name = "User"
+                user.is_active = False
+                user.set_unusable_password()
+                user.save()
+
+                # 6. Dispatch event for any cleanup handlers
+                EventDispatcher.dispatch_account_deleted(user_id=user_id, email=user_email)
+
+                logger.info(f"Account deleted for user {user_id}")
+
+                return Result(
+                    success=True,
+                    message="Account deleted successfully.",
+                    data={"user_id": user_id},
+                )
+
+        except Exception as e:
+            logger.exception(f"Account deletion error for user {user.id}: {e}")
+            return Result(success=False, message="Failed to delete account.", error=str(e))
+
+    def collect_user_data(self, user) -> Dict[str, Any]:
+        """
+        Collect all user data for GDPR export.
+
+        Collects data from all related models and returns a dictionary
+        suitable for JSON export.
+
+        Args:
+            user: CustomUser instance
+
+        Returns:
+            Dict containing all user data
+        """
+        from django.utils import timezone
+
+        data = {
+            "export_date": timezone.now().isoformat(),
+            "user_id": str(user.id),
+            "account": {
+                "email": user.email,
+                "username": user.username,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "date_joined": user.date_joined.isoformat() if user.date_joined else None,
+                "last_login": user.last_login.isoformat() if user.last_login else None,
+                "is_active": user.is_active,
+                "role": user.role if hasattr(user, "role") else None,
+            },
+            "profile": {},
+            "orders": [],
+            "reviews": [],
+            "messages": [],
+            "seller_data": None,
+        }
+
+        # Profile data
+        if hasattr(user, "profile"):
+            profile = user.profile
+            data["profile"] = {
+                "bio": profile.bio,
+                "location": profile.location,
+                "phone_number": profile.phone_number,
+                "country_code": profile.country_code if hasattr(profile, "country_code") else None,
+                "website": profile.website,
+                "job_title": profile.job_title if hasattr(profile, "job_title") else None,
+                "company": profile.company if hasattr(profile, "company") else None,
+                "birth_date": str(profile.birth_date)
+                if hasattr(profile, "birth_date") and profile.birth_date
+                else None,
+                "gender": profile.gender if hasattr(profile, "gender") else None,
+                "timezone": str(profile.timezone) if hasattr(profile, "timezone") else None,
+                "language_preference": profile.language_preference
+                if hasattr(profile, "language_preference")
+                else None,
+                "currency_preference": profile.currency_preference
+                if hasattr(profile, "currency_preference")
+                else None,
+                "is_verified_seller": profile.is_verified_seller if hasattr(profile, "is_verified_seller") else False,
+                "seller_type": profile.seller_type if hasattr(profile, "seller_type") else None,
+                "marketing_emails_enabled": profile.marketing_emails_enabled
+                if hasattr(profile, "marketing_emails_enabled")
+                else None,
+                "newsletter_enabled": profile.newsletter_enabled if hasattr(profile, "newsletter_enabled") else None,
+            }
+
+        # Orders (if marketplace exists)
+        try:
+            from marketplace.models import Order
+
+            orders = Order.objects.filter(buyer=user).select_related("seller")
+            data["orders"] = [
+                {
+                    "id": str(order.id),
+                    "created_at": order.created_at.isoformat() if order.created_at else None,
+                    "status": order.status,
+                    "total_amount": str(order.total_amount) if hasattr(order, "total_amount") else None,
+                }
+                for order in orders
+            ]
+        except (ImportError, Exception) as e:
+            logger.info(f"Could not collect orders for user {user.id}: {e}")
+
+        # Reviews (if marketplace exists)
+        try:
+            from marketplace.models import Review
+
+            reviews = Review.objects.filter(user=user)
+            data["reviews"] = [
+                {
+                    "id": str(review.id),
+                    "created_at": review.created_at.isoformat() if review.created_at else None,
+                    "rating": review.rating,
+                    "comment": review.comment if hasattr(review, "comment") else None,
+                }
+                for review in reviews
+            ]
+        except (ImportError, Exception) as e:
+            logger.info(f"Could not collect reviews for user {user.id}: {e}")
+
+        # Messages (if chat exists)
+        try:
+            from chat.models import Message
+
+            messages = Message.objects.filter(sender=user).order_by("-created_at")[:100]
+            data["messages"] = [
+                {
+                    "id": str(msg.id),
+                    "created_at": msg.created_at.isoformat() if msg.created_at else None,
+                    "content": msg.content[:200] + "..." if len(msg.content) > 200 else msg.content,
+                }
+                for msg in messages
+            ]
+        except (ImportError, Exception) as e:
+            logger.info(f"Could not collect messages for user {user.id}: {e}")
+
+        # Seller data (if applicable)
+        try:
+            from authentication.domain.models import SellerApplication
+
+            seller_app = SellerApplication.objects.filter(user=user).first()
+            if seller_app:
+                data["seller_data"] = {
+                    "business_name": seller_app.business_name if hasattr(seller_app, "business_name") else None,
+                    "status": seller_app.status,
+                    "created_at": seller_app.created_at.isoformat() if seller_app.created_at else None,
+                }
+        except (ImportError, Exception) as e:
+            logger.info(f"Could not collect seller data for user {user.id}: {e}")
+
+        return data

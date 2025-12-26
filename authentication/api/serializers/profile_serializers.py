@@ -188,3 +188,27 @@ class PublicUserSerializer(serializers.ModelSerializer):
             "is_verified_seller",
             "seller_type",
         )
+
+
+class AccountDeletionSerializer(serializers.Serializer):
+    """
+    Serializer for GDPR account deletion request.
+
+    Requires user to type "DELETE" and provide their password
+    to confirm the irreversible action.
+    """
+
+    confirmation = serializers.CharField(
+        required=True,
+        help_text='Type "DELETE" to confirm account deletion',
+    )
+    password = serializers.CharField(
+        required=True,
+        write_only=True,
+        help_text="Your current password for verification",
+    )
+
+    def validate_confirmation(self, value):
+        if value != "DELETE":
+            raise serializers.ValidationError('You must type "DELETE" to confirm.')
+        return value

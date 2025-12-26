@@ -10,7 +10,13 @@ from .auth_views import (
     TwoFactorLoginVerifyView,
     VerifyEmailView,
 )
-from .profile_views import ProfilePictureUploadView, ProfileUpdateView, PublicProfileDetailView
+from .profile_views import (
+    ProfileDeleteView,
+    ProfileExportView,
+    ProfilePictureUploadView,
+    ProfileUpdateView,
+    PublicProfileDetailView,
+)
 from .seller_views import SellerApplicationAdminView, SellerApplicationCreateView, SellerApplicationStatusView
 
 
@@ -28,6 +34,8 @@ __all__ = [
     "PublicProfileDetailView",
     "ProfileUpdateView",
     "ProfilePictureUploadView",
+    "ProfileExportView",
+    "ProfileDeleteView",
     "SellerApplicationCreateView",
     "SellerApplicationStatusView",
     "SellerApplicationAdminView",

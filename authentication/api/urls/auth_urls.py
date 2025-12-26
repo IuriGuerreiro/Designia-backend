@@ -7,6 +7,8 @@ from authentication.api.views import (
     Enable2FAView,
     GoogleLoginView,
     LoginAPIView,
+    ProfileDeleteView,
+    ProfileExportView,
     ProfilePictureUploadView,
     ProfileUpdateView,
     PublicProfileDetailView,
@@ -42,6 +44,9 @@ urlpatterns = [
     path("profile/picture/upload/", ProfilePictureUploadView.as_view(), name="upload_profile_picture"),
     path("profile/picture/delete/", ProfilePictureUploadView.as_view(), name="delete_profile_picture"),
     path("users/<uuid:pk>/", PublicProfileDetailView.as_view(), name="public_profile_detail"),
+    # GDPR
+    path("profile/export/", ProfileExportView.as_view(), name="profile_export"),
+    path("profile/delete/", ProfileDeleteView.as_view(), name="profile_delete"),
     # Seller
     path("seller/apply/", SellerApplicationCreateView.as_view(), name="seller_apply"),
     path("seller/application/status/", SellerApplicationStatusView.as_view(), name="seller_application_status"),

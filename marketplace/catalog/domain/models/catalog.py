@@ -73,6 +73,8 @@ class Product(models.Model):
     view_count = models.PositiveIntegerField(default=0)
     click_count = models.PositiveIntegerField(default=0)
     favorite_count = models.PositiveIntegerField(default=0)
+    average_rating = models.DecimalField(max_digits=3, decimal_places=2, default=0.00)
+    review_count = models.PositiveIntegerField(default=0)
 
     class Meta:
         ordering = ["-created_at"]

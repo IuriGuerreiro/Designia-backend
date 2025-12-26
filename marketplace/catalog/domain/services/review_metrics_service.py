@@ -219,6 +219,22 @@ class ReviewMetricsService(BaseService):
             if not dist_result.ok:
                 return dist_result
 
+            # Save to Product model
+            # We use update() to avoid overwriting other fields concurrently, or select_for_update
+            # But since this is specific metrics update, update() is safer/faster for just these fields
+            # provided we don't need to trigger other signals (save() triggers signals)
+            # However, Product.save() might have logic. Let's check Product.save().
+            # It only handles slug. So update() is fine, or fetching and saving.
+            # Let's fetch and save to be safe and consistent with ORM usage.
+            try:
+                product = Product.objects.get(id=product_id)
+                product.average_rating = Decimal(str(avg_result.value))
+                product.review_count = count_result.value
+                product.save(update_fields=["average_rating", "review_count"])
+            except Product.DoesNotExist:
+                self.logger.warning(f"Product {product_id} not found when updating metrics")
+                # We can still return the calculated metrics if needed, but it's weird.
+
             metrics = {
                 "average_rating": float(avg_result.value),
                 "review_count": count_result.value,

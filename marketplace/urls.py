@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 
 from marketplace.api.views import internal_views
 from marketplace.cart.api.views.cart_views import CartViewSet
+from marketplace.catalog.api.views.analytics_views import SellerAnalyticsView
 from marketplace.catalog.api.views.category_views import CategoryViewSet
 from marketplace.catalog.api.views.image_views import ProductImageViewSet
 from marketplace.catalog.api.views.metric_views import ProductMetricsViewSet
@@ -81,6 +82,8 @@ urlpatterns = [
         ProductViewSet.as_view({"get": "list"}),
         name="seller-products",
     ),
+    # Seller Analytics (authenticated seller only)
+    path("seller/analytics/", SellerAnalyticsView.as_view(), name="seller-analytics"),
     # ==================== USER PROFILES ====================
     # Handled by router: /profiles/
     # ==================== METRICS (Prometheus) ====================

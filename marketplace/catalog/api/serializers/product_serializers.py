@@ -8,7 +8,6 @@ from marketplace.cart.domain.services.inventory_service import InventoryService
 from marketplace.cart.domain.services.pricing_service import PricingService
 from marketplace.catalog.domain.models.catalog import Product
 from marketplace.catalog.domain.models.interaction import ProductFavorite, ProductMetrics
-from marketplace.catalog.domain.services.review_metrics_service import ReviewMetricsService
 
 from .category_serializers import ProductDetailCategorySerializer
 from .image_serializers import ProductDetailImageSerializer, ProductImageSerializer
@@ -115,14 +114,10 @@ class ProductListSerializer(serializers.ModelSerializer):
         return False
 
     def get_average_rating(self, obj):
-        if hasattr(obj, "calculated_avg_rating"):
-            return obj.calculated_avg_rating or 0
-        return ReviewMetricsService().calculate_average_rating(str(obj.id)).value
+        return float(obj.average_rating)
 
     def get_review_count(self, obj):
-        if hasattr(obj, "calculated_review_count"):
-            return obj.calculated_review_count or 0
-        return ReviewMetricsService().get_review_count(str(obj.id)).value
+        return obj.review_count
 
     def get_is_on_sale(self, obj):
         return PricingService().is_on_sale(obj).value
@@ -222,7 +217,7 @@ class ProductDetailSerializer(serializers.ModelSerializer):
         return int(PricingService().calculate_discount_percentage(obj).value)
 
     def get_average_rating(self, obj):
-        return ReviewMetricsService().calculate_average_rating(str(obj.id)).value
+        return float(obj.average_rating)
 
     def get_is_in_stock(self, obj):
         return InventoryService().is_in_stock(str(obj.id)).value
