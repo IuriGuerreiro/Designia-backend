@@ -12,7 +12,7 @@ import logging
 from infrastructure.payments.interface import CheckoutSession, PaymentStatus
 from marketplace.models import Order
 from marketplace.services.base import BaseService, ErrorCodes, ServiceResult, service_err, service_ok
-from payment_system.services.payment_service import PaymentService
+from payment_system.domain.services.payment_service import PaymentService
 
 
 logger = logging.getLogger(__name__)

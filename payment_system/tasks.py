@@ -10,7 +10,7 @@ from datetime import timedelta
 from celery import shared_task
 from django.utils import timezone
 
-from payment_system.services.payout_service import PayoutService
+from payment_system.domain.services.payout_service import PayoutService
 
 
 logger = logging.getLogger(__name__)

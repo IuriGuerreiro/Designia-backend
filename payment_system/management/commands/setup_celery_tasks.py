@@ -9,7 +9,7 @@ This command configures all default periodic tasks including:
 
 from django.core.management.base import BaseCommand, CommandError
 
-from payment_system.services.celery_scheduler_service import CelerySchedulerService
+from payment_system.domain.services.celery_scheduler_service import CelerySchedulerService
 
 
 class Command(BaseCommand):

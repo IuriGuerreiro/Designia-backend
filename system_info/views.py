@@ -14,7 +14,7 @@ from .models import AppVersion
 
 logger = logging.getLogger(__name__)
 
-bucket_root_folders = ["furniture", "product-ar-models"]
+bucket_root_folders = ["furniture", "product-ar-models", "gdpr-exports", "profile_pictures"]
 
 
 @csrf_exempt

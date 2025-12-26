@@ -6,6 +6,7 @@ Story 6.1 - Data Export and Account Deletion
 
 import json
 import logging
+from io import BytesIO
 
 from celery import shared_task
 from django.template.loader import render_to_string
@@ -54,15 +55,18 @@ def export_user_data_task(user_id: str):
         json_content = json.dumps(user_data, indent=2, ensure_ascii=False)
         json_bytes = json_content.encode("utf-8")
 
-        # Upload to S3
+        # Upload to S3 (wrap bytes in BytesIO for file-like interface)
         storage = S3StorageProvider()
         export_filename = f"gdpr-exports/{user_id}/data_export_{timezone.now().strftime('%Y%m%d_%H%M%S')}.json"
 
+        file_obj = BytesIO(json_bytes)
+        file_obj.name = "data_export.json"  # S3 provider may need a name attribute
+
         success, file_key_or_error, _ = storage.upload_file(
-            file=json_bytes,
+            file=file_obj,
             path=export_filename,
             public=False,
-            content_type="application/json",
+            validate_image=False,  # Allow JSON files
         )
 
         if not success:

@@ -24,7 +24,7 @@ app.config_from_object("django.conf:settings", namespace="CELERY")
 app.autodiscover_tasks()
 
 # Explicitly import our tasks to ensure they're registered
-app.autodiscover_tasks(["payment_system.Tasks"])
+app.autodiscover_tasks(["payment_system.Tasks", "authentication.tasks"])
 
 # Celery Beat configuration for periodic tasks
 app.conf.beat_schedule = {

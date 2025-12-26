@@ -279,11 +279,16 @@ class ProfileService:
         Delete user account (GDPR Right to Erasure).
 
         Business Logic:
-        1. Anonymize public data (reviews) - change author to "Deleted User"
-        2. Delete private data (messages, orders relation but keep for seller records)
-        3. Delete profile picture from storage
-        4. Deactivate and anonymize user account
-        5. Note: Password already verified in view layer
+        1. Delete profile picture from storage
+        2. Delete seller's products and associated images from S3
+        3. Delete user's favorites
+        4. Delete user's cart
+        5. Anonymize public data (reviews) - change author to "Deleted User"
+        6. Delete private data (chat messages)
+        7. Clear personal profile data
+        8. Deactivate and anonymize user account
+        9. Dispatch account deleted event
+        Note: Password already verified in view layer
 
         Args:
             user: CustomUser instance to delete
@@ -302,7 +307,51 @@ class ProfileService:
                 if hasattr(user, "profile") and user.profile.profile_picture_url:
                     self.storage_provider.delete_file(user.profile.profile_picture_url)
 
-                # 2. Anonymize reviews (if marketplace app exists)
+                # 2. Delete seller's products and associated images from S3
+                try:
+                    from marketplace.catalog.domain.models import Product, ProductImage
+
+                    # Get all products by this seller
+                    seller_products = Product.objects.filter(seller=user)
+
+                    # Delete product images from S3 storage
+                    for product in seller_products:
+                        product_images = ProductImage.objects.filter(product=product)
+                        for image in product_images:
+                            # Delete from S3 if s3_key exists
+                            if image.s3_key:
+                                try:
+                                    self.storage_provider.delete_file(image.s3_key)
+                                except Exception as img_e:
+                                    logger.warning(f"Failed to delete product image {image.id} from S3: {img_e}")
+
+                    # Delete all products (CASCADE will delete ProductImages, reviews, etc.)
+                    products_count = seller_products.count()
+                    seller_products.delete()
+                    logger.info(f"Deleted {products_count} products for user {user_id}")
+
+                except (ImportError, Exception) as e:
+                    logger.info(f"Could not delete products for user {user_id}: {e}")
+
+                # 3. Delete user's favorites
+                try:
+                    from marketplace.catalog.domain.models import ProductFavorite
+
+                    favorites_deleted = ProductFavorite.objects.filter(user=user).delete()[0]
+                    logger.info(f"Deleted {favorites_deleted} favorites for user {user_id}")
+                except (ImportError, Exception) as e:
+                    logger.info(f"Could not delete favorites for user {user_id}: {e}")
+
+                # 4. Delete user's cart
+                try:
+                    from marketplace.cart.domain.models import Cart
+
+                    Cart.objects.filter(user=user).delete()
+                    logger.info(f"Deleted cart for user {user_id}")
+                except (ImportError, Exception) as e:
+                    logger.info(f"Could not delete cart for user {user_id}: {e}")
+
+                # 5. Anonymize reviews written by this user (if marketplace app exists)
                 try:
                     from marketplace.models import Review
 
@@ -313,7 +362,7 @@ class ProfileService:
                 except (ImportError, Exception) as e:
                     logger.info(f"Could not anonymize reviews for user {user_id}: {e}")
 
-                # 3. Delete chat messages (if chat app exists)
+                # 6. Delete chat messages (if chat app exists)
                 try:
                     from chat.models import Message
 
@@ -321,7 +370,7 @@ class ProfileService:
                 except (ImportError, Exception) as e:
                     logger.info(f"Could not delete messages for user {user_id}: {e}")
 
-                # 4. Clear personal profile data
+                # 7. Clear personal profile data
                 if hasattr(user, "profile"):
                     profile = user.profile
                     profile.bio = ""
@@ -340,7 +389,7 @@ class ProfileService:
                     profile.profile_picture_url = None
                     profile.save()
 
-                # 5. Anonymize and deactivate user
+                # 8. Anonymize and deactivate user
                 user.email = f"deleted_{user_id}@deleted.local"
                 user.username = f"deleted_{user_id}"
                 user.first_name = "Deleted"
@@ -349,7 +398,7 @@ class ProfileService:
                 user.set_unusable_password()
                 user.save()
 
-                # 6. Dispatch event for any cleanup handlers
+                # 9. Dispatch event for any cleanup handlers
                 EventDispatcher.dispatch_account_deleted(user_id=user_id, email=user_email)
 
                 logger.info(f"Account deleted for user {user_id}")
