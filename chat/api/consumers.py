@@ -64,6 +64,17 @@ class ChatConsumer(AsyncWebsocketConsumer):
                     logger.error(f"Error saving message: {e}")
                     await self.send_error("Failed to send message")
 
+            elif msg_type == "chat.typing":
+                # Broadcast typing status to group
+                await self.channel_layer.group_send(
+                    self.group_name,
+                    {
+                        "type": "chat_typing",
+                        "sender_id": str(self.user.id),
+                        "username": self.user.username,
+                    },
+                )
+
             elif msg_type == "ping":
                 await self.send(text_data=json.dumps({"type": "pong"}))
             else:
@@ -81,6 +92,26 @@ class ChatConsumer(AsyncWebsocketConsumer):
         """
         # Send message to WebSocket
         await self.send(text_data=json.dumps({"type": "chat.message", "data": event["message"]}))
+
+    async def chat_typing(self, event):
+        """
+        Handler for 'chat.typing' events.
+        """
+        # Don't send back to the user who is typing
+        if event["sender_id"] != str(self.user.id):
+            await self.send(
+                text_data=json.dumps(
+                    {"type": "chat.typing", "sender_id": event["sender_id"], "username": event["username"]}
+                )
+            )
+
+    async def chat_read(self, event):
+        """
+        Handler for 'chat.read' events.
+        """
+        # Send to everyone (including the reader, so they can update their own UI if needed,
+        # though usually optimistic update handles that)
+        await self.send(text_data=json.dumps({"type": "chat.read", "data": event["message"]}))
 
     async def send_error(self, message, code="error"):
         await self.send(text_data=json.dumps({"type": "error", "code": code, "message": message}))

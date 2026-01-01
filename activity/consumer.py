@@ -45,7 +45,7 @@ class ActivityConsumer(AsyncWebsocketConsumer):
             text_data=json.dumps(
                 {
                     "type": "connection_success",
-                    "user_id": self.user.id,
+                    "user_id": str(self.user.id),
                     "cart_count": cart_count,
                     "unread_messages_count": unread_messages,
                     "message": "Connected to activity notifications",

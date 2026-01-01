@@ -1,9 +1,16 @@
-from django.urls import path
+from django.urls import include, path
+from rest_framework.routers import DefaultRouter
 
 from . import views
+from .api.views.conversation_views import ConversationViewSet
 
+
+router = DefaultRouter()
+router.register(r"conversations", ConversationViewSet, basename="conversation")
 
 urlpatterns = [
+    # New Refactored API
+    path("", include(router.urls)),
     # Chat endpoints
     path("", views.ChatListView.as_view(), name="chat_list"),
     path("<int:pk>/", views.ChatDetailView.as_view(), name="chat_detail"),

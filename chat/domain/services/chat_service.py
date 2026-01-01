@@ -68,3 +68,45 @@ class ChatService:
         page_obj = paginator.get_page(page)
 
         return page_obj
+
+    def mark_messages_as_read(self, user, thread_id):
+        """
+        Mark all messages in a thread as read for the user.
+        """
+        try:
+            thread = Thread.objects.get(id=thread_id)
+        except Thread.DoesNotExist:
+            raise ObjectDoesNotExist("Thread not found")
+
+        participant = ThreadParticipant.objects.filter(thread=thread, user=user).first()
+        if not participant:
+            raise PermissionDenied("User is not a participant of this thread")
+
+        from django.utils import timezone
+
+        now = timezone.now()
+
+        # Update participant's last_read_at
+        participant.last_read_at = now
+        participant.save(update_fields=["last_read_at"])
+
+        # Update messages is_read status (messages sent by OTHERS)
+        # This is efficient for visual indicators
+        updated_count = (
+            ThreadMessage.objects.filter(thread=thread, is_read=False).exclude(sender=user).update(is_read=True)
+        )
+
+        if updated_count > 0:
+            # Broadcast read event
+            group_name = f"thread_{thread.id}"
+            payload = {
+                "type": "chat_read",
+                "message": {
+                    "thread_id": str(thread.id),
+                    "reader_id": str(user.id),
+                    "read_at": now.isoformat(),
+                },
+            }
+            async_to_sync(self.channel_layer.group_send)(group_name, payload)
+
+        return updated_count
