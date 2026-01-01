@@ -3,10 +3,12 @@ from rest_framework.routers import DefaultRouter
 
 from . import views
 from .api.views.conversation_views import ConversationViewSet
+from .api.views.report_views import ReportViewSet
 
 
 router = DefaultRouter()
 router.register(r"conversations", ConversationViewSet, basename="conversation")
+router.register(r"reports", ReportViewSet, basename="chat-report")
 
 urlpatterns = [
     # New Refactored API

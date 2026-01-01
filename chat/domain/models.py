@@ -69,3 +69,39 @@ class ThreadMessage(models.Model):
 
     def __str__(self):
         return f"Message {self.id} from {self.sender}"
+
+
+class ChatReport(models.Model):
+    REPORT_REASON_CHOICES = [
+        ("spam", "Spam"),
+        ("harassment", "Harassment"),
+        ("inappropriate", "Inappropriate Content"),
+        ("scam", "Scam"),
+        ("other", "Other"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    message = models.ForeignKey(ThreadMessage, on_delete=models.CASCADE, related_name="reports")
+    reporter = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="chat_reports")
+    reason = models.CharField(max_length=20, choices=REPORT_REASON_CHOICES)
+    description = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    resolved = models.BooleanField(default=False)
+    resolved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="resolved_reports",
+    )
+    resolution_note = models.TextField(blank=True, null=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["-created_at"]),
+            models.Index(fields=["resolved"]),
+        ]
+
+    def __str__(self):
+        return f"Report {self.id} by {self.reporter} on {self.message}"

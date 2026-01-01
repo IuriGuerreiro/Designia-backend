@@ -1,5 +1,6 @@
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
 from chat.api.serializers.conversation_serializers import (
@@ -10,6 +11,14 @@ from chat.api.serializers.conversation_serializers import (
 from chat.domain.models import Thread, ThreadParticipant
 
 
+class MessagePagination(PageNumberPagination):
+    """Pagination for chat messages"""
+
+    page_size = 20
+    page_size_query_param = "page_size"
+    max_page_size = 100
+
+
 class ConversationViewSet(viewsets.ModelViewSet):
     serializer_class = ThreadSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -17,6 +26,21 @@ class ConversationViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         # Return threads where current user is a participant
         return Thread.objects.filter(participants=self.request.user).distinct()
+
+    def get_paginator(self):
+        # Only paginate the messages action, not the conversation list
+        if self.action == "messages":
+            return super().get_paginator()
+        return None
+
+    @property
+    def paginator(self):
+        # Only paginate the messages action, not the conversation list
+        if self.action == "messages":
+            if not hasattr(self, "_paginator"):
+                self._paginator = MessagePagination()
+            return self._paginator
+        return None
 
     def create(self, request, *args, **kwargs):
         """
@@ -67,7 +91,7 @@ class ConversationViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["get"])
     def messages(self, request, pk=None):
         thread = self.get_object()
-        messages = thread.messages.all().order_by("created_at")
+        messages = thread.messages.all().order_by("-created_at")
         page = self.paginate_queryset(messages)
         if page is not None:
             serializer = ThreadMessageSerializer(page, many=True)
