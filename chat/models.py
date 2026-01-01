@@ -155,3 +155,6 @@ class Message(models.Model):
             return f"{self.sender.username}: {content_preview}"
         else:
             return f"{self.sender.username}: [Image]"
+
+
+# Import new domain models

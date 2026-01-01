@@ -27,13 +27,16 @@ django_asgi_app = get_asgi_application()
 
 # Import routing here, after Django has been initialized
 import chat.routing  # noqa: E402
+from chat.middleware import ChannelThrottlingMiddleware  # noqa: E402
 
 
 application = ProtocolTypeRouter(
     {
         # Django's ASGI application to handle traditional HTTP requests
         "http": django_asgi_app,
-        # WebSocket chat application with authentication
-        "websocket": AllowedHostsOriginValidator(AuthMiddlewareStack(URLRouter(chat.routing.websocket_urlpatterns))),
+        # WebSocket chat application with authentication and throttling
+        "websocket": ChannelThrottlingMiddleware(
+            AllowedHostsOriginValidator(AuthMiddlewareStack(URLRouter(chat.routing.websocket_urlpatterns)))
+        ),
     }
 )
