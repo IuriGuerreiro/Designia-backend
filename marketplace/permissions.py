@@ -31,8 +31,9 @@ class IsOwnerOrReadOnly(permissions.BasePermission):
 
         # Write permissions are only allowed to the owner of the object.
         # For ProductReview, check if the reviewer is the current user
+        # Note: Reviews with null reviewer (deleted users) cannot be edited
         if hasattr(obj, "reviewer"):
-            return obj.reviewer == request.user
+            return obj.reviewer is not None and obj.reviewer == request.user
 
         # For ProductImage, check if the product seller is the current user
         if hasattr(obj, "product"):
@@ -116,7 +117,8 @@ class IsReviewerOrReadOnly(permissions.BasePermission):
             return True
 
         # Write permissions are only allowed to the reviewer
-        return obj.reviewer == request.user
+        # Reviews with null reviewer (deleted users) cannot be edited
+        return obj.reviewer is not None and obj.reviewer == request.user
 
 
 class IsProductOwner(permissions.BasePermission):

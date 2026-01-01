@@ -283,11 +283,14 @@ class ProfileService:
         2. Delete seller's products and associated images from S3
         3. Delete user's favorites
         4. Delete user's cart
-        5. Anonymize public data (reviews) - change author to "Deleted User"
-        6. Delete private data (chat messages)
-        7. Clear personal profile data
-        8. Deactivate and anonymize user account
-        9. Dispatch account deleted event
+        5. Anonymize public data (reviews) - set reviewer to NULL, store "Deleted User" name
+        6. Delete private data (chat messages and chats)
+        7. Delete review helpful votes
+        8. Delete return requests
+        9. Delete activity tracking data
+        10. Clear personal profile data
+        11. Deactivate and anonymize user account
+        12. Dispatch account deleted event
         Note: Password already verified in view layer
 
         Args:
@@ -353,24 +356,59 @@ class ProfileService:
 
                 # 5. Anonymize reviews written by this user (if marketplace app exists)
                 try:
-                    from marketplace.models import Review
+                    from marketplace.models import ProductReview
 
-                    Review.objects.filter(user=user).update(
-                        user=None,
+                    reviews_count = ProductReview.objects.filter(reviewer=user).update(
+                        reviewer=None,
                         reviewer_name="Deleted User",
                     )
+                    logger.info(f"Anonymized {reviews_count} reviews for user {user_id}")
                 except (ImportError, Exception) as e:
                     logger.info(f"Could not anonymize reviews for user {user_id}: {e}")
 
-                # 6. Delete chat messages (if chat app exists)
+                # 6. Delete chat messages and chats (if chat app exists)
                 try:
-                    from chat.models import Message
+                    from chat.models import Chat, Message
 
-                    Message.objects.filter(sender=user).delete()
+                    messages_deleted = Message.objects.filter(sender=user).delete()[0]
+                    logger.info(f"Deleted {messages_deleted} messages for user {user_id}")
+
+                    # Delete chats where user is participant
+                    from django.db.models import Q
+
+                    chats_deleted = Chat.objects.filter(Q(user1=user) | Q(user2=user)).delete()[0]
+                    logger.info(f"Deleted {chats_deleted} chats for user {user_id}")
                 except (ImportError, Exception) as e:
-                    logger.info(f"Could not delete messages for user {user_id}: {e}")
+                    logger.info(f"Could not delete messages/chats for user {user_id}: {e}")
 
-                # 7. Clear personal profile data
+                # 7. Delete review helpful votes
+                try:
+                    from marketplace.models import ProductReviewHelpful
+
+                    helpful_deleted = ProductReviewHelpful.objects.filter(user=user).delete()[0]
+                    logger.info(f"Deleted {helpful_deleted} helpful votes for user {user_id}")
+                except (ImportError, Exception) as e:
+                    logger.info(f"Could not delete helpful votes for user {user_id}: {e}")
+
+                # 8. Delete return requests
+                try:
+                    from marketplace.ordering.domain.models import ReturnRequest
+
+                    returns_deleted = ReturnRequest.objects.filter(requested_by=user).delete()[0]
+                    logger.info(f"Deleted {returns_deleted} return requests for user {user_id}")
+                except (ImportError, Exception) as e:
+                    logger.info(f"Could not delete return requests for user {user_id}: {e}")
+
+                # 9. Delete user activity tracking data
+                try:
+                    from activity.models import UserClick
+
+                    activity_deleted = UserClick.objects.filter(user=user).delete()[0]
+                    logger.info(f"Deleted {activity_deleted} activity records for user {user_id}")
+                except (ImportError, Exception) as e:
+                    logger.info(f"Could not delete activity records for user {user_id}: {e}")
+
+                # 10. Clear personal profile data
                 if hasattr(user, "profile"):
                     profile = user.profile
                     profile.bio = ""
@@ -389,7 +427,7 @@ class ProfileService:
                     profile.profile_picture_url = None
                     profile.save()
 
-                # 8. Anonymize and deactivate user
+                # 11. Anonymize and deactivate user
                 user.email = f"deleted_{user_id}@deleted.local"
                 user.username = f"deleted_{user_id}"
                 user.first_name = "Deleted"
@@ -398,7 +436,7 @@ class ProfileService:
                 user.set_unusable_password()
                 user.save()
 
-                # 9. Dispatch event for any cleanup handlers
+                # 12. Dispatch event for any cleanup handlers
                 EventDispatcher.dispatch_account_deleted(user_id=user_id, email=user_email)
 
                 logger.info(f"Account deleted for user {user_id}")
@@ -497,15 +535,17 @@ class ProfileService:
 
         # Reviews (if marketplace exists)
         try:
-            from marketplace.models import Review
+            from marketplace.models import ProductReview
 
-            reviews = Review.objects.filter(user=user)
+            reviews = ProductReview.objects.filter(reviewer=user)
             data["reviews"] = [
                 {
                     "id": str(review.id),
                     "created_at": review.created_at.isoformat() if review.created_at else None,
                     "rating": review.rating,
-                    "comment": review.comment if hasattr(review, "comment") else None,
+                    "title": review.title,
+                    "comment": review.comment,
+                    "product_id": str(review.product_id) if review.product_id else None,
                 }
                 for review in reviews
             ]

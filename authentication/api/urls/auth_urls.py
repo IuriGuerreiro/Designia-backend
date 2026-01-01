@@ -7,6 +7,8 @@ from authentication.api.views import (
     Enable2FAView,
     GoogleLoginView,
     LoginAPIView,
+    PasswordResetRequestView,
+    PasswordResetVerifyView,
     ProfileDeleteView,
     ProfileExportView,
     ProfilePictureUploadView,
@@ -20,6 +22,7 @@ from authentication.api.views import (
     Send2FACodeView,
     TwoFactorLoginVerifyView,
     VerifyEmailView,
+    VerifyPasswordView,
     health_views,
     metrics_views,
 )
@@ -34,6 +37,9 @@ urlpatterns = [
     path("resend-verification/", ResendVerificationView.as_view(), name="resend_verification"),
     path("google/login/", GoogleLoginView.as_view(), name="google_login"),
     path("login/verify-2fa/", TwoFactorLoginVerifyView.as_view(), name="login_verify_2fa"),
+    path("verify-password/", VerifyPasswordView.as_view(), name="verify_password"),
+    path("password/reset/", PasswordResetRequestView.as_view(), name="password_reset_request"),
+    path("password/reset/verify/", PasswordResetVerifyView.as_view(), name="password_reset_verify"),
     # 2FA Management
     path("2fa/send-code/", Send2FACodeView.as_view(), name="send_2fa_code"),
     path("2fa/enable/", Enable2FAView.as_view(), name="enable_2fa"),

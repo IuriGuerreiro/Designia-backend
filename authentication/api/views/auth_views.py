@@ -24,6 +24,7 @@ from authentication.api.serializers.response_serializers import (
     VerifyEmailRequestSerializer,
     VerifyEmailResponseSerializer,
 )
+from authentication.domain.models import CustomUser
 from authentication.domain.services.auth_service import AuthService
 from authentication.infra.auth_providers.google import GoogleAuthProvider
 from authentication.infra.mail.django_email_provider import DjangoEmailProvider
@@ -606,3 +607,151 @@ class AccountStatusView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class VerifyPasswordView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        summary="Verify user password",
+        description="Verify the current user's password to authorize sensitive actions.",
+        request={"application/json": {"type": "object", "properties": {"password": {"type": "string"}}}},
+        responses={
+            200: OpenApiResponse(description="Password verified"),
+            400: ErrorResponseSerializer,
+        },
+        tags=["Auth"],
+    )
+    def post(self, request):
+        password = request.data.get("password")
+        if not password:
+            return Response({"error": "Password is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        user = request.user
+        if not user.check_password(password):
+            return Response({"error": "Invalid password"}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({"message": "Password verified"}, status=status.HTTP_200_OK)
+
+
+class PasswordResetRequestView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    @extend_schema(
+        summary="Request password reset",
+        description="Send a password reset link to the user's email.",
+        request={
+            "application/json": {"type": "object", "properties": {"email": {"type": "string", "format": "email"}}}
+        },
+        responses={
+            200: OpenApiResponse(description="Reset link sent"),
+            400: ErrorResponseSerializer,
+        },
+        tags=["Auth"],
+    )
+    def post(self, request):
+        email = request.data.get("email")
+        if not email:
+            return Response({"error": "Email is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = CustomUser.objects.get(email=email)
+
+            # Create a 2FA code for password reset
+            from django.conf import settings
+
+            from authentication.domain.models import TwoFactorCode
+
+            # Invalidate existing unused reset codes
+            TwoFactorCode.objects.filter(user=user, purpose="reset_password", is_used=False).update(is_used=True)
+
+            # Create new code
+            reset_code = TwoFactorCode.objects.create(user=user, purpose="reset_password")
+
+            # Generate the link (assuming a frontend route exists or will exist)
+            reset_link = f"{settings.FRONTEND_URL}/reset-password?email={user.email}&code={reset_code.code}"
+
+            # PRINT TO CONSOLE as requested
+            print("\n" + "=" * 50)
+            print(f"PASSWORD RESET LINK FOR {user.email}:")
+            print(reset_link)
+            print("=" * 50 + "\n")
+
+        except CustomUser.DoesNotExist:
+            # Avoid enumeration - do nothing but return success
+            pass
+        except Exception as e:
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error in PasswordResetRequestView: {e}")
+
+        # Always return success to avoid user enumeration
+        return Response(
+            {"message": "If an account exists with this email, a reset link has been sent."}, status=status.HTTP_200_OK
+        )
+
+
+class PasswordResetVerifyView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    @extend_schema(
+        summary="Reset password with code",
+        description="Verify the reset code and set a new password for the user.",
+        request={
+            "application/json": {
+                "type": "object",
+                "properties": {
+                    "email": {"type": "string", "format": "email"},
+                    "code": {"type": "string", "minLength": 6, "maxLength": 6},
+                    "password": {"type": "string"},
+                    "password_confirm": {"type": "string"},
+                },
+            }
+        },
+        responses={
+            200: OpenApiResponse(description="Password reset successfully"),
+            400: ErrorResponseSerializer,
+        },
+        tags=["Auth"],
+    )
+    def post(self, request):
+        email = request.data.get("email")
+        code = request.data.get("code")
+        password = request.data.get("password")
+        password_confirm = request.data.get("password_confirm")
+
+        if not all([email, code, password, password_confirm]):
+            return Response({"error": "All fields are required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        if password != password_confirm:
+            return Response({"error": "Passwords do not match"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = CustomUser.objects.get(email=email)
+
+            # Verify the code
+            from authentication.utils.common import verify_2fa_code
+
+            success, message = verify_2fa_code(user, code, purpose="reset_password")
+
+            if not success:
+                return Response({"error": message}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Set new password
+            user.set_password(password)
+            user.save()
+
+            return Response(
+                {"message": "Password reset successfully. You can now log in with your new password."},
+                status=status.HTTP_200_OK,
+            )
+
+        except CustomUser.DoesNotExist:
+            return Response({"error": "Invalid request"}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error in PasswordResetVerifyView: {e}")
+            return Response({"error": "An unexpected error occurred"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

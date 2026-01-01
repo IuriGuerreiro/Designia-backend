@@ -10,7 +10,9 @@ User = get_user_model()
 
 class ProductReview(models.Model):
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="reviews")
-    reviewer = models.ForeignKey(User, on_delete=models.CASCADE, related_name="reviews")
+    reviewer = models.ForeignKey(User, on_delete=models.SET_NULL, related_name="reviews", null=True, blank=True)
+    # Stores reviewer display name for GDPR compliance (when reviewer is deleted/anonymized)
+    reviewer_name = models.CharField(max_length=150, blank=True, default="")
     rating = models.PositiveIntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
     title = models.CharField(max_length=200, blank=True)
     comment = models.TextField(blank=True)
@@ -21,12 +23,25 @@ class ProductReview(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        unique_together = ["product", "reviewer"]
+        # Changed from unique_together to allow multiple reviews with null reviewer
+        constraints = [
+            models.UniqueConstraint(
+                fields=["product", "reviewer"],
+                condition=models.Q(reviewer__isnull=False),
+                name="unique_product_reviewer",
+            )
+        ]
         ordering = ["-created_at"]
         app_label = "marketplace"
 
+    def get_reviewer_display_name(self):
+        """Return the display name for the reviewer."""
+        if self.reviewer:
+            return self.reviewer.username
+        return self.reviewer_name or "Deleted User"
+
     def __str__(self):
-        return f"Review by {self.reviewer.username} for {self.product.name}"
+        return f"Review by {self.get_reviewer_display_name()} for {self.product.name}"
 
 
 class ProductReviewHelpful(models.Model):
