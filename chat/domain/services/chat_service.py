@@ -35,7 +35,7 @@ class ChatService:
             "message": {
                 "id": str(message.id),
                 "thread_id": str(thread.id),
-                "sender_id": user.id,
+                "sender_id": str(user.id),
                 "sender_username": user.username,
                 "text": message.text,
                 "image_url": message.image_url,

@@ -26,8 +26,9 @@ django.setup()
 django_asgi_app = get_asgi_application()
 
 # Import routing here, after Django has been initialized
-import chat.routing  # noqa: E402
-from chat.middleware import ChannelThrottlingMiddleware  # noqa: E402
+import chat.api.routing  # noqa: E402
+from chat.middleware.auth import HandshakeAuthMiddleware  # noqa: E402
+from chat.middleware.throttling import ChannelThrottlingMiddleware  # noqa: E402
 
 
 application = ProtocolTypeRouter(
@@ -36,7 +37,9 @@ application = ProtocolTypeRouter(
         "http": django_asgi_app,
         # WebSocket chat application with authentication and throttling
         "websocket": ChannelThrottlingMiddleware(
-            AllowedHostsOriginValidator(AuthMiddlewareStack(URLRouter(chat.routing.websocket_urlpatterns)))
+            AllowedHostsOriginValidator(
+                AuthMiddlewareStack(HandshakeAuthMiddleware(URLRouter(chat.api.routing.websocket_urlpatterns)))
+            )
         ),
     }
 )

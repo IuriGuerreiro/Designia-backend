@@ -1,4 +1,3 @@
-from asgiref.sync import async_to_sync
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db.models import Q
@@ -11,7 +10,9 @@ from rest_framework.response import Response
 
 from .models import Chat, Message
 from .serializers import ChatCreateSerializer, ChatSerializer, MessageCreateSerializer, MessageSerializer
-from .user_consumer import UserConsumer
+
+
+# from .user_consumer import UserConsumer
 
 
 User = get_user_model()
@@ -65,16 +66,16 @@ class ChatListView(generics.ListCreateAPIView):
 
                 try:
                     # Create a context for the other user to get the correct "other_user" field
-                    other_user_request = type("Request", (), {"user": other_user})()
-                    other_user_serializer = ChatSerializer(chat, context={"request": other_user_request})
-                    other_user_chat_data = other_user_serializer.data
+                    # other_user_request = type("Request", (), {"user": other_user})()
+                    # other_user_serializer = ChatSerializer(chat, context={"request": other_user_request})
+                    # other_user_chat_data = other_user_serializer.data
 
                     logger.info(
                         f"📤 Attempting to notify user {other_user.username} (id: {other_user.id}) about new chat"
                     )
 
                     # Notify the other user about the new chat
-                    async_to_sync(UserConsumer.notify_new_chat)(user_id=other_user.id, chat_data=other_user_chat_data)
+                    # async_to_sync(UserConsumer.notify_new_chat)(user_id=other_user.id, chat_data=other_user_chat_data)
 
                     logger.info(f"  Successfully initiated WebSocket notification for new chat {chat.id}")
 
@@ -160,7 +161,7 @@ class MessageListView(generics.ListCreateAPIView):
 
             try:
                 # Notify the other user about the new message
-                async_to_sync(UserConsumer.notify_new_message)(user_id=other_user.id, message_data=message_data)
+                # async_to_sync(UserConsumer.notify_new_message)(user_id=other_user.id, message_data=message_data)
                 logger.info(f"✅ Successfully notified user {other_user.id} about new message")
 
                 # Also notify Activity WebSocket for global unread count update
@@ -290,7 +291,7 @@ def mark_messages_read(request, chat_id):
 
             try:
                 # Notify the other user that their messages were read
-                async_to_sync(UserConsumer.notify_message_read)(user_id=other_user.id, chat_id=chat.id)
+                # async_to_sync(UserConsumer.notify_message_read)(user_id=other_user.id, chat_id=chat.id)
                 logger.info(f"✅ Successfully notified user {other_user.id} about messages read")
 
                 # Also notify Activity WebSocket for global unread count update (for the reader)
