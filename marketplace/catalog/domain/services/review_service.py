@@ -102,14 +102,13 @@ class ReviewService(BaseService):
             ).exists()
 
             # Determine if verified purchase is strict requirement or just a flag
-            # Story says "Review creation validates: user purchased product" implies strict requirement?
+            # Story says "Review creation validates: user purchased product" implies strict requirement.
             # Usually reviews are allowed even if not verified, but marked as verified.
             # However, acceptance criteria says: "Review creation validates: user purchased product"
-            # Let's assume strict validation for now based on AC, or at least set the flag.
+            # We enforce strict validation based on AC.
 
-            # If we want to ENFORCE verified purchase:
-            # if not is_verified:
-            #     return service_err(ErrorCodes.PERMISSION_DENIED, "You can only review products you have purchased")
+            if not is_verified:
+                return service_err(ErrorCodes.PERMISSION_DENIED, "You can only review products you have purchased")
 
             review = ProductReview.objects.create(
                 product=product,

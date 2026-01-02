@@ -56,6 +56,37 @@ class ReviewViewIntegrationTest(TestCase):
         self.assertEqual(ProductReview.objects.count(), 1)
         self.assertTrue(response.data["is_verified_purchase"])
 
+    def test_create_review_nested_url_success(self):
+        """Test creating review via nested URL /products/{slug}/reviews/"""
+        self.client.force_authenticate(user=self.user)
+        # Assuming URL pattern: /api/marketplace/products/{slug}/reviews/
+        # We need to construct this manually or use reverse if available with kwargs
+        # The main urls.py defines: path("products/<slug:product_slug>/reviews/", ...)
+
+        url = reverse("marketplace:product-reviews-list", kwargs={"product_slug": self.product.slug})
+        data = {"rating": 5, "title": "Nested!", "comment": "Works."}
+        response = self.client.post(url, data)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(ProductReview.objects.filter(title="Nested!").count(), 1)
+
+    def test_list_reviews_nested_url_success(self):
+        """Test listing reviews via nested URL /products/{slug}/reviews/"""
+        ProductReviewFactory(product=self.product, reviewer=self.user, rating=5)
+
+        url = reverse("marketplace:product-reviews-list", kwargs={"product_slug": self.product.slug})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data["results"]), 1)
+
+    def test_create_review_no_purchase_fail(self):
+        """Ensure users who haven't purchased cannot review"""
+        self.client.force_authenticate(user=self.other_user)
+        data = {"product_id": str(self.product.id), "rating": 5, "title": "Fake", "comment": "No buy"}
+        response = self.client.post(self.review_list_url, data)
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertIn("only review products you have purchased", response.data["detail"])
+
     def test_create_duplicate_review_fail(self):
         self.client.force_authenticate(user=self.user)
         # Create first review using factory

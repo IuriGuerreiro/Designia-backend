@@ -309,7 +309,7 @@ class ReviewResponseSerializer(serializers.Serializer):
     rating = serializers.IntegerField(help_text="Rating (1-5 stars)")
     title = serializers.CharField(help_text="Review title")
     comment = serializers.CharField(help_text="Review text")
-    verified_purchase = serializers.BooleanField(help_text="Whether reviewer purchased the product")
+    is_verified_purchase = serializers.BooleanField(help_text="Whether reviewer purchased the product")
     created_at = serializers.DateTimeField(help_text="Review creation timestamp")
     updated_at = serializers.DateTimeField(help_text="Last update timestamp")
 

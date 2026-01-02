@@ -52,11 +52,12 @@ class ReviewViewSet(viewsets.ViewSet):
         },
         tags=["Marketplace - Reviews"],
     )
-    def list(self, request):
+    def list(self, request, product_slug=None):
         service = self.get_service()
 
         # Product slug or ID handling
-        product_slug = request.query_params.get("product_slug")
+        # Priority: URL kwarg > query param
+        product_slug = product_slug or self.kwargs.get("product_slug") or request.query_params.get("product_slug")
         product_id = request.query_params.get("product_id")
 
         if not product_id and product_slug:
@@ -113,10 +114,12 @@ class ReviewViewSet(viewsets.ViewSet):
         responses={201: ReviewResponseSerializer, 400: ErrorResponseSerializer, 404: ErrorResponseSerializer},
         tags=["Marketplace - Reviews"],
     )
-    def create(self, request):
+    def create(self, request, product_slug=None):
         service = self.get_service()
 
-        product_slug = request.data.get("product_slug")
+        # Product slug or ID handling
+        # Priority: URL kwarg > request data
+        product_slug = product_slug or self.kwargs.get("product_slug") or request.data.get("product_slug")
         product_id = request.data.get("product_id")
 
         if not product_id and product_slug:
@@ -145,6 +148,8 @@ class ReviewViewSet(viewsets.ViewSet):
                 return Response({"detail": result.error_detail}, status=status.HTTP_404_NOT_FOUND)
             elif result.error == ErrorCodes.DUPLICATE_REVIEW:
                 return Response({"detail": result.error_detail}, status=status.HTTP_400_BAD_REQUEST)
+            elif result.error == ErrorCodes.PERMISSION_DENIED:
+                return Response({"detail": result.error_detail}, status=status.HTTP_403_FORBIDDEN)
             elif result.error == ErrorCodes.INVALID_INPUT:
                 return Response({"detail": result.error_detail}, status=status.HTTP_400_BAD_REQUEST)
             return Response({"detail": result.error_detail}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
