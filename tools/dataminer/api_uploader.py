@@ -306,7 +306,7 @@ class DesigniaAPIUploader:
         logger.info(f"Found {len(data)} items to process.")
 
         for i, item in enumerate(data):
-            logger.info(f"[{i+1}/{len(data)}] Processing {item.get('name')}")
+            logger.info(f"[{i + 1}/{len(data)}] Processing {item.get('name')}")
 
             # Gather image paths
             images = item.get("images", [])
