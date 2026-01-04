@@ -3,7 +3,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from django.utils import timezone
-
 from payment_system.services.exchange_rate_service import ExchangeRateService
 
 

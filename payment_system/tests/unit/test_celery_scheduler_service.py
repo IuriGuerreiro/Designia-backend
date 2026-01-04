@@ -1,7 +1,6 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from payment_system.services.celery_scheduler_service import CelerySchedulerService
 
 

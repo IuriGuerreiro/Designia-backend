@@ -7,10 +7,13 @@ import stripe
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from django.urls import clear_url_caches, reverse  # Import clear_url_caches
+from marketplace.services.order_service import OrderService
+from payment_system.services.checkout_service import CheckoutService
+from payment_system.services.payout_service import PayoutService
+from payment_system.services.webhook_service import WebhookService
 
 from infrastructure.payments.interface import CheckoutSession, PaymentIntent, PaymentStatus, WebhookEvent
 from marketplace.models import Order
-from marketplace.services.order_service import OrderService
 from marketplace.tests.factories import (
     CartFactory,
     CartItemFactory,
@@ -21,9 +24,6 @@ from marketplace.tests.factories import (
     UserFactory,
 )
 from payment_system.models import PaymentTracker, PaymentTransaction
-from payment_system.services.checkout_service import CheckoutService
-from payment_system.services.payout_service import PayoutService
-from payment_system.services.webhook_service import WebhookService
 
 
 User = get_user_model()

@@ -9,6 +9,8 @@ from unittest.mock import MagicMock
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from marketplace.services.base import ErrorCodes
+from marketplace.services.order_service import OrderService
 
 from infrastructure.payments.interface import (
     CheckoutSession,
@@ -18,8 +20,6 @@ from infrastructure.payments.interface import (
     PaymentStatus,
 )
 from marketplace.models import Category, Order, OrderItem, Product
-from marketplace.services.base import ErrorCodes
-from marketplace.services.order_service import OrderService
 from payment_system.services.payment_service import PaymentService
 
 

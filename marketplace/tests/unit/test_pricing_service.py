@@ -2,9 +2,9 @@ from decimal import Decimal
 from unittest.mock import Mock
 
 import pytest
+from marketplace.services.pricing_service import PricingService
 
 from marketplace.models import Product
-from marketplace.services.pricing_service import PricingService
 
 
 @pytest.mark.unit

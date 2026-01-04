@@ -9,9 +9,9 @@ from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from marketplace.services.base import ErrorCodes
 
 from infrastructure.payments.interface import PaymentProviderInterface
-from marketplace.services.base import ErrorCodes
 from payment_system.models import PaymentTransaction
 from payment_system.services.payout_service import PayoutService
 
@@ -195,8 +195,9 @@ class PayoutServiceTest(TestCase):
 
     @patch("payment_system.services.payout_service.PayoutService.create_payout")
     def test_process_pending_payouts(self, mock_create_payout):
-        from marketplace.models import Order
         from marketplace.services.base import service_ok
+
+        from marketplace.models import Order
 
         mock_create_payout.return_value = service_ok("payout_obj")
 

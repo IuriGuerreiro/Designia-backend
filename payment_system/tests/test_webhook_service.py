@@ -8,11 +8,11 @@ from unittest.mock import MagicMock
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from marketplace.services.base import ErrorCodes, service_ok
+from marketplace.services.order_service import OrderService
 
 from infrastructure.payments.interface import PaymentProviderInterface, WebhookEvent
 from marketplace.models import Order
-from marketplace.services.base import ErrorCodes, service_ok
-from marketplace.services.order_service import OrderService
 from payment_system.services.webhook_service import WebhookService
 
 

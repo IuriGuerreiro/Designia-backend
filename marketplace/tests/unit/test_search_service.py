@@ -4,9 +4,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from django.db.models import QuerySet
+from marketplace.services.search_service import ErrorCodes, SearchService
 
 from marketplace.models import Product
-from marketplace.services.search_service import ErrorCodes, SearchService
 
 
 @pytest.fixture

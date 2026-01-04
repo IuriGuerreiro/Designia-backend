@@ -4,10 +4,10 @@ from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
 from django.test import RequestFactory, TestCase
+from payment_system.views import create_checkout_session
 from rest_framework.test import force_authenticate
 
 from marketplace.tests.factories import CartFactory, CartItemFactory, ProductFactory, UserFactory
-from payment_system.views import create_checkout_session
 
 
 User = get_user_model()

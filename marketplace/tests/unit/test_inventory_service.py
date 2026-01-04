@@ -1,9 +1,9 @@
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
+from marketplace.services.inventory_service import ErrorCodes, InventoryService
 
 from marketplace.models import Product
-from marketplace.services.inventory_service import ErrorCodes, InventoryService
 
 
 @pytest.mark.unit

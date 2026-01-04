@@ -9,9 +9,10 @@ Story 4.2: CheckoutService - Session Management
 
 import logging
 
+from marketplace.services.base import BaseService, ErrorCodes, ServiceResult, service_err, service_ok
+
 from infrastructure.payments.interface import CheckoutSession, PaymentStatus
 from marketplace.models import Order
-from marketplace.services.base import BaseService, ErrorCodes, ServiceResult, service_err, service_ok
 from payment_system.domain.services.payment_service import PaymentService
 
 

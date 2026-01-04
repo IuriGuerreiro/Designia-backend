@@ -1,9 +1,9 @@
 from unittest.mock import MagicMock, PropertyMock, patch
 
 from django.test import RequestFactory, TestCase
+from payment_system.views import get_product_image_url
 
 from marketplace.tests.factories import ProductFactory, ProductImageFactory
-from payment_system.views import get_product_image_url
 
 
 class ViewsHelpersTest(TestCase):
