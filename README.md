@@ -2,81 +2,107 @@
 
 A comprehensive Django REST API backend for the Designia marketplace platform, featuring payment processing, order management, and automated task scheduling.
 
-## 🚀 Quick Start
+## 🏗 Architecture
 
-### Prerequisites
-- Python 3.8+
-- ngrok (for webhook testing)
-- Stripe Account (for payments)
+The backend follows a **Layered Service Architecture** using Django 5.2 and Django REST Framework.
 
-### Installation
+-   **Core Framework**: Django 5.2 (Python 3.12)
+-   **API**: Django REST Framework (DRF) for REST endpoints.
+-   **Real-time**: Django Channels + Redis for WebSockets (Chat).
+-   **Async Tasks**: Celery + Redis for background processing (Payments, Analytics).
+-   **Database**: MySQL 8.0 (Primary), Redis (Cache/Broker).
+-   **Storage**: MinIO (S3-compatible) for file storage.
+-   **Observability**: Prometheus (Metrics), Grafana (Visualization), Jaeger (Tracing), Kong (Gateway).
 
-1. **Clone and Setup**
+### Key Services (Django Apps)
+-   **Authentication**: JWT-based auth, Google OAuth, Stripe Connect onboarding.
+-   **Marketplace**: Product catalog, search, reviews, order management.
+-   **Payment System**: Stripe integration, webhooks, transaction handling.
+-   **Chat**: Real-time messaging between users.
+-   **AR**: 3D model management for the mobile app.
+
+## 🚀 Quick Start with Docker
+
+The project uses Docker to spin up all infrastructure dependencies (Database, Cache, Storage, Monitoring).
+
+### 1. Prerequisites
+-   Docker & Docker Compose
+-   Python 3.12+ (for local Django dev)
+-   Stripe Account (for payments)
+
+### 2. Network Setup
+Create a shared network for the containers:
+```bash
+docker network create app-network
+```
+
+### 3. Core Infrastructure (MySQL, Redis, MinIO)
+Start the essential services for development:
+```bash
+docker-compose -f docker-compose.dev.yml up -d
+```
+*   **MySQL**: Port 3308 (mapped to 3306 inside container)
+*   **Redis**: Port 6379
+*   **MinIO**: Console at http://localhost:9101, API at 9100
+
+### 4. Observability Stack (Prometheus, Kong, Grafana)
+You have two options for the observability stack:
+
+**Option A: Full Stack (Kong Gateway + Observability)**
+```bash
+docker-compose -f infrastructure/kong/docker-compose.kong.yml up -d
+```
+*   **Kong Gateway**: http://localhost:8000
+*   **Kong Admin**: http://localhost:8001
+*   **Grafana**: http://localhost:3001 (User/Pass: admin/admin)
+*   **Prometheus**: http://localhost:9090
+*   **Jaeger UI**: http://localhost:16686
+
+**Option B: Observability Only (No Gateway)**
+```bash
+docker-compose -f infrastructure/kong/docker-compose.observability-only.yml up -d
+```
+
+## 💻 Local Development Setup
+
+Once Docker containers are running, you can run the Django app locally.
+
+### 1. Environment Setup
 ```bash
 cd Designia-backend
 python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-pip install -r requirements-dev.txt  # Tools: black, ruff, isort, pre-commit
+pip install -r requirements-dev.txt
 ```
 
-2. **Environment Configuration**
+### 2. Configuration
 ```bash
 cp .env.example .env
-# Edit .env with your actual values:
-# - Database credentials
-# - Stripe API keys
-# - Redis configuration
-# - Email settings
+# Edit .env:
+# - Set DB_PORT=3308 (matching docker-compose.dev.yml)
+# - Set DB_HOST=127.0.0.1
+# - Configure Stripe Keys
 ```
 
-3. **Database Setup**
+### 3. Database Initialization
 ```bash
 python manage.py makemigrations
 python manage.py migrate
 python manage.py createsuperuser
 ```
 
-4. **Redis Server**
+### 4. Running the Application
+Use the standard Django development server:
 ```bash
-# Ubuntu/Debian
-sudo apt install redis-server
-sudo systemctl start redis
-sudo systemctl enable redis
-
-# macOS
-brew install redis
-brew services start redis
-
-# Windows (WSL recommended)
-# Install Redis in WSL following Ubuntu instructions above
+python manage.py runserver
 ```
+-   **API**: http://127.0.0.1:8000/api/
+-   **Admin**: http://127.0.0.1:8000/admin/
+-   **WebSocket**: ws://127.0.0.1:8000/ws/chat/
 
-### Running the Application
-
-1. **Start Daphne Server**
-```bash
-# Easy way (recommended)
-./run_backend.sh          # Linux/macOS
-run_backend.bat           # Windows
-
-# Manual way
-daphne -b 192.168.3.2 -p 8001 designiaBackend.asgi:application
-```
-
-2. **Setup ngrok for Stripe Webhooks**
-```bash
-# Install ngrok from https://ngrok.com/
-ngrok http 8001
-# Copy the https://*.ngrok-free.app URL
-# Add to Stripe Dashboard > Webhooks with endpoint: /api/payments/stripe_webhook/
-```
-
-## 🌐 Access Points
-
-- **API**: http://192.168.3.2:8001/api/
-- **Admin**: http://192.168.3.2:8001/admin/
-- **WebSocket**: ws://192.168.3.2:8001/ws/chat/
+> **Note**: If you need to test high-concurrency WebSockets or production-like ASGI behavior, you can use `daphne`:
+> `daphne -b 0.0.0.0 -p 8001 designiaBackend.asgi:application`
 
 ## 🔄 Celery Task System
 
@@ -88,30 +114,20 @@ The backend uses Celery with Redis for asynchronous task processing and scheduli
 
 ### Starting Celery Services
 
-**Terminal 1: Redis Server**
-```bash
-redis-server
-# Keep this running
-```
+Make sure your Redis container is running (Step 3 above).
 
-**Terminal 2: Celery Worker**
+**Terminal 1: Celery Worker**
 ```bash
-source venv/bin/activate
+source .venv/bin/activate
 celery -A designiaBackend worker -l info
 # Keep this running for task processing
 ```
 
-**Terminal 3: Celery Beat Scheduler**
+**Terminal 2: Celery Beat Scheduler**
 ```bash
-source venv/bin/activate
+source .venv/bin/activate
 celery -A designiaBackend beat -l info
 # Keep this running for scheduled tasks
-```
-
-**Terminal 4: Django Server** (optional)
-```bash
-source venv/bin/activate
-python manage.py runserver 0.0.0.0:8000
 ```
 
 ## 🧹 Code Style & Hooks
@@ -120,7 +136,6 @@ This project uses Black, Ruff, and isort with pre-commit to standardize formatti
 
 Setup once:
 ```bash
-pip install -r requirements-dev.txt
 pre-commit install
 ```
 
@@ -130,8 +145,6 @@ black .
 isort .
 ruff check --fix .
 ```
-
-Pre-commit will automatically run on each commit.
 
 ### Celery Monitoring (Optional)
 ```bash
@@ -147,21 +160,15 @@ celery -A designiaBackend flower
 
 ### Quick Connectivity Test
 ```bash
-source venv/bin/activate
+source .venv/bin/activate
 python test_celery_simple.py
 ```
-This tests:
-- Worker connectivity
-- Task registration
-- Exchange rate updates
-- Payment timeout processing
-- Scheduler status
 
 ### Manual Task Execution
 
 **Test Exchange Rate Update:**
 ```bash
-source venv/bin/activate
+source .venv/bin/activate
 python -c "
 import os, django
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'designiaBackend.settings')
@@ -173,78 +180,13 @@ print('Exchange Rate Result:', result)
 "
 ```
 
-**Test Payment Timeout Check:**
-```bash
-source venv/bin/activate
-python -c "
-import os, django
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'designiaBackend.settings')
-django.setup()
-
-from payment_system.Tasks.payment_tasks import check_payment_timeouts_task
-result = check_payment_timeouts_task()
-print('Timeout Check Result:', result)
-"
-```
-
-**Manual Payment Timeout Test:**
-```bash
-source venv/bin/activate
-python test_manual_timeout.py
-```
-
-### Trigger Tasks via Service Layer
-```python
-from payment_system.services.celery_scheduler_service import CelerySchedulerService
-
-# Trigger immediate execution
-exchange_result = CelerySchedulerService.trigger_manual_update('exchange_rates')
-timeout_result = CelerySchedulerService.trigger_manual_update('payment_timeouts')
-
-# Check task status
-status = CelerySchedulerService.get_task_status()
-print(status)
-```
-
 ### Debugging Common Issues
 
 **Worker Not Connecting:**
 ```bash
 # Check Redis connection
-redis-cli ping
+redis-cli -p 6379 ping
 # Should return: PONG
-
-# Check Celery configuration
-python -c "from celery import current_app; print(current_app.conf.broker_url)"
-```
-
-**Tasks Not Registered:**
-```bash
-# List all registered tasks
-python -c "
-from celery import current_app
-tasks = list(current_app.tasks.keys())
-payment_tasks = [t for t in tasks if 'payment_system' in t]
-print('Payment Tasks:', payment_tasks)
-"
-```
-
-**Clear Redis Queue (Reset):**
-```bash
-# Clear all queues and results
-redis-cli FLUSHALL
-
-# Or clear specific queues
-redis-cli DEL celery payment_tasks marketplace_tasks
-```
-
-**Check Scheduled Tasks:**
-```bash
-# View Beat scheduler database entries
-python manage.py shell
->>> from django_celery_beat.models import PeriodicTask
->>> for task in PeriodicTask.objects.all():
-...     print(f"{task.name}: {task.enabled}")
 ```
 
 ## 📊 System Monitoring
@@ -256,18 +198,6 @@ python manage.py shell
 ### Scheduled Tasks
 - **Exchange Rate Update**: Daily at midnight UTC
 - **Payment Timeout Check**: Every hour
-
-### Logs
-```bash
-# View Celery worker logs
-tail -f celery_worker.log
-
-# View Django logs
-tail -f django_debug.log
-
-# Monitor Redis activity
-redis-cli MONITOR
-```
 
 ## 🛠 Development Workflow
 
@@ -307,86 +237,9 @@ app.conf.beat_schedule = {
 }
 ```
 
-### Testing New Tasks
-```bash
-# Test task directly
-python -c "
-import os, django
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'designiaBackend.settings')
-django.setup()
-
-from payment_system.Tasks.your_module import your_new_task
-result = your_new_task()
-print(result)
-"
-
-# Test via Celery
-python -c "
-from payment_system.Tasks.your_module import your_new_task
-async_result = your_new_task.delay()
-print('Task ID:', async_result.id)
-print('Result:', async_result.get())
-"
-```
-
 ## 🔐 Security Notes
 
 - Never commit `.env` files
 - Use environment variables for all secrets
 - Stripe webhook endpoints require HTTPS in production
 - Redis should be password-protected in production
-- Review Celery security settings for production deployment
-
-## 📦 Key Components
-
-- **Django REST Framework**: API endpoints
-- **Celery + Redis**: Asynchronous task processing
-- **Stripe Integration**: Payment processing
-- **MySQL/PostgreSQL**: Database
-- **JWT Authentication**: User authentication
-- **Automated Testing**: Comprehensive test suite
-
-## 🚀 Production Deployment
-
-### Celery in Production
-```bash
-# Use supervisor or systemd for process management
-# Example systemd service files:
-
-# /etc/systemd/system/celery-worker.service
-# /etc/systemd/system/celery-beat.service
-
-# Enable and start services
-sudo systemctl enable celery-worker celery-beat
-sudo systemctl start celery-worker celery-beat
-```
-
-### Environment Configuration
-- Use Redis with authentication
-- Configure proper Django settings for production
-- Set up SSL certificates for HTTPS
-- Configure firewall rules
-- Monitor logs and performance metrics
-
-## 📞 Support
-
-For issues related to:
-- **Payment Processing**: Check Stripe dashboard and webhook logs
-- **Task Scheduling**: Monitor Celery logs and Redis connectivity
-- **Database**: Review Django migrations and model changes
-- **Authentication**: Verify JWT token configuration
-
-## 📋 Task Status Reference
-
-### Task States
-- ✅ **SUCCESS**: Task completed successfully
-- ❌ **FAILURE**: Task failed with error
-- 🔄 **PENDING**: Task queued but not started
-- ⏳ **RETRY**: Task retrying after failure
-- 📊 **PROGRESS**: Task in progress (custom state)
-
-### Queue Status
-- **Active**: Currently processing tasks
-- **Scheduled**: Tasks waiting for execution time
-- **Failed**: Tasks that exceeded max retries
-- **Success**: Successfully completed tasks
